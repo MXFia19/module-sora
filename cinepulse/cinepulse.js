@@ -3,7 +3,8 @@
 // ==========================================================
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
-const REFRESH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI5ODExNjVjYi1kYzJlLTQzNTAtYjM0YS1lM2FlNzA1NjYwOTkiLCJzZXNzaW9uSWQiOiJlN2ViNzQxYy1lMTg3LTRmN2YtYjQ0Zi1mODhhM2QzODI0MTMiLCJpYXQiOjE3NzE2ODg5NTEsImV4cCI6MTc3NDI4MDk1MSwiYXVkIjoiY2luZXB1bHNlLWZyb250ZW5kIiwiaXNzIjoiY2luZXB1bHNlLWJhY2tlbmQtYXBpIn0._U9kiwQU63HqB0oll85UpEGj5bOvTXcdCrDFLrMi1ow";
+// On utilise 'let' pour que le script puisse mettre à jour le jeton lui-même !
+let REFRESH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI5ODExNjVjYi1kYzJlLTQzNTAtYjM0YS1lM2FlNzA1NjYwOTkiLCJzZXNzaW9uSWQiOiJlN2ViNzQxYy1lMTg3LTRmN2YtYjQ0Zi1mODhhM2QzODI0MTMiLCJpYXQiOjE3NzE2ODg5NTEsImV4cCI6MTc3NDI4MDk1MSwiYXVkIjoiY2luZXB1bHNlLWZyb250ZW5kIiwiaXNzIjoiY2luZXB1bHNlLWJhY2tlbmQtYXBpIn0._U9kiwQU63HqB0oll85UpEGj5bOvTXcdCrDFLrMi1ow";
 const PROFILE_ID = "9b6ae015-e0c7-4a56-a4d0-c6885a29415a";
 const CF_COOKIE = "xSp4KUWAn28y_GZR33aNKNp_extwYewGOiRPnNvnnqg-1771694639-1.2.1.1-HyUFeVaRTsge0KLNwIgIS7uSLcl1l7JsAy8D4S2Ax5tHg6ytpzTeg4Enjn2QvVgrusvlOQVGDJxOSyk_e9S7RRNzX1FUwB2cf_sBPXdc7n7J2w6nuKD11JC_mAo0wU7yWm6hUD1F6nFUTwPlYlXvwwAAV2umBI8pKM_EcaqCHUbPbZSXfO69Y7SXDCA9IiDdu7D8S_m8o6PJzdPnDVPH7xWgRLC7Gehn4AxuP34B2jg";
 
@@ -24,16 +25,23 @@ async function getFreshToken() {
             body: JSON.stringify({ refreshToken: REFRESH_TOKEN })
         });
         
-        const data = await response.json();
+        const responseData = await response.json();
         
-        // On cherche le nouveau jeton (soit direct, soit caché dans "state")
-        const newToken = data.accessToken || data.token || (data.state && data.state.accessToken);
+        // Navigation dans la nouvelle structure trouvée
+        const newToken = responseData?.data?.items?.accessToken;
+        const newRefreshToken = responseData?.data?.items?.refreshToken;
         
         if (newToken) {
             console.log("[Cinepulse] Nouveau pass obtenu avec succès !");
+            
+            // Mise à jour de la clé maître si le serveur nous en donne une nouvelle
+            if (newRefreshToken) {
+                REFRESH_TOKEN = newRefreshToken;
+            }
+            
             return newToken;
         } else {
-            console.log("[Cinepulse] Échec. Le serveur a répondu, mais pas de jeton :", JSON.stringify(data));
+            console.log("[Cinepulse] Échec. Le serveur a répondu, mais pas de jeton :", JSON.stringify(responseData));
             return null;
         }
     } catch (e) {
