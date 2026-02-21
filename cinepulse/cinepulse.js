@@ -17,25 +17,22 @@ async function getFreshToken() {
                 'Content-Type': 'application/json',
                 'Origin': 'https://cinepulse.lol',
                 'Referer': 'https://cinepulse.lol/',
-                
-                // --- LES EN-TÊTES SECRETS DÉCOUVERTS ---
-                'X-Requested-With': 'cinepulse.frontend',
-                'X-Profile-Id': PROFILE_ID,
-                'Cookie': `cf_clearance=${CF_COOKIE}`,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
+                'X-Requested-With': 'cinepulse.frontend', // <-- LE SECRET ANTI-ROBOT EST ICI
+                'Authorization': `Bearer ${REFRESH_TOKEN}`  // <-- Ils veulent l'en-tête même pour rafraîchir
             },
-            // La charge utile exacte (Payload) montrée dans ta capture
             body: JSON.stringify({ refreshToken: REFRESH_TOKEN })
         });
         
         const data = await response.json();
         
-        const newToken = data.accessToken || data.token;
+        // On cherche le nouveau jeton (soit direct, soit caché dans "state")
+        const newToken = data.accessToken || data.token || (data.state && data.state.accessToken);
+        
         if (newToken) {
             console.log("[Cinepulse] Nouveau pass obtenu avec succès !");
             return newToken;
         } else {
-            console.log("[Cinepulse] Échec. Réponse du serveur :", JSON.stringify(data));
+            console.log("[Cinepulse] Échec. Le serveur a répondu, mais pas de jeton :", JSON.stringify(data));
             return null;
         }
     } catch (e) {
