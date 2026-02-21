@@ -11,7 +11,7 @@
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://nakios.site/",
-    "searchBaseUrl": "https://api.themoviedb.org/3/search/multi?api_key=f3d757824f08ea2cff45eb8f47ca3a1e&query=%s&language=fr-FR&page=1&include_adult=false&sort_by=popularity.desc",
+    "searchBaseUrl": "https://themoviedb.org",
     "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/nakios/nakios.js",
     "type": "shows/movies",
     "downloadSupport": true,
