@@ -28,7 +28,6 @@ async function initUrls() {
 
     // On déduit l'API et le domaine à partir de l'adresse trouvée
     try {
-        // Enlève le https:// pour récupérer juste le domaine (ex: nakios.site)
         HOSTNAME = BASE_URL.replace(/^https?:\/\//, ''); 
         API_URL = `https://api.${HOSTNAME}`;
     } catch(e) {
@@ -39,16 +38,12 @@ async function initUrls() {
     console.log(`[Nakios] Configuration terminée -> Base: ${BASE_URL} | API: ${API_URL}`);
 }
 
-
 // --- 1. RECHERCHE (VIA L'API OFFICIELLE DE NAKIOS) ---
 async function searchResults(keyword) {
     try {
-        // 1. On s'assure d'avoir la bonne adresse de l'API (Auto-réparation)
         await initUrls();
 
         const encodedKeyword = encodeURIComponent(keyword);
-        
-        // 2. On utilise la propre API de Nakios avec notre variable dynamique !
         const searchUrl = `${API_URL}/api/search/multi?query=${encodedKeyword}&page=1`;
         console.log(`[Nakios] Lancement de la recherche interne : ${searchUrl}`);
         
@@ -61,8 +56,7 @@ async function searchResults(keyword) {
         
         const data = await responseText.json();
 
-        // 3. Transformation des résultats
-        // Nakios renvoie probablement une structure similaire à TMDB, on cherche le tableau de résultats
+        // Transformation des résultats
         const items = data.results || data.data || data.items || data; 
 
         if (!Array.isArray(items)) {
@@ -71,12 +65,10 @@ async function searchResults(keyword) {
         }
 
         const transformedResults = items.map(result => {
-            // On déduit si c'est un film ou une série
             let type = result.media_type || (result.name ? "tv" : "movie");
             let title = result.title || result.name || result.original_title;
             let id = result.id || result.tmdb_id;
             
-            // Gestion de l'image (si Nakios renvoie un bout de lien ou un lien complet)
             let image = "https://via.placeholder.com/500x750?text=Pas+d'image";
             if (result.poster_path) {
                 image = result.poster_path.startsWith('http') 
@@ -88,7 +80,6 @@ async function searchResults(keyword) {
                 return {
                     title: title,
                     image: image,
-                    // On crée le lien avec notre BASE_URL auto-réparée
                     href: `${BASE_URL}/${type}/${id}`
                 };
             }
@@ -101,43 +92,41 @@ async function searchResults(keyword) {
     }
 }
 
+// --- 2. DÉTAILS (VIA L'API OFFICIELLE NAKIOS) ---
 async function extractDetails(url) {
     try {
-        if(url.includes('movie')) {
-            const match = url.match(/movie\/(\d+)/);
-            if (!match) throw new Error("Invalid URL format");
+        await initUrls();
+        
+        const isMovie = url.includes('movie');
+        const match = url.match(/(?:movie|tv)\/(\d+)/);
+        if (!match) throw new Error("Invalid URL format");
 
-            const movieId = match[1];
-            const responseText = await soraFetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${TMDB_API_KEY}&language=fr-FR`);
-            const data = await responseText.json();
+        const id = match[1];
+        
+        // Nakios utilise /api/movie/ pour les films, et /api/series/ pour les séries
+        const apiUrl = isMovie ? `${API_URL}/api/movie/${id}` : `${API_URL}/api/series/${id}`;
+        console.log(`[Nakios] Récupération des détails : ${apiUrl}`);
+        
+        const responseText = await soraFetch(apiUrl, {
+            headers: {
+                "Origin": BASE_URL,
+                "Referer": `${BASE_URL}/`
+            }
+        });
+        
+        const data = await responseText.json();
+        const info = data.data || data;
 
-            const transformedResults = [{
-                description: data.overview || 'Aucune description disponible.',
-                aliases: `Durée : ${data.runtime ? data.runtime + " minutes" : 'Inconnue'}`,
-                airdate: `Date de sortie : ${data.release_date ? data.release_date : 'Inconnue'}`
-            }];
+        const transformedResults = [{
+            description: info.overview || info.description || 'Aucune description disponible.',
+            aliases: `Durée : ${info.runtime || (info.episode_run_time ? info.episode_run_time[0] : 'Inconnue')} minutes`,
+            airdate: `Date de sortie : ${info.release_date || info.first_air_date || 'Inconnue'}`
+        }];
 
-            return JSON.stringify(transformedResults);
-        } else if(url.includes('tv')) {
-            const match = url.match(/tv\/(\d+)/);
-            if (!match) throw new Error("Invalid URL format");
-
-            const showId = match[1];
-            const responseText = await soraFetch(`https://api.themoviedb.org/3/tv/${showId}?api_key=${TMDB_API_KEY}&language=fr-FR`);
-            const data = await responseText.json();
-
-            const transformedResults = [{
-                description: data.overview || 'Aucune description disponible.',
-                aliases: `Durée : ${data.episode_run_time && data.episode_run_time.length ? data.episode_run_time[0] + " minutes" : 'Inconnue'}`,
-                airdate: `Première diffusion : ${data.first_air_date ? data.first_air_date : 'Inconnue'}`
-            }];
-
-            return JSON.stringify(transformedResults);
-        } else {
-            throw new Error("Invalid URL format");
-        }
+        return JSON.stringify(transformedResults);
+        
     } catch (error) {
-        console.log('Details error: ' + error);
+        console.log('[Nakios] Erreur Details: ' + error);
         return JSON.stringify([{
             description: 'Erreur lors du chargement de la description',
             aliases: 'Durée : Inconnue',
@@ -146,55 +135,64 @@ async function extractDetails(url) {
     }
 }
 
+// --- 3. ÉPISODES (VIA L'API OFFICIELLE NAKIOS) ---
 async function extractEpisodes(url) {
     try {
-        if(url.includes('movie')) {
-            const match = url.match(/movie\/(\d+)/);
-            if (!match) throw new Error("Invalid URL format");
-            const movieId = match[1];
-            
-            return JSON.stringify([
-                { href: `${movieId}/movie`, number: 1, title: "Film Complet" }
-            ]);
-        } else if(url.includes('tv')) {
-            const match = url.match(/tv\/(\d+)/);
-            if (!match) throw new Error("Invalid URL format");
-            const showId = match[1];
-            
-            const showResponseText = await soraFetch(`https://api.themoviedb.org/3/tv/${showId}?api_key=${TMDB_API_KEY}&language=fr-FR`);
-            const showData = await showResponseText.json();
+        await initUrls();
+        
+        const isMovie = url.includes('movie');
+        const match = url.match(/(?:movie|tv)\/(\d+)/);
+        if (!match) throw new Error("Invalid URL format");
+        
+        const id = match[1];
+
+        if (isMovie) {
+            return JSON.stringify([{ href: `${id}/movie`, number: 1, title: "Film Complet" }]);
+        } else {
+            const seriesUrl = `${API_URL}/api/series/${id}`;
+            const responseText = await soraFetch(seriesUrl, {
+                headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` }
+            });
+            const data = await responseText.json();
+            const info = data.data || data;
             
             let allEpisodes = [];
-            for (const season of showData.seasons) {
-                const seasonNumber = season.season_number;
-
-                if(seasonNumber === 0) continue; 
-                
-                const seasonResponseText = await soraFetch(`https://api.themoviedb.org/3/tv/${showId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}&language=fr-FR`);
-                const seasonData = await seasonResponseText.json();
-                
-                if (seasonData.episodes && seasonData.episodes.length) {
-                    const episodes = seasonData.episodes.map(episode => ({
-                        href: `${showId}/${seasonNumber}/${episode.episode_number}`,
-                        number: episode.episode_number,
-                        title: episode.name || `Épisode ${episode.episode_number}`
-                    }));
-                    allEpisodes = allEpisodes.concat(episodes);
+            
+            if (info.seasons && Array.isArray(info.seasons)) {
+                for (const season of info.seasons) {
+                    const seasonNumber = season.season_number;
+                    if(seasonNumber === 0) continue; 
+                    
+                    const seasonUrl = `${API_URL}/api/series/${id}/season/${seasonNumber}`;
+                    const seasonResponse = await soraFetch(seasonUrl, {
+                        headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` }
+                    });
+                    const seasonData = await seasonResponse.json();
+                    
+                    const sInfo = seasonData.data || seasonData;
+                    const episodesList = sInfo.episodes || (Array.isArray(sInfo) ? sInfo : []);
+                    
+                    if (episodesList && episodesList.length) {
+                        const episodes = episodesList.map(episode => ({
+                            href: `${id}/${seasonNumber}/${episode.episode_number}`,
+                            number: episode.episode_number,
+                            title: episode.name || `Épisode ${episode.episode_number}`
+                        }));
+                        allEpisodes = allEpisodes.concat(episodes);
+                    }
                 }
             }
             return JSON.stringify(allEpisodes);
-        } else {
-            throw new Error("Invalid URL format");
         }
     } catch (error) {
-        console.log('Fetch error in extractEpisodes: ' + error);
+        console.log('[Nakios] Erreur extractEpisodes: ' + error);
         return JSON.stringify([]);
     }    
 }
 
+// --- 4. EXTRACTION VIDÉO (SANS PROXY + SMART HEADERS) ---
 async function extractStreamUrl(url) {
     try {
-        // 1. On s'assure d'avoir la bonne adresse et sa bonne API
         await initUrls();
 
         let streams = [];
@@ -255,14 +253,12 @@ async function extractStreamUrl(url) {
                 }
                 
                 if (typeof value === 'string') {
-                    // On accepte les m3u8, mp4 et les liens des serveurs connus
                     let isVideoUrl = value.includes('.m3u8') || value.includes('.mp4') || value.includes('fsvid.lol') || value.includes('vidzy.org');
                     let isApiUrl = value.startsWith('http') && ['url', 'link', 'file', 'src'].includes(key.toLowerCase());
                     
                     if (isVideoUrl || isApiUrl) {
                         let finalName = passName;
                         if (obj.quality) finalName += ` - ${obj.quality}`;
-                        
                         rawStreams.push({ url: value, name: finalName });
                     }
                 } else if (typeof value === 'object') {
@@ -273,7 +269,6 @@ async function extractStreamUrl(url) {
 
         findStreams(data);
 
-        // Dé-duplication des liens
         let uniqueStreams = [];
         let seenUrls = new Set();
         for (let item of rawStreams) {
@@ -283,23 +278,34 @@ async function extractStreamUrl(url) {
             }
         }
         
-        // Finalisation des liens SANS LE PROXY
+        // Finalisation des liens (SANS LE PROXY + AVEC EN-TÊTES INTELLIGENTS)
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
             
-            // Si le lien est relatif (ex: /hls/video.m3u8), on lui colle l'adresse du serveur
             if (item.url.startsWith('/')) {
                 finalUrl = `${API_URL}${item.url}`;
             }
 
-            // Et c'est tout ! On ne touche plus au reste (les liens fsvid, vidzy, etc.)
+            // Déguisement complet pour tromper les protections anti-hotlink
+            let streamHeaders = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                "Origin": BASE_URL,
+                "Referer": `${BASE_URL}/`
+            };
+
+            // On adapte l'origine pour rassurer fsvid et vidzy
+            if (finalUrl.includes('fsvid') || finalUrl.includes('vidzy')) {
+                try {
+                    const urlObj = new URL(finalUrl);
+                    streamHeaders["Origin"] = urlObj.origin;
+                    streamHeaders["Referer"] = urlObj.origin + "/";
+                } catch(e) {}
+            }
+
             streams.push({
                 title: item.name, 
                 streamUrl: finalUrl,
-                headers: {
-                    "Origin": BASE_URL,
-                    "Referer": `${BASE_URL}/`
-                }
+                headers: streamHeaders
             });
         }
 
