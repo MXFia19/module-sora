@@ -1,29 +1,30 @@
 // ==========================================================
-// MODULE SORA : CINEPULSE (AUTO-REFRESH VERSION)
+// MODULE SORA : CINEPULSE (AUTO-REFRESH VERSION FIX)
 // ==========================================================
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
-// La clé maître (Expire dans ~30 jours, à renouveler une fois par mois)
 const REFRESH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI5ODExNjVjYi1kYzJlLTQzNTAtYjM0YS1lM2FlNzA1NjYwOTkiLCJzZXNzaW9uSWQiOiJlN2ViNzQxYy1lMTg3LTRmN2YtYjQ0Zi1mODhhM2QzODI0MTMiLCJpYXQiOjE3NzE2ODg5NTEsImV4cCI6MTc3NDI4MDk1MSwiYXVkIjoiY2luZXB1bHNlLWZyb250ZW5kIiwiaXNzIjoiY2luZXB1bHNlLWJhY2tlbmQtYXBpIn0._U9kiwQU63HqB0oll85UpEGj5bOvTXcdCrDFLrMi1ow";
+const PROFILE_ID = "9b6ae015-e0c7-4a56-a4d0-c6885a29415a";
+const CF_COOKIE = "xSp4KUWAn28y_GZR33aNKNp_extwYewGOiRPnNvnnqg-1771694639-1.2.1.1-HyUFeVaRTsge0KLNwIgIS7uSLcl1l7JsAy8D4S2Ax5tHg6ytpzTeg4Enjn2QvVgrusvlOQVGDJxOSyk_e9S7RRNzX1FUwB2cf_sBPXdc7n7J2w6nuKD11JC_mAo0wU7yWm6hUD1F6nFUTwPlYlXvwwAAV2umBI8pKM_EcaqCHUbPbZSXfO69Y7SXDCA9IiDdu7D8S_m8o6PJzdPnDVPH7xWgRLC7Gehn4AxuP34B2jg";
 
 // --- FONCTION MAGIQUE : GÉNÉRATEUR DE JETON ---
 async function getFreshToken() {
     try {
         console.log("[Cinepulse] Demande d'un nouveau pass d'accès...");
-        
-        // Ton cookie Cloudflare de la capture d'écran
-        const CF_COOKIE = "xSp4KUWAn28y_GZR33aNKNp_extwYewGOiRPnNvnnqg-1771694639-1.2.1.1-HyUFeVaRTsge0KLNwIgIS7uSLcl1l7JsAy8D4S2Ax5tHg6ytpzTeg4Enjn2QvVgrusvlOQVGDJxOSyk_e9S7RRNzX1FUwB2cf_sBPXdc7n7J2w6nuKD11JC_mAo0wU7yWm6hUD1F6nFUTwPIYIXvwwAAV2umBI8pKM_EcaqCHUbPbZSXfO69Y7SXDCA9IiDdu7D8S_m8o6PJzdPnDVPH7xWgRLC7Gehn4AxuP34B2jg";
-
         const response = await soraFetch("https://apiapi.cinepulse.lol/api/v2/auth/refresh-auth-token", {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Origin': 'https://cinepulse.lol',
                 'Referer': 'https://cinepulse.lol/',
+                
+                // --- LES EN-TÊTES SECRETS DÉCOUVERTS ---
+                'X-Requested-With': 'cinepulse.frontend',
+                'X-Profile-Id': PROFILE_ID,
                 'Cookie': `cf_clearance=${CF_COOKIE}`,
-                // On imite un navigateur PC classique pour coller au cookie
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
             },
+            // La charge utile exacte (Payload) montrée dans ta capture
             body: JSON.stringify({ refreshToken: REFRESH_TOKEN })
         });
         
@@ -38,10 +39,11 @@ async function getFreshToken() {
             return null;
         }
     } catch (e) {
-        console.log("[Cinepulse] Erreur fatale du générateur :", e);
+        console.log("[Cinepulse] Erreur fatale du générateur de jeton :", e);
         return null;
     }
 }
+
 // --- OUTILS DE SÉCURITÉ CINEPULSE (REVERSE-ENGINEERED) ---
 
 function soraBtoa(str) {
