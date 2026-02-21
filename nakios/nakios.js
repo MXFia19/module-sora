@@ -258,11 +258,10 @@ async function extractStreamUrl(url) {
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
             
-            // Adaptation automatique de l'API Proxy en fonction du nom de domaine
+            // Si le lien commence par "/", on rajoute juste l'adresse de l'API devant.
+            // Sinon (si c'est un lien http vers fsvid ou autre), on le laisse intact !
             if (item.url.startsWith('/')) {
                 finalUrl = `${API_URL}${item.url}`;
-            } else if (!item.url.includes(HOSTNAME)) {
-                finalUrl = `${API_URL}/api/sources/proxy?url=${encodeURIComponent(item.url)}`;
             }
 
             streams.push({
