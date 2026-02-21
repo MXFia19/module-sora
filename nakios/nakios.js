@@ -1,5 +1,3 @@
-const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
-
 // Variables globales qui vont stocker les adresses officielles
 let BASE_URL = "";
 let API_URL = "";
@@ -42,35 +40,63 @@ async function initUrls() {
 }
 
 
+// --- 1. RECHERCHE (VIA L'API OFFICIELLE DE NAKIOS) ---
 async function searchResults(keyword) {
     try {
-        // 1. On s'assure d'avoir la bonne adresse
+        // 1. On s'assure d'avoir la bonne adresse de l'API (Auto-réparation)
         await initUrls();
 
         const encodedKeyword = encodeURIComponent(keyword);
-        const responseText = await soraFetch(`https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodedKeyword}&language=fr-FR&page=1&include_adult=false&sort_by=popularity.desc`);
+        
+        // 2. On utilise la propre API de Nakios avec notre variable dynamique !
+        const searchUrl = `${API_URL}/api/search/multi?query=${encodedKeyword}&page=1`;
+        console.log(`[Nakios] Lancement de la recherche interne : ${searchUrl}`);
+        
+        const responseText = await soraFetch(searchUrl, {
+            headers: {
+                "Origin": BASE_URL,
+                "Referer": `${BASE_URL}/`
+            }
+        });
+        
         const data = await responseText.json();
 
-        const transformedResults = data.results.map(result => {
-            if(result.media_type === "movie" || result.title) {
-                return {
-                    title: result.title || result.name,
-                    image: `https://image.tmdb.org/t/p/w500${result.poster_path}`,
-                    href: `${BASE_URL}/movie/${result.id}` // <-- Utilise l'adresse dynamique
-                };
+        // 3. Transformation des résultats
+        // Nakios renvoie probablement une structure similaire à TMDB, on cherche le tableau de résultats
+        const items = data.results || data.data || data.items || data; 
+
+        if (!Array.isArray(items)) {
+            console.log("[Nakios] Structure de recherche inattendue :", JSON.stringify(data).substring(0, 200));
+            return JSON.stringify([]);
+        }
+
+        const transformedResults = items.map(result => {
+            // On déduit si c'est un film ou une série
+            let type = result.media_type || (result.name ? "tv" : "movie");
+            let title = result.title || result.name || result.original_title;
+            let id = result.id || result.tmdb_id;
+            
+            // Gestion de l'image (si Nakios renvoie un bout de lien ou un lien complet)
+            let image = "https://via.placeholder.com/500x750?text=Pas+d'image";
+            if (result.poster_path) {
+                image = result.poster_path.startsWith('http') 
+                    ? result.poster_path 
+                    : `https://image.tmdb.org/t/p/w500${result.poster_path}`;
             }
-            else if(result.media_type === "tv" || result.name) {
+
+            if (title && id) {
                 return {
-                    title: result.name || result.title,
-                    image: `https://image.tmdb.org/t/p/w500${result.poster_path}`,
-                    href: `${BASE_URL}/tv/${result.id}` // <-- Utilise l'adresse dynamique
+                    title: title,
+                    image: image,
+                    // On crée le lien avec notre BASE_URL auto-réparée
+                    href: `${BASE_URL}/${type}/${id}`
                 };
             }
         });
 
         return JSON.stringify(transformedResults.filter(Boolean));
     } catch (error) {
-        console.log('Fetch error in searchResults: ' + error);
+        console.log('[Nakios] Erreur fatale dans searchResults : ' + error);
         return JSON.stringify([]);
     }
 }
