@@ -149,22 +149,29 @@ async function extractEpisodes(url) {
             let allEpisodes = [];
 
             for (let i = 1; i <= data.seasons; i++) {
-                const seasonResponseText = await soraFetch(`https://api.${domain}/api/v1/media/${showId}/season/${i}`, {
-                    headers: {
-                        "Referer": `https://${domain}/`,
-                        "Origin": `https://${domain}`
-                    }
-                });
-                const seasonJson = await seasonResponseText.json();
-                const seasonData = seasonJson.data.items;
-
-                for (const episode of seasonData.episodes) {
-                    allEpisodes.push({
-                        href: `${showId}/${i}/${episode.episode}`,
-                        number: episode.episode,
-                        title: episode.name
+                try {
+                    const seasonResponseText = await soraFetch(`https://api.${domain}/api/v1/media/${showId}/season/${i}`, {
+                        headers: {
+                            "Referer": `https://${domain}/`,
+                            "Origin": `https://${domain}`
+                        }
                     });
+                    const seasonJson = await seasonResponseText.json();
+                    const seasonData = seasonJson.data.items;
+
+                    for (const episode of seasonData.episodes) {
+                        allEpisodes.push({
+                            href: `${showId}/${i}/${episode.episode}`,
+                            number: episode.episode,
+                            title: episode.name
+                        });
+                    }
+                } catch (e) {
+                    console.log(`[Purstream] Erreur chargement saison ${i}:`, e);
                 }
+                
+                // LE BOUCLIER ANTI-SPAM POUR ÉVITER LES "JSON PARSING ERROR"
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
             return JSON.stringify(allEpisodes);
         } else {
@@ -213,12 +220,15 @@ async function extractStreamUrl(url) {
 
         for (const source of sources) {
             if (source.stream_url) {
+                // Création des en-têtes en béton armé pour le lecteur vidéo
                 streams.push({
-                    title: source.source_name || "Source 1",
+                    title: source.source_name || "Serveur Purstream",
                     streamUrl: source.stream_url,
                     headers: {
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15",
-                        "Referer": `https://${domain}/`
+                        "Origin": `https://${domain}`,
+                        "Referer": `https://${domain}/`,
+                        "Accept": "*/*",
+                        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
                     }
                 });
             }
