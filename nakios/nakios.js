@@ -1,7 +1,52 @@
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
+// Variables globales qui vont stocker les adresses officielles
+let BASE_URL = "";
+let API_URL = "";
+let HOSTNAME = "";
+
+// --- LE CERVEAU AUTO-RÉPARATEUR ---
+async function initUrls() {
+    if (BASE_URL !== "") return; // Si on l'a déjà trouvé, on ne refait pas la recherche
+
+    try {
+        console.log("[Nakios] Recherche de la nouvelle adresse officielle sur nakios.online...");
+        const response = await soraFetch("https://nakios.online/");
+        const text = await response.text();
+
+        // On cherche le lien dans le bouton "Visiter le site"
+        const match = text.match(/href="([^"]+)"[^>]*>.*?Visiter/i) || text.match(/(https:\/\/nakios\.[a-z]+)/i);
+        
+        if (match && match[1]) {
+            BASE_URL = match[1];
+            if (BASE_URL.endsWith('/')) BASE_URL = BASE_URL.slice(0, -1);
+        } else {
+            throw new Error("Aucun lien trouvé");
+        }
+    } catch (e) {
+        console.log("[Nakios] Impossible de récupérer l'adresse, utilisation de l'adresse de secours.");
+        BASE_URL = "https://nakios.site"; // Plan B
+    }
+
+    // On déduit l'API et le domaine à partir de l'adresse trouvée
+    try {
+        // Enlève le https:// pour récupérer juste le domaine (ex: nakios.site)
+        HOSTNAME = BASE_URL.replace(/^https?:\/\//, ''); 
+        API_URL = `https://api.${HOSTNAME}`;
+    } catch(e) {
+        HOSTNAME = "nakios.site";
+        API_URL = "https://api.nakios.site";
+    }
+    
+    console.log(`[Nakios] Configuration terminée -> Base: ${BASE_URL} | API: ${API_URL}`);
+}
+
+
 async function searchResults(keyword) {
     try {
+        // 1. On s'assure d'avoir la bonne adresse
+        await initUrls();
+
         const encodedKeyword = encodeURIComponent(keyword);
         const responseText = await soraFetch(`https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodedKeyword}&language=fr-FR&page=1&include_adult=false&sort_by=popularity.desc`);
         const data = await responseText.json();
@@ -11,14 +56,14 @@ async function searchResults(keyword) {
                 return {
                     title: result.title || result.name,
                     image: `https://image.tmdb.org/t/p/w500${result.poster_path}`,
-                    href: `https://nakios.site/movie/${result.id}`
+                    href: `${BASE_URL}/movie/${result.id}` // <-- Utilise l'adresse dynamique
                 };
             }
             else if(result.media_type === "tv" || result.name) {
                 return {
                     title: result.name || result.title,
                     image: `https://image.tmdb.org/t/p/w500${result.poster_path}`,
-                    href: `https://nakios.site/tv/${result.id}`
+                    href: `${BASE_URL}/tv/${result.id}` // <-- Utilise l'adresse dynamique
                 };
             }
         });
@@ -123,6 +168,9 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
     try {
+        // 1. On s'assure d'avoir la bonne adresse et sa bonne API
+        await initUrls();
+
         let streams = [];
         let showId = "";
         let seasonNumber = "";
@@ -141,15 +189,15 @@ async function extractStreamUrl(url) {
 
         let apiUrl = "";
         if (isMovie) {
-            apiUrl = `https://api.nakios.site/api/sources/movie/${showId}`;
+            apiUrl = `${API_URL}/api/sources/movie/${showId}`;
         } else {
-            apiUrl = `https://api.nakios.site/api/sources/tv/${showId}/${seasonNumber}/${episodeNumber}`;
+            apiUrl = `${API_URL}/api/sources/tv/${showId}/${seasonNumber}/${episodeNumber}`;
         }
 
         const response = await soraFetch(apiUrl, {
             headers: {
-                "Origin": "https://nakios.site",
-                "Referer": "https://nakios.site/"
+                "Origin": BASE_URL,
+                "Referer": `${BASE_URL}/`
             }
         });
         
@@ -210,18 +258,19 @@ async function extractStreamUrl(url) {
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
             
+            // Adaptation automatique de l'API Proxy en fonction du nom de domaine
             if (item.url.startsWith('/')) {
-                finalUrl = `https://api.nakios.site${item.url}`;
-            } else if (!item.url.includes('nakios.site')) {
-                finalUrl = `https://api.nakios.site/api/sources/proxy?url=${encodeURIComponent(item.url)}`;
+                finalUrl = `${API_URL}${item.url}`;
+            } else if (!item.url.includes(HOSTNAME)) {
+                finalUrl = `${API_URL}/api/sources/proxy?url=${encodeURIComponent(item.url)}`;
             }
 
             streams.push({
                 title: item.name, 
                 streamUrl: finalUrl,
                 headers: {
-                    "Origin": "https://nakios.site",
-                    "Referer": "https://nakios.site/"
+                    "Origin": BASE_URL,
+                    "Referer": `${BASE_URL}/`
                 }
             });
         }
