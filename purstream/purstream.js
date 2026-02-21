@@ -157,21 +157,20 @@ async function extractEpisodes(url) {
                         }
                     });
                     const seasonJson = await seasonResponseText.json();
-                    const seasonData = seasonJson.data.items;
-
-                    for (const episode of seasonData.episodes) {
-                        allEpisodes.push({
-                            href: `${showId}/${i}/${episode.episode}`,
-                            number: episode.episode,
-                            title: episode.name
-                        });
+                    
+                    if (seasonJson && seasonJson.data && seasonJson.data.items) {
+                        const seasonData = seasonJson.data.items;
+                        for (const episode of seasonData.episodes) {
+                            allEpisodes.push({
+                                href: `${showId}/${i}/${episode.episode}`,
+                                number: episode.episode,
+                                title: episode.name || `Épisode ${episode.episode}`
+                            });
+                        }
                     }
                 } catch (e) {
                     console.log(`[Purstream] Erreur chargement saison ${i}:`, e);
                 }
-                
-                // LE BOUCLIER ANTI-SPAM POUR ÉVITER LES "JSON PARSING ERROR"
-                await new Promise(resolve => setTimeout(resolve, 200));
             }
             return JSON.stringify(allEpisodes);
         } else {
