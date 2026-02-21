@@ -92,7 +92,7 @@ async function searchResults(keyword) {
     }
 }
 
-// --- 2. DÉTAILS (VIA L'API OFFICIELLE NAKIOS) ---
+// --- 2. DÉTAILS (MÉTHODE HYBRIDE TMDB + NAKIOS) ---
 async function extractDetails(url) {
     try {
         await initUrls();
@@ -103,24 +103,45 @@ async function extractDetails(url) {
 
         const id = match[1];
         
-        // Nakios utilise /api/movie/ pour les films, et /api/series/ pour les séries
-        const apiUrl = isMovie ? `${API_URL}/api/movie/${id}` : `${API_URL}/api/series/${id}`;
-        console.log(`[Nakios] Récupération des détails : ${apiUrl}`);
+        // On tente d'abord de récupérer les belles données complètes via TMDB
+        const tmdbUrl = isMovie 
+            ? `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`
+            : `https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`;
+            
+        console.log(`[Nakios] Récupération des détails via TMDB : ${tmdbUrl}`);
         
-        const responseText = await soraFetch(apiUrl, {
-            headers: {
-                "Origin": BASE_URL,
-                "Referer": `${BASE_URL}/`
-            }
-        });
+        let responseText = await soraFetch(tmdbUrl);
+        let data = await responseText.json();
         
-        const data = await responseText.json();
-        const info = data.data || data;
+        // Si TMDB ne connaît pas le film ou renvoie une erreur, on passe au Plan B (API Nakios)
+        if (data.success === false || !data.id) {
+            console.log(`[Nakios] Échec TMDB. Basculement sur l'API Nakios...`);
+            const nakiosUrl = isMovie ? `${API_URL}/api/movie/${id}` : `${API_URL}/api/series/${id}`;
+            responseText = await soraFetch(nakiosUrl, { headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` } });
+            data = await responseText.json();
+            data = data.data || data; // Adaptation au format Nakios
+        }
+
+        // --- DÉTECTION INTELLIGENTE DE LA DURÉE ---
+        let duration = 'Inconnue';
+        if (data.runtime) {
+            duration = data.runtime; // Format Film (TMDB ou Nakios)
+        } else if (data.episode_run_time && data.episode_run_time.length > 0) {
+            duration = data.episode_run_time[0]; // Format Série TMDB
+        } else if (data.episodes && data.episodes.length > 0 && data.episodes[0].runtime) {
+            duration = data.episodes[0].runtime; // Format Série Nakios (Lecture de l'épisode 1)
+        }
+
+        // --- EXTRACTION DE LA DATE ---
+        let releaseDate = data.release_date || data.first_air_date || data.air_date || 'Inconnue';
+
+        // --- EXTRACTION DU RÉSUMÉ ---
+        let overview = data.overview || data.description || 'Aucune description disponible.';
 
         const transformedResults = [{
-            description: info.overview || info.description || 'Aucune description disponible.',
-            aliases: `Durée : ${info.runtime || (info.episode_run_time ? info.episode_run_time[0] : 'Inconnue')} minutes`,
-            airdate: `Date de sortie : ${info.release_date || info.first_air_date || 'Inconnue'}`
+            description: overview,
+            aliases: `Durée : ${duration !== 'Inconnue' ? duration + ' minutes' : 'Inconnue'}`,
+            airdate: `Date de sortie : ${releaseDate}`
         }];
 
         return JSON.stringify(transformedResults);
