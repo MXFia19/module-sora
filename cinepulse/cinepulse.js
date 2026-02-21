@@ -18,7 +18,8 @@ async function getFreshToken() {
                 'Origin': 'https://cinepulse.lol',
                 'Referer': 'https://cinepulse.lol/',
                 'X-Requested-With': 'cinepulse.frontend', // <-- LE SECRET ANTI-ROBOT EST ICI
-                'Authorization': `Bearer ${REFRESH_TOKEN}`  // <-- Ils veulent l'en-tête même pour rafraîchir
+                'Authorization': `Bearer ${REFRESH_TOKEN}`,  // <-- Ils veulent l'en-tête même pour rafraîchir
+                'Cookie': CF_COOKIE // <-- Ajout du cookie Cloudflare vital
             },
             body: JSON.stringify({ refreshToken: REFRESH_TOKEN })
         });
@@ -42,7 +43,6 @@ async function getFreshToken() {
 }
 
 // --- OUTILS DE SÉCURITÉ CINEPULSE (REVERSE-ENGINEERED) ---
-
 function soraBtoa(str) {
     if (typeof btoa === 'function') return btoa(str);
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
@@ -251,7 +251,7 @@ async function extractStreamUrl(url) {
             const parts = url.split('/');
             showId = parts[0]; 
         } else {
-            const parts = split('/');
+            const parts = url.split('/');
             showId = parts[0];         
             seasonNumber = parts[1];   
             episodeNumber = parts[2];  
@@ -280,7 +280,7 @@ async function extractStreamUrl(url) {
 
         console.log("[Cinepulse] URL d'attaque générée :", apiUrl);
 
-        // 5. Exécution de la requête avec le jeton FRAIS
+        // 5. Exécution de la requête avec le jeton FRAIS et le Cookie Cloudflare
         const response = await soraFetch(apiUrl, {
             method: 'GET',
             headers: {
@@ -290,7 +290,8 @@ async function extractStreamUrl(url) {
                 "X-Request-Time": Date.now().toString(),
                 "Origin": "https://cinepulse.lol",
                 "Referer": "https://cinepulse.lol/",
-                "Accept": "application/json"
+                "Accept": "application/json",
+                "Cookie": CF_COOKIE // <-- Ajout du cookie ici aussi !
             }
         });
         
