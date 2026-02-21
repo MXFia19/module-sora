@@ -1,0 +1,20 @@
+{
+    "sourceName": "cinepulse",
+    "iconUrl": "https://cinepulse.lol/pwa-192x192.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://cinepulse.lol/assets/21-bananya-bananya-DDx7D5eY.png",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "French",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://cinepulse.lol/",
+    "searchBaseUrl": "https://api.themoviedb.org/3/search/multi?api_key=f3d757824f08ea2cff45eb8f47ca3a1e&query=%s&language=fr-FR&page=1&include_adult=false&sort_by=popularity.desc",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/cinepulse/cinepulse.js",
+    "type": "shows/movies",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true
+}
