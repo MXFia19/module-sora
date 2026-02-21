@@ -9,6 +9,7 @@ const PROFILE_ID = "9b6ae015-e0c7-4a56-a4d0-c6885a29415a";
 const CF_COOKIE = "xSp4KUWAn28y_GZR33aNKNp_extwYewGOiRPnNvnnqg-1771694639-1.2.1.1-HyUFeVaRTsge0KLNwIgIS7uSLcl1l7JsAy8D4S2Ax5tHg6ytpzTeg4Enjn2QvVgrusvlOQVGDJxOSyk_e9S7RRNzX1FUwB2cf_sBPXdc7n7J2w6nuKD11JC_mAo0wU7yWm6hUD1F6nFUTwPlYlXvwwAAV2umBI8pKM_EcaqCHUbPbZSXfO69Y7SXDCA9IiDdu7D8S_m8o6PJzdPnDVPH7xWgRLC7Gehn4AxuP34B2jg";
 
 // --- FONCTION MAGIQUE : GÉNÉRATEUR DE JETON ---
+// --- FONCTION MAGIQUE : GÉNÉRATEUR DE JETON ---
 async function getFreshToken() {
     try {
         console.log("[Cinepulse] Demande d'un nouveau pass d'accès...");
@@ -18,34 +19,39 @@ async function getFreshToken() {
                 'Content-Type': 'application/json',
                 'Origin': 'https://cinepulse.lol',
                 'Referer': 'https://cinepulse.lol/',
-                'X-Requested-With': 'cinepulse.frontend', // <-- LE SECRET ANTI-ROBOT EST ICI
-                'Authorization': `Bearer ${REFRESH_TOKEN}`,  // <-- Ils veulent l'en-tête même pour rafraîchir
-                'Cookie': CF_COOKIE // <-- Ajout du cookie Cloudflare vital
+                'X-Requested-With': 'cinepulse.frontend',
+                'Authorization': `Bearer ${REFRESH_TOKEN}`,
+                'Cookie': CF_COOKIE,
+                // LE DÉGUISEMENT : On se fait passer pour un vrai navigateur PC
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
             body: JSON.stringify({ refreshToken: REFRESH_TOKEN })
         });
         
-        const responseData = await response.json();
+        // On récupère le texte brut pour voir la vraie réponse de Cloudflare
+        const rawText = await response.text();
+        let responseData;
         
-        // Navigation dans la nouvelle structure trouvée
+        try {
+            responseData = JSON.parse(rawText);
+        } catch (e) {
+            console.log("[Cinepulse] Cloudflare a bloqué ! Voici sa réponse :", rawText.substring(0, 300));
+            return null;
+        }
+        
         const newToken = responseData?.data?.items?.accessToken;
         const newRefreshToken = responseData?.data?.items?.refreshToken;
         
         if (newToken) {
             console.log("[Cinepulse] Nouveau pass obtenu avec succès !");
-            
-            // Mise à jour de la clé maître si le serveur nous en donne une nouvelle
-            if (newRefreshToken) {
-                REFRESH_TOKEN = newRefreshToken;
-            }
-            
+            if (newRefreshToken) REFRESH_TOKEN = newRefreshToken;
             return newToken;
         } else {
-            console.log("[Cinepulse] Échec. Le serveur a répondu, mais pas de jeton :", JSON.stringify(responseData));
+            console.log("[Cinepulse] Échec. JSON inattendu :", JSON.stringify(responseData));
             return null;
         }
     } catch (e) {
-        console.log("[Cinepulse] Erreur fatale du générateur de jeton :", e);
+        console.log("[Cinepulse] Erreur fatale :", e);
         return null;
     }
 }
