@@ -229,7 +229,8 @@ async function extractStreamUrl(url) {
                 }
                 
                 if (typeof value === 'string') {
-                    let isVideoUrl = value.includes('.m3u8') || value.includes('.mp4') || value.includes('fsvid.lol');
+                    // On accepte les m3u8, mp4 et les liens des serveurs connus
+                    let isVideoUrl = value.includes('.m3u8') || value.includes('.mp4') || value.includes('fsvid.lol') || value.includes('vidzy.org');
                     let isApiUrl = value.startsWith('http') && ['url', 'link', 'file', 'src'].includes(key.toLowerCase());
                     
                     if (isVideoUrl || isApiUrl) {
@@ -246,6 +247,7 @@ async function extractStreamUrl(url) {
 
         findStreams(data);
 
+        // Dé-duplication des liens
         let uniqueStreams = [];
         let seenUrls = new Set();
         for (let item of rawStreams) {
@@ -255,15 +257,16 @@ async function extractStreamUrl(url) {
             }
         }
         
+        // Finalisation des liens SANS LE PROXY
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
             
-            // Si le lien commence par "/", on rajoute juste l'adresse de l'API devant.
-            // Sinon (si c'est un lien http vers fsvid ou autre), on le laisse intact !
+            // Si le lien est relatif (ex: /hls/video.m3u8), on lui colle l'adresse du serveur
             if (item.url.startsWith('/')) {
                 finalUrl = `${API_URL}${item.url}`;
             }
 
+            // Et c'est tout ! On ne touche plus au reste (les liens fsvid, vidzy, etc.)
             streams.push({
                 title: item.name, 
                 streamUrl: finalUrl,
