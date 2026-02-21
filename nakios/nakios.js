@@ -1,3 +1,4 @@
+const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 // Variables globales qui vont stocker les adresses officielles
 let BASE_URL = "";
 let API_URL = "";
