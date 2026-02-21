@@ -8,8 +8,7 @@ let REFRESH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI5ODExNj
 const PROFILE_ID = "9b6ae015-e0c7-4a56-a4d0-c6885a29415a";
 const CF_COOKIE = "xSp4KUWAn28y_GZR33aNKNp_extwYewGOiRPnNvnnqg-1771694639-1.2.1.1-HyUFeVaRTsge0KLNwIgIS7uSLcl1l7JsAy8D4S2Ax5tHg6ytpzTeg4Enjn2QvVgrusvlOQVGDJxOSyk_e9S7RRNzX1FUwB2cf_sBPXdc7n7J2w6nuKD11JC_mAo0wU7yWm6hUD1F6nFUTwPlYlXvwwAAV2umBI8pKM_EcaqCHUbPbZSXfO69Y7SXDCA9IiDdu7D8S_m8o6PJzdPnDVPH7xWgRLC7Gehn4AxuP34B2jg";
 
-// --- FONCTION MAGIQUE : GÉNÉRATEUR DE JETON ---
-// --- FONCTION MAGIQUE : GÉNÉRATEUR DE JETON ---
+// --- FONCTION MAGIQUE : GÉNÉRATEUR DE JETON (MODE DÉBOGAGE EXTRÊME) ---
 async function getFreshToken() {
     try {
         console.log("[Cinepulse] Demande d'un nouveau pass d'accès...");
@@ -22,20 +21,32 @@ async function getFreshToken() {
                 'X-Requested-With': 'cinepulse.frontend',
                 'Authorization': `Bearer ${REFRESH_TOKEN}`,
                 'Cookie': CF_COOKIE,
-                // LE DÉGUISEMENT : On se fait passer pour un vrai navigateur PC
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
             body: JSON.stringify({ refreshToken: REFRESH_TOKEN })
         });
         
-        // On récupère le texte brut pour voir la vraie réponse de Cloudflare
-        const rawText = await response.text();
-        let responseData;
+        // 1. On affiche le code d'état HTTP (très important !)
+        console.log(`[Cinepulse] Statut HTTP de la réponse : ${response.status}`);
         
+        // 2. On récupère le texte brut EXACT, quoi qu'il arrive
+        const rawText = await response.text();
+        
+        // 3. On l'affiche en entier dans les logs
+        console.log(`[Cinepulse] RÉPONSE BRUTE EXACTE DU SERVEUR : \n${rawText}`);
+        
+        // Si la réponse est vide, on s'arrête là
+        if (!rawText || rawText.trim() === "") {
+            console.log("[Cinepulse] Le serveur a renvoyé un texte totalement vide.");
+            return null;
+        }
+
+        // 4. On essaie de lire ça comme du JSON
+        let responseData;
         try {
             responseData = JSON.parse(rawText);
         } catch (e) {
-            console.log("[Cinepulse] Cloudflare a bloqué ! Voici sa réponse :", rawText.substring(0, 300));
+            console.log("[Cinepulse] Impossible de lire la réponse comme du JSON. C'est sûrement une page HTML d'erreur.");
             return null;
         }
         
@@ -47,11 +58,11 @@ async function getFreshToken() {
             if (newRefreshToken) REFRESH_TOKEN = newRefreshToken;
             return newToken;
         } else {
-            console.log("[Cinepulse] Échec. JSON inattendu :", JSON.stringify(responseData));
+            console.log("[Cinepulse] Le JSON ne contient pas le chemin data.items.accessToken !");
             return null;
         }
     } catch (e) {
-        console.log("[Cinepulse] Erreur fatale :", e);
+        console.log("[Cinepulse] Erreur fatale de connexion :", e);
         return null;
     }
 }
