@@ -1,6 +1,31 @@
 const BASE_URL = "https://hostcord.xyz";
 
-// --- 1. RECHERCHE ---
+// --- FONCTION MAGIQUE : EXTRACTION DU JSON CACHÉ DANS LE HTML ---
+async function getInertiaData(url) {
+    const response = await soraFetch(url, {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": `${BASE_URL}/`
+        }
+    });
+    const html = await response.text();
+    
+    // On cherche l'attribut data-page qui contient le JSON crypté en entités HTML
+    const match = html.match(/data-page=(['"])(.*?)\1/);
+    if (match && match[2]) {
+        // On nettoie le texte pour qu'il redevienne du vrai JSON
+        let jsonString = match[2]
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>');
+            
+        return JSON.parse(jsonString);
+    }
+    throw new Error("Impossible de trouver les données Inertia dans la page HTML.");
+}
+
+// --- 1. RECHERCHE (Fonctionnait déjà parfaitement) ---
 async function searchResults(keyword) {
     try {
         const encodedKeyword = encodeURIComponent(keyword);
@@ -9,14 +34,13 @@ async function searchResults(keyword) {
         const response = await soraFetch(searchUrl);
         const data = await response.json();
 
-        // Le site renvoie directement un tableau d'objets
         if (!Array.isArray(data)) return JSON.stringify([]);
 
         const transformedResults = data.map(item => {
             return {
                 title: item.title,
                 image: item.poster,
-                href: item.url // Exemple: "https://hostcord.xyz/movie/281"
+                href: item.url
             };
         });
 
@@ -30,20 +54,10 @@ async function searchResults(keyword) {
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
     try {
-        // La magie d'Inertia.js : on demande au serveur de renvoyer le JSON plutôt que la page web
-        const response = await soraFetch(url, {
-            headers: {
-                "X-Inertia": "true", // <--- LE SECRET EST ICI
-                "X-Inertia-Version": "",
-                "Referer": BASE_URL
-            }
-        });
+        // On utilise notre nouvelle fonction pour lire la page web
+        const json = await getInertiaData(url);
         
-        const json = await response.json();
-        
-        // On récupère l'objet "movie" ou "serie" dans les props
         const item = json.props.movie || json.props.serie || json.props.show;
-        
         if (!item) throw new Error("Données introuvables");
 
         const transformedResults = [{
@@ -63,27 +77,22 @@ async function extractDetails(url) {
 // --- 3. ÉPISODES ---
 async function extractEpisodes(url) {
     try {
-        const response = await soraFetch(url, {
-            headers: { "X-Inertia": "true", "Referer": BASE_URL }
-        });
-        const json = await response.json();
+        const json = await getInertiaData(url);
         
-        // --- CAS 1 : C'EST UN FILM ---
+        // Film
         if (json.props.movie && json.props.movie.video_url) {
             return JSON.stringify([{
-                href: json.props.movie.video_url, // L'iframe: "https://ptb.rdmfile.eu/iframe/..."
+                href: json.props.movie.video_url, 
                 number: 1,
                 title: "Film Complet"
             }]);
         }
         
-        // --- CAS 2 : C'EST UNE SÉRIE (Logique préventive) ---
+        // Série (logique dynamique)
         if (json.props.serie || json.props.show) {
             const show = json.props.serie || json.props.show;
             let allEpisodes = [];
             
-            // Note: Comme on n'a pas vu le JSON exact d'une série, ceci est une déduction logique.
-            // Si le site a un tableau "episodes" direct :
             if (show.episodes && Array.isArray(show.episodes)) {
                 show.episodes.forEach(ep => {
                     allEpisodes.push({
@@ -92,9 +101,7 @@ async function extractEpisodes(url) {
                         title: ep.title || `Épisode ${ep.episode_number}`
                     });
                 });
-            } 
-            // Si le site a des "seasons" qui contiennent des "episodes" :
-            else if (show.seasons && Array.isArray(show.seasons)) {
+            } else if (show.seasons && Array.isArray(show.seasons)) {
                 show.seasons.forEach(season => {
                     if(season.episodes) {
                         season.episodes.forEach(ep => {
@@ -118,10 +125,9 @@ async function extractEpisodes(url) {
     }    
 }
 
-// --- 4. EXTRACTION VIDÉO (Scraping de rdmfile.eu) ---
+// --- 4. EXTRACTION VIDÉO (Scraping de l'iframe rdmfile) ---
 async function extractStreamUrl(url) {
     try {
-        // L'URL ici est l'iframe (ex: https://ptb.rdmfile.eu/iframe/fc4b91ff)
         console.log(`[Hostcord] Extraction de l'iframe : ${url}`);
         
         const response = await soraFetch(url, {
@@ -134,7 +140,6 @@ async function extractStreamUrl(url) {
         const html = await response.text();
         let streams = [];
 
-        // On cherche le lien vidéo caché dans le code de l'iframe (format standard .m3u8 ou .mp4)
         const fileMatch = html.match(/(?:file|src)\s*:\s*["'](https:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
         if (fileMatch) {
             streams.push({
@@ -144,7 +149,6 @@ async function extractStreamUrl(url) {
             });
         }
         
-        // Si le lien vidéo est dans une balise <source> HTML5
         if (streams.length === 0) {
             const sourceMatch = html.match(/<source[^>]+src=["']([^"']+)["']/i);
             if (sourceMatch) {
@@ -156,7 +160,6 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // Si le lecteur cache un autre iFrame à l'intérieur
         if (streams.length === 0) {
             const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
             if (iframeMatch) {
@@ -168,10 +171,8 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // Sécurité ultime : Si on n'arrive pas à extraire le flux, on renvoie l'iframe tel quel
-        // pour que Sora tente de le gérer ou pour l'ouvrir dans le lecteur web.
         if (streams.length === 0) {
-            console.log("[Hostcord] Flux non trouvé dans l'iframe, tentative d'envoi du lien brut.");
+            console.log("[Hostcord] Flux non trouvé dans l'iframe, envoi du lien brut.");
             streams.push({
                 title: "Lecteur Web",
                 streamUrl: url,
