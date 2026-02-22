@@ -123,578 +123,184 @@ async function extractEpisodes(url) {
 // searchResults("breaking bad");
 
 
-// searchResults("breaking bad").then(console.log);
-// extractDetails("https://movix.blog/tv/1396").then(console.log);
-// extractEpisodes("https://movix.blog/tv/1396").then(console.log);
-// extractStreamUrl("https://movix.blog/watch/tv/1396/s/1/e/1").then(console.log);
+
 
 async function extractStreamUrl(url) {
-    try {
-        let streams = [];
+    let streams = [];
+    let showId = "";
+    let seasonNumber = "";
+    let episodeNumber = "";
 
-        let showId = "";
-        let seasonNumber = "";
-        let episodeNumber = "";
-
-        if (url.includes('movie')) {
-            const [showIdTemp, episodeNumberTemp] = url.split('/');
-
-            showId = showIdTemp;
-            episodeNumber = episodeNumberTemp;
-        } else {
-            const [showIdTemp, seasonNumberTemp, episodeNumberTemp] = url.split('/');
-
-            showId = showIdTemp;
-            seasonNumber = seasonNumberTemp;
-            episodeNumber = episodeNumberTemp;
-        }
-
-
-        let uas = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1",
-            "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Mobile Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Safari/605.1.15",
-            "Mozilla/5.0 (Linux; Android 11; Pixel 4 XL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Mobile Safari/537.36",
-        ];
-
-        if (episodeNumber === "movie") {
-            const response = await soraFetch(`https://frembed.buzz/api/films?id=${showId}&idType=tmdb`, {
-                headers: {
-                    "Referer": "https://frembed.buzz/",
-                    "Origin": "https://frembed.buzz"
-                }
-            });
-            const data = await response.json();
-    
-            const links = Object.entries(data)
-                .filter(([key, value]) =>
-                    typeof value === "string" &&
-                    value.startsWith("http") &&
-                    key.startsWith("link")
-                )
-                .map(([key, value]) => ({
-                    type: key.includes("vostfr")
-                    ? "VOSTFR"
-                    : key.includes("vo")
-                    ? "VO"
-                    : "VF",
-                    name: key,
-                    url: value
-                }));
-
-            console.log("Links: " + JSON.stringify(links));
-
-            for (const playerLink of links) {
-                console.log(JSON.stringify(playerLink));
-                console.log(playerLink.url);
-    
-                if (playerLink.name === "link7" || playerLink.name === "link7vostfr" || playerLink.name === "link4" || playerLink.name === "link4vostfr" || playerLink.name === "link7vo" || playerLink.name === "link4vo") {
-                    console.log(playerLink.url);
-                    const res = await soraFetch(playerLink.url, {
-                        headers: {
-                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0",
-                            "Referer": playerLink.url,
-                        }
-                    });
-                    const text = await res.text();
-
-                    const match = text.match(/sources:\s*\[\s*"([^"]+)"\s*\]/);
-
-                    const streamUrl = match ? match[1] : null;
-
-                    if (streamUrl) {
-                        console.log(streamUrl);
-    
-                        streams.push({
-                            title: playerLink.type + " - " + "Uqload",
-                            streamUrl,
-                            headers: {
-                                Referer: "https://uqload.bz/",
-                            }
-                        });
-                    }
-                } else if (playerLink.name === "link3" || playerLink.name === "link3vostfr") {
-                    let headers = {
-                        "User-Agent": uas[(url.length) % uas.length], // use a different user agent based on the url and provider
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
-                        "Referer": url,
-                        "Connection": "keep-alive",
-                        "x-Requested-With": "XMLHttpRequest",
-                    };
-
-                    console.log(playerLink.url);
-                    const res = await soraFetch(playerLink.url, {
-                        headers
-                    });
-                    let text = await res.text();
-
-                    const title = text.match(/<title>(.*?)<\/title>/);
-                    if (title && title[1].toLowerCase().includes("redirect")) {
-                        const matches = [
-                            /<meta http-equiv="refresh" content="0;url=(.*?)"/,
-                            /window\.location\.href\s*=\s*["'](.*?)["']/,
-                            /window\.location\.replace\s*\(\s*["'](.*?)["']\s*\)/,
-                            /window\.location\s*=\s*["'](.*?)["']/,
-                            /window\.location\.assign\s*\(\s*["'](.*?)["']\s*\)/,
-                            /top\.location\s*=\s*["'](.*?)["']/,
-                            /top\.location\.replace\s*\(\s*["'](.*?)["']\s*\)/,
-                        ];
-                        for (const match of matches) {
-                            const redirectUrl = text.match(match);
-
-                            if (redirectUrl && redirectUrl[1] && typeof redirectUrl[1] === "string" && redirectUrl[1].startsWith("http")) {
-                                console.log("Redirect URL found: " + redirectUrl[1]);
-                                const redirectedUrl = redirectUrl[1];
-                                headers['Referer'] = redirectedUrl;
-                                headers['Host'] = redirectedUrl.match(/https?:\/\/([^\/]+)/)[1];
-                                text = await soraFetch(redirectedUrl, {
-                                    headers,
-                                }).then((res) => res.text());
-                                break;
-                            }
-                        }
-                    }
-
-                    let streamData = null;
-                    try {
-                        streamData = voeExtractor(text);
-                    } catch (error) {
-                        console.log("VOE extraction error: " + error);
-                        return "";
-                    }
-
-                    const streamUrl = streamData;
-
-                    if (streamUrl) {
-                        console.log("Voe Stream URL: " + streamUrl);
-
-                        streams.push({
-                            title: playerLink.type + " - " + "Voe",
-                            streamUrl,
-                            headers: {
-                                Referer: "https://crystaltreatmenteast.com/",
-                                Origin: "https://crystaltreatmenteast.com",
-                            }
-                        });
-                    }
-                }
-            }
-        } else {
-            const response = await soraFetch(`https://frembed.buzz/api/series?id=${showId}&sa=${seasonNumber}&epi=${episodeNumber}&idType=tmdb`, {
-                headers: {
-                    "Referer": "https://frembed.buzz/",
-                    "Origin": "https://frembed.buzz"
-                }
-            });
-            const data = await response.json();
-    
-            const links = Object.entries(data)
-                .filter(([key, value]) =>
-                    typeof value === "string" &&
-                    value.startsWith("http") &&
-                    key.startsWith("link")
-                )
-                .map(([key, value]) => ({
-                    type: key.includes("vostfr")
-                    ? "VOSTFR"
-                    : key.includes("vo")
-                    ? "VO"
-                    : "VF",
-                    name: key,
-                    url: value
-                }));
-
-            console.log("Links: " + JSON.stringify(links));
-
-            for (const playerLink of links) {
-                console.log(JSON.stringify(playerLink));
-                console.log(playerLink.url);
-    
-                if (playerLink.name === "link7" || playerLink.name === "link7vostfr" || playerLink.name === "link4" || playerLink.name === "link4vostfr" || playerLink.name === "link7vo" || playerLink.name === "link4vo") {
-                    console.log(playerLink.url);
-                    const res = await soraFetch(playerLink.url, {
-                        headers: {
-                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0",
-                            "Referer": playerLink.url,
-                        }
-                    });
-                    const text = await res.text();
-
-                    const match = text.match(/sources:\s*\[\s*"([^"]+)"\s*\]/);
-
-                    const streamUrl = match ? match[1] : null;
-
-                    if (streamUrl) {
-                        console.log(streamUrl);
-    
-                        streams.push({
-                            title: playerLink.type + " - " + "Uqload",
-                            streamUrl,
-                            headers: {
-                                Referer: "https://uqload.bz/",
-                            }
-                        });
-                    }
-                } else if (playerLink.name === "link3" || playerLink.name === "link3vostfr") {
-                    let headers = {
-                        "User-Agent": uas[(url.length) % uas.length], // use a different user agent based on the url and provider
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
-                        "Referer": url,
-                        "Connection": "keep-alive",
-                        "x-Requested-With": "XMLHttpRequest",
-                    };
-
-                    console.log(playerLink.url);
-                    const res = await soraFetch(playerLink.url, {
-                        headers
-                    });
-                    let text = await res.text();
-
-                    const title = text.match(/<title>(.*?)<\/title>/);
-                    if (title && title[1].toLowerCase().includes("redirect")) {
-                        const matches = [
-                            /<meta http-equiv="refresh" content="0;url=(.*?)"/,
-                            /window\.location\.href\s*=\s*["'](.*?)["']/,
-                            /window\.location\.replace\s*\(\s*["'](.*?)["']\s*\)/,
-                            /window\.location\s*=\s*["'](.*?)["']/,
-                            /window\.location\.assign\s*\(\s*["'](.*?)["']\s*\)/,
-                            /top\.location\s*=\s*["'](.*?)["']/,
-                            /top\.location\.replace\s*\(\s*["'](.*?)["']\s*\)/,
-                        ];
-                        for (const match of matches) {
-                            const redirectUrl = text.match(match);
-
-                            if (redirectUrl && redirectUrl[1] && typeof redirectUrl[1] === "string" && redirectUrl[1].startsWith("http")) {
-                                console.log("Redirect URL found: " + redirectUrl[1]);
-                                const redirectedUrl = redirectUrl[1];
-                                headers['Referer'] = redirectedUrl;
-                                headers['Host'] = redirectedUrl.match(/https?:\/\/([^\/]+)/)[1];
-                                text = await soraFetch(redirectedUrl, {
-                                    headers,
-                                }).then((res) => res.text());
-                                break;
-                            }
-                        }
-                    }
-
-                    let streamData = null;
-                    try {
-                        streamData = voeExtractor(text);
-                    } catch (error) {
-                        console.log("VOE extraction error: " + error);
-                        return "";
-                    }
-
-                    const streamUrl = streamData;
-
-                    if (streamUrl) {
-                        console.log("Voe Stream URL: " + streamUrl);
-
-                        streams.push({
-                            title: playerLink.type + " - " + "Voe",
-                            streamUrl,
-                            headers: {
-                                Referer: "https://crystaltreatmenteast.com/",
-                                Origin: "https://crystaltreatmenteast.com",
-                            }
-                        });
-                    }
-                }
-            }
-        }
-
-        if (episodeNumber === "movie") {
-            const response = await soraFetch(`https://api.movix.club/api/fstream/movie/${showId}`, {
-                headers: {
-                    "Referer": "https://movix.blog/"
-                }
-            });
-            const data = await response.json();
-    
-            console.log(JSON.stringify(data));
-            console.log(JSON.stringify(data.players));
-    
-            const playerLinks = data.players;
-            const playerVFs = playerLinks?.VF || [];
-            const playerVFQs = playerLinks?.VFQ || [];
-            const playerVFFs = playerLinks?.VFF || [];
-            const playerVOSTFRs = playerLinks?.VOSTFR || [];
-    
-            console.log(JSON.stringify(playerLinks));
-    
-            console.log(JSON.stringify(playerVFs));
-            console.log(JSON.stringify(playerVFQs));
-            console.log(JSON.stringify(playerVFFs));
-            console.log(JSON.stringify(playerVOSTFRs));
-    
-            let allPlayers = [];
-
-            if (!playerVFs.length && !playerVFQs.length && !playerVFFs.length && !playerVOSTFRs.length) {
-                console.log("No player links found.");
-            }
-
-            if (playerVFs.length) {
-                allPlayers.push({
-                    name: "VF",
-                    players: playerVFs
-                });
-            }
-
-            if (playerVFQs.length) {
-                allPlayers.push({
-                    name: "VFQ",
-                    players: playerVFQs
-                });
-            }
-
-            if (playerVFFs.length) {
-                allPlayers.push({
-                    name: "VFF",
-                    players: playerVFFs
-                });
-            }
-
-            if (playerVOSTFRs.length) {
-                allPlayers.push({
-                    name: "VOSTFR",
-                    players: playerVOSTFRs
-                });
-            }
-
-            for (const players of allPlayers) {
-                for (const playerLink of players.players) {
-                    console.log(JSON.stringify(playerLink));
-                    console.log(playerLink.url);
-        
-                    if (playerLink.url.includes("vidzy")) {
-                        console.log(playerLink.url);
-                        const res = await soraFetch(playerLink.url);
-                        const text = await res.text();
-        
-                        const packedScriptMatch = text.match(/(eval\(function\(p,a,c,k,e,d[\s\S]*?)<\/script>/);
-                        if (!packedScriptMatch) {
-                            continue;
-                        }
-                        const packedScript = packedScriptMatch[1];
-                        console.log("Packed script found.");
-                        const unpackedScript = unpack(packedScript);
-                        console.log("Unpacked script:", unpackedScript);
-                        const regex = /sources\s*:\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/;
-        
-                        const match2 = unpackedScript.match(regex);
-                        if (!match2) {
-                            continue;
-                        }
-                        const streamUrl = match2 ? match2[1] : null;
-        
-                        console.log(streamUrl);
-        
-                        if (streamUrl) {
-                            streams.push({
-                                title: players.name + " - " + playerLink.quality + " - " + playerLink.player.toUpperCase(),
-                                streamUrl,
-                                headers: {
-                                    Referer: "https://vidzy.org/",
-                                    Origin: "https://vidzy.org",
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-        } else {
-            const response = await soraFetch(`https://api.movix.club/api/fstream/tv/${showId}/season/${seasonNumber}`, {
-                headers: {
-                    "Referer": "https://movix.blog/"
-                }
-            });
-            const data = await response.json();
-    
-            console.log(JSON.stringify(data));
-            console.log(JSON.stringify(data?.episodes));
-    
-            const episode = data?.episodes?.[episodeNumber];
-            const playerLinks = episode.languages;
-
-            const playerVFs = playerLinks?.VF || [];
-            const playerVFQs = playerLinks?.VFQ || [];
-            const playerVFFs = playerLinks?.VFF || [];
-            const playerVOSTFRs = playerLinks?.VOSTFR || [];
-    
-            console.log(JSON.stringify(playerLinks));
-    
-            console.log(JSON.stringify(playerVFs));
-            console.log(JSON.stringify(playerVFQs));
-            console.log(JSON.stringify(playerVFFs));
-            console.log(JSON.stringify(playerVOSTFRs));
-
-            let allPlayers = [];
-
-            if (!playerVFs.length && !playerVFQs.length && !playerVFFs.length && !playerVOSTFRs.length) {
-                console.log("No player links found.");
-            }
-
-            if (playerVFs.length) {
-                allPlayers.push({
-                    name: "VF",
-                    players: playerVFs
-                });
-            }
-
-            if (playerVFQs.length) {
-                allPlayers.push({
-                    name: "VFQ",
-                    players: playerVFQs
-                });
-            }
-
-            if (playerVFFs.length) {
-                allPlayers.push({
-                    name: "VFF",
-                    players: playerVFFs
-                });
-            }
-
-            if (playerVOSTFRs.length) {
-                allPlayers.push({
-                    name: "VOSTFR",
-                    players: playerVOSTFRs
-                });
-            }
-
-            console.log("All Players: " + JSON.stringify(allPlayers));
-
-            for (const players of allPlayers) {
-                for (const playerLink of players.players) {
-                    console.log(JSON.stringify(playerLink));
-                    console.log(playerLink.url);
-        
-                    if (playerLink.player.includes("Vidzy")) {
-                        console.log(playerLink.url);
-                        const res = await soraFetch(playerLink.url);
-                        const text = await res.text();
-        
-                        const packedScriptMatch = text.match(/(eval\(function\(p,a,c,k,e,d[\s\S]*?)<\/script>/);
-                        if (!packedScriptMatch) {
-                            continue;
-                        }
-                        const packedScript = packedScriptMatch[1];
-                        console.log("Packed script found.");
-                        const unpackedScript = unpack(packedScript);
-                        console.log("Unpacked script:", unpackedScript);
-                        const regex = /sources\s*:\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/;
-        
-                        const match2 = unpackedScript.match(regex);
-                        if (!match2) {
-                            continue;
-                        }
-                        const streamUrl = match2 ? match2[1] : null;
-        
-                        console.log(streamUrl);
-        
-                        if (streamUrl) {
-                            streams.push({
-                                title: players.name + " - " + playerLink.quality + " - " + playerLink.player.toUpperCase(),
-                                streamUrl,
-                                headers: {
-                                    Referer: "https://vidzy.org/",
-                                    Origin: "https://vidzy.org",
-                                }
-                            });
-                        }
-                    } 
-                    // else if (playerLink.player.includes("Voe")) {
-                    //     let headers = {
-                    //         "User-Agent": uas[(url.length) % uas.length], // use a different user agent based on the url and provider
-                    //         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                    //         "Accept-Language": "en-US,en;q=0.5",
-                    //         "Referer": url,
-                    //         "Connection": "keep-alive",
-                    //         "x-Requested-With": "XMLHttpRequest",
-                    //     };
-    
-                    //     console.log(playerLink.url);
-                    //     const res = await soraFetch(playerLink.url, {
-                    //         headers
-                    //     });
-                    //     let text = await res.text();
-    
-                    //     const title = text.match(/<title>(.*?)<\/title>/);
-                    //     if (title && title[1].toLowerCase().includes("redirect")) {
-                    //         const matches = [
-                    //             /<meta http-equiv="refresh" content="0;url=(.*?)"/,
-                    //             /window\.location\.href\s*=\s*["'](.*?)["']/,
-                    //             /window\.location\.replace\s*\(\s*["'](.*?)["']\s*\)/,
-                    //             /window\.location\s*=\s*["'](.*?)["']/,
-                    //             /window\.location\.assign\s*\(\s*["'](.*?)["']\s*\)/,
-                    //             /top\.location\s*=\s*["'](.*?)["']/,
-                    //             /top\.location\.replace\s*\(\s*["'](.*?)["']\s*\)/,
-                    //         ];
-                    //         for (const match of matches) {
-                    //             const redirectUrl = text.match(match);
-    
-                    //             if (redirectUrl && redirectUrl[1] && typeof redirectUrl[1] === "string" && redirectUrl[1].startsWith("http")) {
-                    //                 console.log("Redirect URL found: " + redirectUrl[1]);
-                    //                 const redirectedUrl = redirectUrl[1];
-                    //                 headers['Referer'] = redirectedUrl;
-                    //                 headers['Host'] = redirectedUrl.match(/https?:\/\/([^\/]+)/)[1];
-                    //                 text = await soraFetch(redirectedUrl, {
-                    //                     headers,
-                    //                 }).then((res) => res.text());
-                    //                 break;
-                    //             }
-                    //         }
-                    //     }
-    
-                    //     let streamData = null;
-                    //     try {
-                    //         streamData = voeExtractor(text);
-                    //     } catch (error) {
-                    //         console.log("VOE extraction error: " + error);
-                    //         return "";
-                    //     }
-    
-                    //     const streamUrl = streamData;
-    
-                    //     if (streamUrl) {
-                    //         console.log("Voe Stream URL: " + streamUrl);
-    
-                    //         streams.push({
-                    //             title: playerLink.quality + " - " + playerLink.player,
-                    //             streamUrl,
-                    //             headers: {
-                    //                 Referer: "https://kakaflix.lol/",
-                    //                 Origin: "https://kakaflix.lol",
-                    //             }
-                    //         });
-                    //     }
-                    // }
-                }
-            }
-        }
-
-        const results = {
-            streams,
-            subtitles: ""
-        };
-
-        console.log(JSON.stringify(results));
-        return JSON.stringify(results);
-    } catch (error) {
-        console.log('Fetch error in extractStreamUrl: ' + error);
-
-        const result = {
-            streams: [],
-            subtitles: ""
-        };
-
-        console.log(result);
-        return JSON.stringify(result);
+    // 1. Découpage de l'URL
+    if (url.includes('movie')) {
+        const parts = url.split('/');
+        showId = parts[0];
+        episodeNumber = parts[1];
+    } else {
+        const parts = url.split('/');
+        showId = parts[0];
+        seasonNumber = parts[1];
+        episodeNumber = parts[2];
     }
+
+    const uas = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1",
+        "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Mobile Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Safari/605.1.15"
+    ];
+    const randomUA = uas[url.length % uas.length];
+
+    // ==========================================
+    // BLOC 1 : RECHERCHE SUR FREMBED.BUZZ
+    // ==========================================
+    try {
+        console.log("[Movix] Appel API Frembed...");
+        const frembedUrl = episodeNumber === "movie" 
+            ? `https://frembed.buzz/api/films?id=${showId}&idType=tmdb`
+            : `https://frembed.buzz/api/series?id=${showId}&sa=${seasonNumber}&epi=${episodeNumber}&idType=tmdb`;
+
+        const resFrembed = await soraFetch(frembedUrl, {
+            headers: { "Referer": "https://frembed.buzz/", "Origin": "https://frembed.buzz" }
+        });
+        const textFrembed = await resFrembed.text();
+        
+        let dataFrembed = null;
+        try { 
+            dataFrembed = JSON.parse(textFrembed); 
+        } catch(e) { 
+            console.log("[Movix] Frembed n'a pas renvoyé de JSON valide."); 
+        }
+
+        if (dataFrembed) {
+            const links = Object.entries(dataFrembed)
+                .filter(([key, value]) => typeof value === "string" && value.startsWith("http") && key.startsWith("link"))
+                .map(([key, value]) => ({
+                    type: key.includes("vostfr") ? "VOSTFR" : key.includes("vo") ? "VO" : "VF",
+                    name: key,
+                    url: value
+                }));
+
+            console.log(`[Movix] ${links.length} liens trouvés sur Frembed.`);
+
+            for (const playerLink of links) {
+                try {
+                    if (playerLink.name.includes("link7") || playerLink.name.includes("link4")) {
+                        const res = await soraFetch(playerLink.url, {
+                            headers: { "User-Agent": randomUA, "Referer": playerLink.url }
+                        });
+                        const text = await res.text();
+                        const match = text.match(/sources:\s*\[\s*"([^"]+)"\s*\]/);
+                        if (match && match[1]) {
+                            streams.push({
+                                title: `${playerLink.type} - Uqload (Frembed)`,
+                                streamUrl: match[1],
+                                headers: { Referer: "https://uqload.bz/" }
+                            });
+                        }
+                    } else if (playerLink.name.includes("link3")) {
+                        const res = await soraFetch(playerLink.url, {
+                            headers: { "User-Agent": randomUA, "Referer": playerLink.url }
+                        });
+                        let text = await res.text();
+
+                        // Gestion des redirections pour VOE
+                        const redirectMatch = text.match(/<meta http-equiv="refresh" content="0;url=(.*?)"/);
+                        if (redirectMatch && redirectMatch[1]) {
+                            text = await soraFetch(redirectMatch[1], {
+                                headers: { "User-Agent": randomUA, "Referer": redirectMatch[1] }
+                            }).then(r => r.text());
+                        }
+
+                        const streamUrl = voeExtractor(text);
+                        if (streamUrl) {
+                            streams.push({
+                                title: `${playerLink.type} - Voe (Frembed)`,
+                                streamUrl,
+                                headers: { Referer: "https://crystaltreatmenteast.com/", Origin: "https://crystaltreatmenteast.com" }
+                            });
+                        }
+                    }
+                } catch(err) {
+                    console.log(`[Movix] Erreur extraction lien Frembed ${playerLink.name}: ` + err);
+                }
+            }
+        }
+    } catch (e) {
+        console.log("[Movix] Erreur globale API Frembed: " + e);
+    }
+
+    // ==========================================
+    // BLOC 2 : RECHERCHE SUR LA NOUVELLE API (.BLOG)
+    // ==========================================
+    try {
+        console.log("[Movix] Appel API Movix Blog...");
+        // On a remplacé api.movix.club par api.movix.blog !
+        const movixUrl = episodeNumber === "movie"
+            ? `https://api.movix.blog/api/fstream/movie/${showId}`
+            : `https://api.movix.blog/api/fstream/tv/${showId}/season/${seasonNumber}`;
+
+        const resMovix = await soraFetch(movixUrl, {
+            headers: { 
+                "Referer": "https://movix.blog/",
+                "Accept": "application/json, text/plain, */*",
+                "User-Agent": randomUA
+            }
+        });
+        
+        const textMovix = await resMovix.text();
+        let dataMovix = null;
+        try { 
+            dataMovix = JSON.parse(textMovix); 
+        } catch(e) { 
+            console.log("[Movix] L'API Movix Blog n'a pas renvoyé de JSON valide. Extrait : " + textMovix.substring(0, 80)); 
+        }
+
+        if (dataMovix) {
+            let playerLinks = {};
+            if (episodeNumber === "movie") {
+                playerLinks = dataMovix.players || {};
+            } else {
+                const episodeData = dataMovix?.episodes?.[episodeNumber];
+                playerLinks = episodeData?.languages || {};
+            }
+
+            const categories = ["VF", "VFQ", "VFF", "VOSTFR"];
+            for (const cat of categories) {
+                const links = playerLinks[cat] || [];
+                for (const playerLink of links) {
+                    try {
+                        if (playerLink.url && playerLink.player.toLowerCase().includes("vidzy")) {
+                            const res = await soraFetch(playerLink.url, {
+                                headers: { "User-Agent": randomUA, "Referer": playerLink.url }
+                            });
+                            const text = await res.text();
+                            
+                            const packedMatch = text.match(/(eval\(function\(p,a,c,k,e,d[\s\S]*?)<\/script>/);
+                            if (packedMatch) {
+                                const unpacked = unpack(packedMatch[1]);
+                                const urlMatch = unpacked.match(/sources\s*:\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/);
+                                if (urlMatch && urlMatch[1]) {
+                                    streams.push({
+                                        title: `${cat} - ${playerLink.quality || 'Auto'} - Vidzy`,
+                                        streamUrl: urlMatch[1],
+                                        headers: { Referer: "https://vidzy.org/", Origin: "https://vidzy.org" }
+                                    });
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.log(`[Movix] Erreur extraction lien Movix ${cat}: ` + err);
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.log("[Movix] Erreur globale API Movix Blog: " + e);
+    }
+
+    console.log(`[Movix] Résultat final : ${streams.length} flux trouvés.`);
+    return JSON.stringify({ streams, subtitles: "" });
 }
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
