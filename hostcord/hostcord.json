@@ -1,0 +1,20 @@
+{
+    "sourceName": "hostcord",
+    "iconUrl": "https://nakios.site/NAKIOS-logo.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "French",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://nakios.site/",
+    "searchBaseUrl": "https://api.nakios.site/api/search",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/hostcord/hostcord.js",
+    "type": "anime/shows/movies",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true
+}
