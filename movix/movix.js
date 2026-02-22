@@ -120,130 +120,44 @@ async function extractEpisodes(url) {
     }    
 }
 
-// searchResults("breaking bad");
-
-
-
-
 async function extractStreamUrl(url) {
     let streams = [];
-    let showId = "";
-    let seasonNumber = "";
-    let episodeNumber = "";
+    
+    // On extrait l'ID depuis l'URL de ton module
+    const parts = url.split('/');
+    const showId = parts[0]; 
+    const seasonNumber = parts.length > 2 ? parts[1] : null;
+    const episodeNumber = parts.length > 2 ? parts[2] : parts[1];
+    const isMovie = episodeNumber === "movie";
 
-    // 1. Découpage de l'URL
-    if (url.includes('movie')) {
-        const parts = url.split('/');
-        showId = parts[0];
-        episodeNumber = parts[1];
-    } else {
-        const parts = url.split('/');
-        showId = parts[0];
-        seasonNumber = parts[1];
-        episodeNumber = parts[2];
-    }
+    const randomUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-    const uas = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Mobile/15E148 Safari/604.1",
-        "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Mobile Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Safari/605.1.15"
-    ];
-    const randomUA = uas[url.length % uas.length];
-
-    // ==========================================
-    // BLOC 1 : RECHERCHE SUR FREMBED.BUZZ
-    // ==========================================
     try {
-        console.log("[Movix] Appel API Frembed...");
-        const frembedUrl = episodeNumber === "movie" 
-            ? `https://frembed.buzz/api/films?id=${showId}&idType=tmdb`
-            : `https://frembed.buzz/api/series?id=${showId}&sa=${seasonNumber}&epi=${episodeNumber}&idType=tmdb`;
-
-        const resFrembed = await soraFetch(frembedUrl, {
-            headers: { "Referer": "https://frembed.buzz/", "Origin": "https://frembed.buzz" }
-        });
-        const textFrembed = await resFrembed.text();
+        console.log(`[Movix] Appel de la nouvelle API pour l'ID: ${showId}...`);
         
-        let dataFrembed = null;
-        try { 
-            dataFrembed = JSON.parse(textFrembed); 
-        } catch(e) { 
-            console.log("[Movix] Frembed n'a pas renvoyé de JSON valide."); 
-        }
+        // On récupère d'abord le nom du film/série grâce à TMDB pour l'injecter dans la nouvelle API de Movix
+        const tmdbType = isMovie ? 'movie' : 'tv';
+        const tmdbRes = await soraFetch(`https://api.themoviedb.org/3/${tmdbType}/${showId}?api_key=f3d757824f08ea2cff45eb8f47ca3a1e&language=fr-FR`);
+        const tmdbData = await tmdbRes.json();
+        
+        // Le nom à chercher
+        const titleToSearch = tmdbData.title || tmdbData.name || tmdbData.original_name;
+        const encodedTitle = encodeURIComponent(titleToSearch);
 
-        if (dataFrembed) {
-            const links = Object.entries(dataFrembed)
-                .filter(([key, value]) => typeof value === "string" && value.startsWith("http") && key.startsWith("link"))
-                .map(([key, value]) => ({
-                    type: key.includes("vostfr") ? "VOSTFR" : key.includes("vo") ? "VO" : "VF",
-                    name: key,
-                    url: value
-                }));
+        // LA NOUVELLE URL DE L'API QUE TU AS TROUVÉE !
+        // L'API a l'air de chercher par nom, ou par type "anime/search/..." ou "movie/search/..."
+        // D'après ta capture, c'est /anime/search/TITRE?includeSeasons=true&includeEpisodes=true
+        const typeApi = tmdbData.genres?.some(g => g.name.toLowerCase().includes("animation")) ? "anime" : (isMovie ? "movie" : "serie");
+        const movixUrl = `https://api.movix.blog/${typeApi}/search/${encodedTitle}?includeSeasons=true&includeEpisodes=true`;
 
-            console.log(`[Movix] ${links.length} liens trouvés sur Frembed.`);
+        console.log(`[Movix] Requête vers: ${movixUrl}`);
 
-            for (const playerLink of links) {
-                try {
-                    if (playerLink.name.includes("link7") || playerLink.name.includes("link4")) {
-                        const res = await soraFetch(playerLink.url, {
-                            headers: { "User-Agent": randomUA, "Referer": playerLink.url }
-                        });
-                        const text = await res.text();
-                        const match = text.match(/sources:\s*\[\s*"([^"]+)"\s*\]/);
-                        if (match && match[1]) {
-                            streams.push({
-                                title: `${playerLink.type} - Uqload (Frembed)`,
-                                streamUrl: match[1],
-                                headers: { Referer: "https://uqload.bz/" }
-                            });
-                        }
-                    } else if (playerLink.name.includes("link3")) {
-                        const res = await soraFetch(playerLink.url, {
-                            headers: { "User-Agent": randomUA, "Referer": playerLink.url }
-                        });
-                        let text = await res.text();
-
-                        // Gestion des redirections pour VOE
-                        const redirectMatch = text.match(/<meta http-equiv="refresh" content="0;url=(.*?)"/);
-                        if (redirectMatch && redirectMatch[1]) {
-                            text = await soraFetch(redirectMatch[1], {
-                                headers: { "User-Agent": randomUA, "Referer": redirectMatch[1] }
-                            }).then(r => r.text());
-                        }
-
-                        const streamUrl = voeExtractor(text);
-                        if (streamUrl) {
-                            streams.push({
-                                title: `${playerLink.type} - Voe (Frembed)`,
-                                streamUrl,
-                                headers: { Referer: "https://crystaltreatmenteast.com/", Origin: "https://crystaltreatmenteast.com" }
-                            });
-                        }
-                    }
-                } catch(err) {
-                    console.log(`[Movix] Erreur extraction lien Frembed ${playerLink.name}: ` + err);
-                }
-            }
-        }
-    } catch (e) {
-        console.log("[Movix] Erreur globale API Frembed: " + e);
-    }
-
-    // ==========================================
-    // BLOC 2 : RECHERCHE SUR LA NOUVELLE API (.BLOG)
-    // ==========================================
-    try {
-        console.log("[Movix] Appel API Movix Blog...");
-        // On a remplacé api.movix.club par api.movix.blog !
-        const movixUrl = episodeNumber === "movie"
-            ? `https://api.movix.blog/api/fstream/movie/${showId}`
-            : `https://api.movix.blog/api/fstream/tv/${showId}/season/${seasonNumber}`;
-
+        // On envoie les fameux "Papiers d'identité" pour ne pas avoir le "Not Found" !
         const resMovix = await soraFetch(movixUrl, {
             headers: { 
                 "Referer": "https://movix.blog/",
-                "Accept": "application/json, text/plain, */*",
+                "Origin": "https://movix.blog",
+                "Accept": "application/json",
                 "User-Agent": randomUA
             }
         });
@@ -253,56 +167,61 @@ async function extractStreamUrl(url) {
         try { 
             dataMovix = JSON.parse(textMovix); 
         } catch(e) { 
-            console.log("[Movix] L'API Movix Blog n'a pas renvoyé de JSON valide. Extrait : " + textMovix.substring(0, 80)); 
+            console.log("[Movix] Erreur JSON : " + textMovix.substring(0, 50)); 
+            return JSON.stringify({ streams: [], subtitles: "" });
         }
 
-        if (dataMovix) {
-            let playerLinks = {};
-            if (episodeNumber === "movie") {
-                playerLinks = dataMovix.players || {};
+        // --- NOUVEAU PARSING BASÉ SUR TA CAPTURE D'ÉCRAN ---
+        if (dataMovix && Array.isArray(dataMovix)) {
+            let targetEpisode = null;
+
+            if (isMovie) {
+                // Pour un film, c'est souvent le premier élément
+                targetEpisode = dataMovix[0];
             } else {
-                const episodeData = dataMovix?.episodes?.[episodeNumber];
-                playerLinks = episodeData?.languages || {};
+                // Pour une série, on cherche le bon épisode dans le tableau renvoyé
+                targetEpisode = dataMovix.find(ep => 
+                    ep.index == episodeNumber && 
+                    (ep.season_name === `Saison ${seasonNumber}` || ep.season_index == seasonNumber)
+                );
             }
 
-            const categories = ["VF", "VFQ", "VFF", "VOSTFR"];
-            for (const cat of categories) {
-                const links = playerLinks[cat] || [];
-                for (const playerLink of links) {
-                    try {
-                        if (playerLink.url && playerLink.player.toLowerCase().includes("vidzy")) {
-                            const res = await soraFetch(playerLink.url, {
-                                headers: { "User-Agent": randomUA, "Referer": playerLink.url }
-                            });
-                            const text = await res.text();
-                            
-                            const packedMatch = text.match(/(eval\(function\(p,a,c,k,e,d[\s\S]*?)<\/script>/);
-                            if (packedMatch) {
-                                const unpacked = unpack(packedMatch[1]);
-                                const urlMatch = unpacked.match(/sources\s*:\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/);
-                                if (urlMatch && urlMatch[1]) {
-                                    streams.push({
-                                        title: `${cat} - ${playerLink.quality || 'Auto'} - Vidzy`,
-                                        streamUrl: urlMatch[1],
-                                        headers: { Referer: "https://vidzy.org/", Origin: "https://vidzy.org" }
-                                    });
-                                }
+            if (targetEpisode && targetEpisode.streaming_links) {
+                // On boucle sur ton tableau "streaming_links" (vf, vostfr...)
+                for (const linkGroup of targetEpisode.streaming_links) {
+                    const language = linkGroup.language.toUpperCase(); // VF ou VOSTFR
+                    
+                    // On boucle sur les lecteurs (sibnet, vidmoly, sendvid...)
+                    for (const playerUrl of linkGroup.players) {
+                        let playerName = "Lecteur Inconnu";
+                        if (playerUrl.includes("sibnet")) playerName = "Sibnet";
+                        if (playerUrl.includes("vidmoly")) playerName = "Vidmoly";
+                        if (playerUrl.includes("sendvid")) playerName = "Sendvid";
+                        if (playerUrl.includes("uqload")) playerName = "Uqload";
+                        if (playerUrl.includes("vidzy")) playerName = "Vidzy";
+
+                        streams.push({
+                            title: `${language} - ${playerName}`,
+                            streamUrl: playerUrl,
+                            headers: { 
+                                "Referer": "https://movix.blog/",
+                                "User-Agent": randomUA
                             }
-                        }
-                    } catch (err) {
-                        console.log(`[Movix] Erreur extraction lien Movix ${cat}: ` + err);
+                        });
                     }
                 }
+            } else {
+                console.log("[Movix] Épisode spécifique non trouvé dans le JSON.");
             }
         }
+
     } catch (e) {
-        console.log("[Movix] Erreur globale API Movix Blog: " + e);
+        console.log("[Movix] Erreur API Movix Blog: " + e);
     }
 
     console.log(`[Movix] Résultat final : ${streams.length} flux trouvés.`);
     return JSON.stringify({ streams, subtitles: "" });
 }
-
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
     try {
         return await fetchv2(
