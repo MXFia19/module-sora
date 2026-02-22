@@ -125,10 +125,10 @@ async function extractEpisodes(url) {
     }    
 }
 
-// --- 4. EXTRACTION VIDÉO (Scraping de l'iframe rdmfile) ---
+// --- 4. EXTRACTION VIDÉO (Extraction JWPlayer) ---
 async function extractStreamUrl(url) {
     try {
-        console.log(`[Hostcord] Extraction de l'iframe : ${url}`);
+        console.log(`[Hostcord] Analyse de l'iframe : ${url}`);
         
         const response = await soraFetch(url, {
             headers: {
@@ -140,42 +140,38 @@ async function extractStreamUrl(url) {
         const html = await response.text();
         let streams = [];
 
-        const fileMatch = html.match(/(?:file|src)\s*:\s*["'](https:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
-        if (fileMatch) {
+        // On cherche précisément la ligne file: "/video/...mp4" du lecteur JWPlayer
+        const jwplayerMatch = html.match(/file:\s*["']([^"']+\.mp4)["']/i);
+        
+        if (jwplayerMatch && jwplayerMatch[1]) {
+            let videoPath = jwplayerMatch[1]; // Contient: /video/fc4b91ff/8c624ca...mp4
+            
+            // On reconstruit l'URL absolue en collant le domaine de l'iframe devant
+            let finalUrl = videoPath;
+            if (videoPath.startsWith('/')) {
+                try {
+                    const urlObj = new URL(url); // Récupère https://ptb.rdmfile.eu
+                    finalUrl = urlObj.origin + videoPath;
+                } catch (e) {
+                    finalUrl = `https://ptb.rdmfile.eu${videoPath}`; // Sécurité
+                }
+            }
+            
+            console.log(`[Hostcord] Lien MP4 capturé avec succès : ${finalUrl}`);
+            
             streams.push({
                 title: "Serveur RDM (Direct)",
-                streamUrl: fileMatch[1],
-                headers: { "Referer": url }
+                streamUrl: finalUrl,
+                headers: { 
+                    "Referer": url, // RDMFile a besoin de savoir qu'on vient de son iframe
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+                }
             });
-        }
-        
-        if (streams.length === 0) {
-            const sourceMatch = html.match(/<source[^>]+src=["']([^"']+)["']/i);
-            if (sourceMatch) {
-                streams.push({
-                    title: "Serveur RDM (HTML5)",
-                    streamUrl: sourceMatch[1],
-                    headers: { "Referer": url }
-                });
-            }
-        }
-
-        if (streams.length === 0) {
-            const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-            if (iframeMatch) {
-                streams.push({
-                    title: "Lecteur Externe",
-                    streamUrl: iframeMatch[1],
-                    headers: { "Referer": url }
-                });
-            }
-        }
-
-        if (streams.length === 0) {
-            console.log("[Hostcord] Flux non trouvé dans l'iframe, envoi du lien brut.");
+        } else {
+            console.log("[Hostcord] Lien introuvable dans JWPlayer. Basculement WebView.");
             streams.push({
-                title: "Lecteur Web",
-                streamUrl: url,
+                title: "Serveur RDM (Lecteur Web)",
+                streamUrl: `webview://${url}`,
                 headers: { "Referer": `${BASE_URL}/` }
             });
         }
@@ -187,7 +183,6 @@ async function extractStreamUrl(url) {
         return JSON.stringify({ streams: [], subtitles: "" });
     }
 }
-
 // --- FONCTION UTILITAIRE SORA ---
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
     try {
