@@ -190,6 +190,7 @@ async function extractStreamUrl(url) {
         let seasonNumber = "";
         let episodeNumber = "";
 
+        // On découpe l'URL interne
         if (url.includes('movie')) {
             const parts = url.split('/');
             showId = parts[0];
@@ -201,12 +202,10 @@ async function extractStreamUrl(url) {
             episodeNumber = parts[2];
         }
 
-        let apiUrl = "";
-        if (episodeNumber === "movie") {
-            apiUrl = `https://api.${domain}/api/v1/stream/${showId}`;
-        } else {
-            apiUrl = `https://api.${domain}/api/v1/stream/${showId}/episode?season=${seasonNumber}&episode=${episodeNumber}`;
-        }
+        // On appelle l'API qui GÉNÈRE LE JETON CRYPTÉ
+        let apiUrl = episodeNumber === "movie" 
+            ? `https://api.${domain}/api/v1/stream/${showId}`
+            : `https://api.${domain}/api/v1/stream/${showId}/episode?season=${seasonNumber}&episode=${episodeNumber}`;
 
         const response = await soraFetch(apiUrl, {
             headers: {
@@ -217,16 +216,15 @@ async function extractStreamUrl(url) {
         const json = await response.json();
         const sources = json?.data?.items?.sources || [];
 
+        // On récupère le lien officiel avec le fameux ?token=...
         for (const source of sources) {
             if (source.stream_url) {
-                // Création des en-têtes en béton armé pour le lecteur vidéo
                 streams.push({
-                    title: source.source_name || "Serveur Purstream",
+                    title: source.source_name || "Purstream (Ouvrir avec VLC)",
                     streamUrl: source.stream_url,
                     headers: {
                         "Origin": `https://${domain}`,
                         "Referer": `https://${domain}/`,
-                        "Accept": "*/*",
                         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
                     }
                 });
@@ -240,7 +238,6 @@ async function extractStreamUrl(url) {
         return JSON.stringify({ streams: [], subtitles: "" });
     }
 }
-
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
     try {
         if (typeof fetchv2 !== 'undefined') {
