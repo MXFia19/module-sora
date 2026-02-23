@@ -13,7 +13,7 @@
     "baseUrl": "https://nakios.site/",
     "searchBaseUrl": "https://api.nakios.site/api/search",
     "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/hostcord/hostcord.js",
-    "type": "anime/shows/movies",
+    "type": "shows/movies",
     "downloadSupport": true,
     "asyncJS": true,
     "softsub": true
