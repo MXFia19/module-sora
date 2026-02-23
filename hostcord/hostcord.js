@@ -74,42 +74,49 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES ---
+// --- 3. ÉPISODES (Nettoyé pour éviter les erreurs JSON) ---
 async function extractEpisodes(url) {
     try {
         const json = await getInertiaData(url);
         
-        // Film
+        // Cas 1 : C'est un Film
         if (json.props.movie && json.props.movie.video_url) {
             return JSON.stringify([{
                 href: json.props.movie.video_url, 
                 number: 1,
+                season: 1,
                 title: "Film Complet"
             }]);
         }
         
-        // Série (logique dynamique)
+        // Cas 2 : C'est une Série
         if (json.props.serie || json.props.show) {
             const show = json.props.serie || json.props.show;
             let allEpisodes = [];
             
             if (show.episodes && Array.isArray(show.episodes)) {
-                show.episodes.forEach(ep => {
-                    allEpisodes.push({
-                        href: ep.video_url || ep.url,
-                        number: ep.episode_number || ep.id,
-                        title: ep.title || `Épisode ${ep.episode_number}`
-                    });
+                show.episodes.forEach((ep, index) => {
+                    if (ep.video_url || ep.url) {
+                        allEpisodes.push({
+                            href: ep.video_url || ep.url,
+                            number: ep.episode_number || (index + 1),
+                            season: ep.season_number || 1,
+                            title: ep.title || `Épisode ${ep.episode_number || (index + 1)}`
+                        });
+                    }
                 });
             } else if (show.seasons && Array.isArray(show.seasons)) {
                 show.seasons.forEach(season => {
-                    if(season.episodes) {
-                        season.episodes.forEach(ep => {
-                            allEpisodes.push({
-                                href: ep.video_url,
-                                number: ep.episode_number,
-                                title: `S${season.season_number} E${ep.episode_number}`
-                            });
+                    if(season.episodes && Array.isArray(season.episodes)) {
+                        season.episodes.forEach((ep, index) => {
+                            if (ep.video_url || ep.url) {
+                                allEpisodes.push({
+                                    href: ep.video_url || ep.url,
+                                    number: ep.episode_number || (index + 1),
+                                    season: season.season_number || 1,
+                                    title: ep.title || `Épisode ${ep.episode_number || (index + 1)}`
+                                });
+                            }
                         });
                     }
                 });
@@ -125,7 +132,7 @@ async function extractEpisodes(url) {
     }    
 }
 
-// --- 4. EXTRACTION VIDÉO (Extraction JWPlayer) ---
+// --- 4. EXTRACTION VIDÉO (Avec Contournement de Redirection Apple) ---
 async function extractStreamUrl(url) {
     try {
         console.log(`[Hostcord] Analyse de l'iframe : ${url}`);
@@ -140,31 +147,36 @@ async function extractStreamUrl(url) {
         const html = await response.text();
         let streams = [];
 
-        // On cherche précisément la ligne file: "/video/...mp4" du lecteur JWPlayer
+        // On cherche le lien MP4
         const jwplayerMatch = html.match(/file:\s*["']([^"']+\.mp4)["']/i);
         
         if (jwplayerMatch && jwplayerMatch[1]) {
-            let videoPath = jwplayerMatch[1]; // Contient: /video/fc4b91ff/8c624ca...mp4
+            let videoPath = jwplayerMatch[1];
+            let finalUrl = videoPath.startsWith('/') ? `https://ptb.rdmfile.eu${videoPath}` : videoPath;
             
-            // On reconstruit l'URL absolue en collant le domaine de l'iframe devant
-            let finalUrl = videoPath;
-            if (videoPath.startsWith('/')) {
-                try {
-                    const urlObj = new URL(url); // Récupère https://ptb.rdmfile.eu
-                    finalUrl = urlObj.origin + videoPath;
-                } catch (e) {
-                    finalUrl = `https://ptb.rdmfile.eu${videoPath}`; // Sécurité
+            console.log(`[Hostcord] Lien MP4 brut trouvé : ${finalUrl}`);
+
+            // ASTUCE ANTI-CRASH APPLE : On "chauffe" le lien pour obtenir l'URL finale directement
+            try {
+                const redirectCheck = await soraFetch(finalUrl, {
+                    method: 'GET',
+                    headers: { "Referer": url }
+                });
+                // Si la requête a été redirigée, on prend l'URL de destination finale
+                if (redirectCheck && redirectCheck.url) {
+                    finalUrl = redirectCheck.url; 
+                    console.log(`[Hostcord] Lien final après redirection : ${finalUrl}`);
                 }
+            } catch(e) {
+                console.log("[Hostcord] Échec de la résolution de redirection, on garde le lien brut.");
             }
-            
-            console.log(`[Hostcord] Lien MP4 capturé avec succès : ${finalUrl}`);
             
             streams.push({
                 title: "Serveur RDM (Direct)",
                 streamUrl: finalUrl,
                 headers: { 
-                    "Referer": url, // RDMFile a besoin de savoir qu'on vient de son iframe
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+                    "Referer": url 
+                    // On retire volontairement le faux User-Agent pour laisser l'AVPlayer d'Apple faire son travail naturellement
                 }
             });
         } else {
