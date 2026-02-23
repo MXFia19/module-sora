@@ -1,6 +1,6 @@
 {
     "sourceName": "hostcord",
-    "iconUrl": "https://nakios.site/NAKIOS-logo.png",
+    "iconUrl": "https://hostcord.xyz/favicon.ico?v=1771813199",
     "author": {
         "name": "MXFia19",
         "icon": "",
@@ -10,7 +10,7 @@
     "language": "French",
     "streamType": "HLS",
     "quality": "1080p",
-    "baseUrl": "https://nakios.site/",
+    "baseUrl": "https://hostcord.xyz",
     "searchBaseUrl": "https://api.nakios.site/api/search",
     "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/hostcord/hostcord.js",
     "type": "shows/movies",
