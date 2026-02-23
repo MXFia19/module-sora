@@ -11,7 +11,7 @@
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://hostcord.xyz",
-    "searchBaseUrl": "https://api.nakios.site/api/search",
+    "searchBaseUrl": "https://hostcord.xyz/search/suggest?q=",
     "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/hostcord/hostcord.js",
     "type": "shows/movies",
     "downloadSupport": true,
