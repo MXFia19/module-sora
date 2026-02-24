@@ -128,132 +128,91 @@ async function extractEpisodes(url) {
 // extractEpisodes("https://movix.blog/tv/1396").then(console.log);
 // extractStreamUrl("https://movix.blog/watch/tv/1396/s/1/e/1").then(console.log);
 
+// --- 4. EXTRACTION VIDÉO (Via API Naga) ---
 async function extractStreamUrl(url) {
     try {
         let streams = [];
-
         let showId = "";
         let seasonNumber = "";
         let episodeNumber = "";
+        let type = "movie";
 
+        // 1. Découpage de l'URL interne de Sora
         if (url.includes('movie')) {
-            const [showIdTemp, episodeNumberTemp] = url.split('/');
-
-            showId = showIdTemp;
-            episodeNumber = episodeNumberTemp;
+            const parts = url.split('/');
+            showId = parts[0];
+            type = "movie";
         } else {
-            const [showIdTemp, seasonNumberTemp, episodeNumberTemp] = url.split('/');
-
-            showId = showIdTemp;
-            seasonNumber = seasonNumberTemp;
-            episodeNumber = episodeNumberTemp;
+            const parts = url.split('/');
+            showId = parts[0];
+            seasonNumber = parts[1];
+            episodeNumber = parts[2];
+            type = "tv";
         }
 
-        if (episodeNumber === "movie") {
-            const response = await soraFetch(`https://nakios.site/api/purstream/${showId}`, {
-                headers: {
-                    "Origin": "https://apis.wavewatch.xyz"
-                }
-            });
-            const data = await response.json();
-    
-            for (const source of data.sources) {
-                streams.push({
-                    title: "PurStream - " + source.quality,
-                    streamUrl: source.url,
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15"
-                    }
-                });
-            }
-        } else {
-            const response = await soraFetch(`https://nakios.site/api/purstream/tv/${showId}?season=${seasonNumber}&episode=${episodeNumber}&idType=tmdb`, {
-                headers: {
-                    "Origin": "https://apis.wavewatch.xyz"
-                }
-            });
-            const data = await response.json();
-
-            for (const source of data.sources) {
-                streams.push({
-                    title: "PurStream - " + source.name,
-                    streamUrl: source.url,
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15"
-                    }
-                });
-            }
+        // 2. Construction de l'URL de l'API Naga
+        let apiUrl = `https://apis.wavewatch.xyz/naga.php?type=${type}&id=${showId}`;
+        if (type === "tv") {
+            // Sécurité : on envoie les deux formats habituels (s/e et season/episode)
+            apiUrl += `&s=${seasonNumber}&e=${episodeNumber}&season=${seasonNumber}&episode=${episodeNumber}`;
         }
 
-        if (episodeNumber === "movie") {
-            const response = await soraFetch(`https://apis.wavewatch.xyz/darkapi.php?tmdbId=${showId}`, {
-                headers: {
-                    "Referer": "https://wwembed.wavewatch.xyz/",
+        console.log(`[Wavewatch] Appel API Naga : ${apiUrl}`);
+
+        // 3. Récupération de la page HTML
+        const response = await soraFetch(apiUrl, {
+            headers: {
+                "Referer": "https://beta.wavewatch.xyz/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        });
+        const html = await response.text();
+
+        // 4. Extraction du tableau JSON caché (var S = [...])
+        const match = html.match(/var\s+S\s*=\s*(\[.*?\]);/s);
+        
+        if (match && match[1]) {
+            const sources = JSON.parse(match[1]);
+
+            for (const src of sources) {
+                let finalUrl = src.url;
+
+                // 5. Décodage des liens cachés derrière "?proxy=" (Base64)
+                if (finalUrl.startsWith('?proxy=')) {
+                    let base64String = finalUrl.replace('?proxy=', '');
+                    try {
+                        // "atob" décode le Base64 en texte clair
+                        finalUrl = atob(base64String); 
+                    } catch(e) {
+                        console.log("[Wavewatch] Erreur décodage Base64 : " + e);
+                        continue; // On ignore ce lien s'il est corrompu
+                    }
                 }
-            });
-            const html = await response.text();
-    
-            const match = html.match(/\{\s*"label"\s*:\s*"([^"]+)"\s*,\s*"url"\s*:\s*"([^"]+)"\s*\}/);
 
-            if (match) {
-                const label = match[1];
-                const streamUrl = match[2];
-
-                console.log({ label, streamUrl });
-
-                streams.push({
-                    title: "DarkApi - " + label,
-                    streamUrl,
-                    headers: {}
-                });
+                // 6. Ajout à la liste si c'est un lien valide
+                if (finalUrl && finalUrl.startsWith('http')) {
+                    streams.push({
+                        title: src.name || "Serveur Wavewatch",
+                        streamUrl: finalUrl,
+                        headers: {
+                            "Referer": "https://apis.wavewatch.xyz/",
+                            "Origin": "https://apis.wavewatch.xyz",
+                            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+                        }
+                    });
+                }
             }
         } else {
-            const response = await soraFetch(`https://apis.wavewatch.xyz/darkapi.php?tmdbId=${showId}&season=${seasonNumber}&episode=${episodeNumber}`, {
-                headers: {
-                    "Referer": "https://wwembed.wavewatch.xyz/",
-                }
-            });
-            const html = await response.text();
-
-            const match = html.match(/\{\s*"label"\s*:\s*"([^"]+)"\s*,\s*"url"\s*:\s*"([^"]+)"\s*\}/);
-
-            if (match) {
-                const label = match[1];
-                const streamUrl = match[2];
-
-                console.log({ label, streamUrl });
-
-                streams.push({
-                    title: "DarkApi - " + label,
-                    streamUrl,
-                    headers: {
-                        "Referer": "https://apis.wavewatch.xyz/",
-                        "Origin": "https://apis.wavewatch.xyz"
-                    }
-                });
-            }
+            console.log("[Wavewatch] Impossible de trouver 'var S' dans le code source de Naga.");
         }
 
-        const results = {
-            streams,
-            subtitles: ""
-        };
+        return JSON.stringify({ streams, subtitles: "" });
 
-        console.log(JSON.stringify(results));
-        return JSON.stringify(results);
     } catch (error) {
-        console.log('Fetch error in extractStreamUrl: ' + error);
-
-        const result = {
-            streams: [],
-            subtitles: ""
-        };
-
-        console.log(result);
-        return JSON.stringify(result);
+        console.log('[Wavewatch] Erreur critique extractStreamUrl: ' + error);
+        return JSON.stringify({ streams: [], subtitles: "" });
     }
 }
-
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
     try {
         return await fetchv2(
