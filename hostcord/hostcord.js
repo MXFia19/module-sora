@@ -132,7 +132,7 @@ async function extractEpisodes(url) {
     }    
 }
 
-// --- 4. EXTRACTION VIDÉO (Correction du Loading Infini) ---
+// --- 4. EXTRACTION VIDÉO (Instantanée, sans ping) ---
 async function extractStreamUrl(url) {
     try {
         console.log(`[Hostcord] Analyse de l'iframe : ${url}`);
@@ -147,44 +147,24 @@ async function extractStreamUrl(url) {
         const html = await response.text();
         let streams = [];
 
-        // On cherche le lien MP4
-        const jwplayerMatch = html.match(/file:\s*["']([^"']+\.mp4)["']/i);
+        // On cherche le lien vidéo (MP4 ou M3U8)
+        const jwplayerMatch = html.match(/file:\s*["']([^"']+\.(?:mp4|m3u8))["']/i);
         
         if (jwplayerMatch && jwplayerMatch[1]) {
             let videoPath = jwplayerMatch[1];
             let finalUrl = videoPath.startsWith('/') ? `https://ptb.rdmfile.eu${videoPath}` : videoPath;
             
-            console.log(`[Hostcord] Lien MP4 brut trouvé : ${finalUrl}`);
-
-            // L'ASTUCE EST ICI : On ajoute "Range: bytes=0-0"
-            // Cela oblige le serveur à faire la redirection SANS télécharger le film entier !
-            try {
-                const redirectCheck = await soraFetch(finalUrl, {
-                    method: 'GET',
-                    headers: { 
-                        "Referer": url,
-                        "Range": "bytes=0-0" 
-                    }
-                });
-                
-                // On récupère la vraie URL de stockage à la fin de la redirection
-                if (redirectCheck && redirectCheck.url) {
-                    finalUrl = redirectCheck.url; 
-                    console.log(`[Hostcord] Lien final après redirection : ${finalUrl}`);
-                }
-            } catch(e) {
-                console.log("[Hostcord] Échec de la résolution de redirection, on garde le lien brut.");
-            }
+            console.log(`[Hostcord] Lien Vidéo trouvé : ${finalUrl}`);
             
             streams.push({
                 title: "Serveur RDM (Direct)",
                 streamUrl: finalUrl,
                 headers: { 
-                    "Referer": url 
+                    "Referer": "https://ptb.rdmfile.eu/" 
                 }
             });
         } else {
-            console.log("[Hostcord] Lien introuvable dans JWPlayer. Basculement WebView.");
+            console.log("[Hostcord] Lien introuvable. Basculement sur Lecteur Web.");
             streams.push({
                 title: "Serveur RDM (Lecteur Web)",
                 streamUrl: `webview://${url}`,
