@@ -132,7 +132,7 @@ async function extractEpisodes(url) {
     }    
 }
 
-// --- 4. EXTRACTION VIDÉO (Avec Contournement de Redirection Apple) ---
+// --- 4. EXTRACTION VIDÉO (Correction du Loading Infini) ---
 async function extractStreamUrl(url) {
     try {
         console.log(`[Hostcord] Analyse de l'iframe : ${url}`);
@@ -156,13 +156,18 @@ async function extractStreamUrl(url) {
             
             console.log(`[Hostcord] Lien MP4 brut trouvé : ${finalUrl}`);
 
-            // ASTUCE ANTI-CRASH APPLE : On "chauffe" le lien pour obtenir l'URL finale directement
+            // L'ASTUCE EST ICI : On ajoute "Range: bytes=0-0"
+            // Cela oblige le serveur à faire la redirection SANS télécharger le film entier !
             try {
                 const redirectCheck = await soraFetch(finalUrl, {
                     method: 'GET',
-                    headers: { "Referer": url }
+                    headers: { 
+                        "Referer": url,
+                        "Range": "bytes=0-0" 
+                    }
                 });
-                // Si la requête a été redirigée, on prend l'URL de destination finale
+                
+                // On récupère la vraie URL de stockage à la fin de la redirection
                 if (redirectCheck && redirectCheck.url) {
                     finalUrl = redirectCheck.url; 
                     console.log(`[Hostcord] Lien final après redirection : ${finalUrl}`);
@@ -176,7 +181,6 @@ async function extractStreamUrl(url) {
                 streamUrl: finalUrl,
                 headers: { 
                     "Referer": url 
-                    // On retire volontairement le faux User-Agent pour laisser l'AVPlayer d'Apple faire son travail naturellement
                 }
             });
         } else {
