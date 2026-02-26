@@ -111,6 +111,8 @@ async function extractEpisodes(url) {
         return JSON.stringify([]);
     }
 }
+
+// --- 4. VIDÉO ---
 async function extractStreamUrl(url) {
     try {
         let streams = [];
@@ -120,49 +122,42 @@ async function extractStreamUrl(url) {
         let pagesToFetch = [url];
         let lecteursTrouves = [];
 
+        // Récupération des redirections serveurs (Menu déroulant)
         const redirectRegex = /data-redirect=["']([^"']+)["']/gi;
         let match;
-        
         while ((match = redirectRegex.exec(html)) !== null) {
             let redirectUrl = match[1];
-            if (redirectUrl.startsWith('/')) {
-                redirectUrl = 'https://v6.voiranime.com' + redirectUrl;
-            }
-            if (!pagesToFetch.includes(redirectUrl)) {
-                pagesToFetch.push(redirectUrl);
-            }
+            if (redirectUrl.startsWith('/')) redirectUrl = BASE_URL + redirectUrl;
+            if (!pagesToFetch.includes(redirectUrl)) pagesToFetch.push(redirectUrl);
         }
-
-        console.log(`[VoirAnime] Trouvé ${pagesToFetch.length} pages de lecteurs à fouiller...`);
 
         const fetchPromises = pagesToFetch.map(pageUrl => 
             fetchv2(pageUrl).then(res => res.text()).catch(() => "")
         );
         const pagesHtml = await Promise.all(fetchPromises);
 
+        const knownHosts = ['vidmoly', 'sibnet', 'sendvid', 'uqload', 'voe', 'streamtape', 'dood', 'filemoon', 'mixdrop'];
+
         pagesHtml.forEach(pageSource => {
-            const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
+            const iframeRegex = /(?:src|data-video|data-src)=["']([^"']+)["']/gi;
             let iframeMatch;
             while ((iframeMatch = iframeRegex.exec(pageSource)) !== null) {
                 let iframeUrl = iframeMatch[1];
                 if (iframeUrl.startsWith('//')) iframeUrl = 'https:' + iframeUrl;
-                if (iframeUrl.startsWith('http') && !lecteursTrouves.includes(iframeUrl)) {
-                    lecteursTrouves.push(iframeUrl);
+                if (iframeUrl.startsWith('http') && knownHosts.some(h => iframeUrl.includes(h))) {
+                    if (!lecteursTrouves.includes(iframeUrl)) lecteursTrouves.push(iframeUrl);
                 }
             }
         });
 
-        if (lecteursTrouves.length === 0) {
-            return JSON.stringify([]);
-        }
+        // On limite à 10 pour éviter les liens d'autres épisodes
+        let liensPropres = lecteursTrouves.slice(0, 10);
 
-        // --- TES LOGS DE DEBUG ---
-        console.log(`[VoirAnime] J'ai trouvé ${lecteursTrouves.length} lecteurs uniques ! Envoi au Global Extractor...`);
-        console.log(`[VoirAnime] Les liens trouvés sont : ${JSON.stringify(lecteursTrouves)}`);
-        // -------------------------
-
+        if (liensPropres.length === 0) return JSON.stringify([]);
+console.log(`[VoirAnime] Super ! J'ai aspiré ${lecteursTrouves.length} iframes uniques.`);
+        console.log(`[VoirAnime] Les voici : ${JSON.stringify(lecteursTrouves)}`);
         let providerTest = {};
-        lecteursTrouves.forEach((lien) => {
+        liensPropres.forEach((lien) => {
             let domain = lien.match(/https?:\/\/(?:www\.)?([^/]+)/i);
             let providerName = domain ? domain[1].split('.')[0] : "inconnu";
             providerTest[lien] = providerName;
@@ -181,9 +176,7 @@ async function extractStreamUrl(url) {
         }
 
         return JSON.stringify(streams);
-
     } catch (err) {
-        console.log('[VoirAnime] Erreur extractStreamUrl: ' + err);
         return JSON.stringify([]);
     }
 }
@@ -220,8 +213,7 @@ async function extractStreamUrlByProvider(url, provider) {
     case "streamtape": return await streamtapeExtractor(url);
     case "mixdrop": return await mixdropExtractor(url);
     case "vidmoly": return await vidmolyExtractor(url);
-    case "video": // Le sous-domaine de Sibnet est video.sibnet.ru
-    case "sibnet": return await sibnetExtractor(url);
+    case "video": case "sibnet": return await sibnetExtractor(url);
     case "uqload": return await uqloadExtractor(url);
     case "voe": return await voeExtractor(url);
     case "upvid": return await upvidExtractor(url);
@@ -233,46 +225,30 @@ async function extractStreamUrlByProvider(url, provider) {
   }
 }
 
-// --- NOUVEL EXTRACTEUR VIDMOLY (Spécial Lecteur Apple iOS) ---
 async function vidmolyExtractor(url) {
   try {
-      const options = {
-          headers: {
-              "Referer": "https://v6.voiranime.com/",
-              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-          }
-      };
-      
+      const options = { headers: { "Referer": BASE_URL + "/" } };
       const response = await soraFetch(url, options);
       const html = await response.text();
-
       const streamRegex = /(https:\/\/[a-zA-Z0-9_.-]+\/[^"']+\.(?:m3u8|mp4)[^"']*)/i;
-      
-      // Les headers qu'on va FORCER le lecteur iOS à utiliser pour tromper Vidmoly
       const playbackHeaders = {
           "Referer": "https://vidmoly.to/",
           "Origin": "https://vidmoly.to",
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
           "Accept": "*/*"
       };
-
       let directMatch = html.match(streamRegex);
-      if (directMatch) {
-          return { title: "Vidmoly", streamUrl: directMatch[1], headers: playbackHeaders };
-      }
-
+      if (directMatch) return { title: "Vidmoly", streamUrl: directMatch[1], headers: playbackHeaders };
       const packedMatch = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
       if (packedMatch) {
           const unpacked = unpack(packedMatch[0]);
           let unpackedMatch = unpacked.match(streamRegex);
-          if (unpackedMatch) {
-              return { title: "Vidmoly", streamUrl: unpackedMatch[1], headers: playbackHeaders };
-          }
+          if (unpackedMatch) return { title: "Vidmoly", streamUrl: unpackedMatch[1], headers: playbackHeaders };
       }
   } catch(e) {}
   return null;
 }
-// Nouvelle fonction pour hacker Sibnet
+
 async function sibnetExtractor(url) {
   try {
       const html = await (await soraFetch(url)).text();
@@ -286,6 +262,49 @@ async function sibnetExtractor(url) {
   return null;
 }
 
+async function streamtapeExtractor(url) {
+  try {
+    const html = await (await soraFetch(url)).text();
+    const scriptMatch = html.match(/document\.getElementById\('robotlink'\)\.innerHTML\s*=\s*(.*);/);
+    if (!scriptMatch) return null;
+    const parts = scriptMatch[1].split("+");
+    let finalUrl = "https:";
+    for (let part of parts) {
+      part = part.trim();
+      if (part.startsWith("'") || part.startsWith('"')) finalUrl += part.replace(/['"]/g, "");
+      else if (part.includes("substring")) {
+        const subMatch = part.match(/'([^']+)'\.substring\(([^)]+)\)/);
+        if (subMatch) finalUrl += subMatch[1].substring(eval(subMatch[2]));
+      }
+    }
+    return { title: "Streamtape", streamUrl: finalUrl };
+  } catch(e) { return null; }
+}
+
+async function sendvidExtractor(url) {
+  const response = await soraFetch(url);
+  const match = (await response.text()).match(/var\s+video_source\s*=\s*"([^"]+)"/);
+  return match ? { title: "Sendvid", streamUrl: match[1] } : null;
+}
+
+async function doodExtractor(url) {
+  const response = await soraFetch(url);
+  const html = await response.text();
+  const md5Match = html.match(/\/pass_md5\/([a-zA-Z0-9_-]+)/);
+  const tokenMatch = html.match(/makePlay\('([^']+)'/);
+  if (!md5Match || !tokenMatch) return null;
+  const passUrl = `https://${url.split("/")[2]}/pass_md5/${md5Match[1]}`;
+  const passText = await (await soraFetch(passUrl, { headers: { Referer: url } })).text();
+  return { title: "Doodstream", streamUrl: `${passText}zUEJeL3mUN?token=${tokenMatch[1]}&expiry=${Date.now()}`, headers: { Referer: url } };
+}
+
+async function mixdropExtractor(url) {
+  const html = await (await soraFetch(url)).text();
+  const packedMatch = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
+  if (!packedMatch) return null;
+  const urlMatch = unpack(packedMatch[0]).match(/MDCore\.wurl="(.*?)";/);
+  return urlMatch ? { title: "Mixdrop", streamUrl: urlMatch[1].startsWith("//") ? "https:" + urlMatch[1] : urlMatch[1] } : null;
+}
 
 async function uqloadExtractor(url) {
   const html = await (await soraFetch(url)).text();
@@ -302,9 +321,9 @@ async function voeExtractor(url) {
   let str = JSON.parse(jsonMatch[1].trim())[0];
   str = str.replace(/[a-zA-Z]/g, c => String.fromCharCode((c <= "Z" ? 90 : 122) >= (c = c.charCodeAt(0) + 13) ? c : c - 26));
   ["@$", "^^", "~@", "%?", "*~", "!!", "#&"].forEach(p => str = str.split(p).join(""));
-  str = typeof atob === "function" ? atob(str) : Buffer.from(str, "base64").toString("utf-8");
+  str = Buffer.from(str, "base64").toString("utf-8");
   str = str.split("").map(c => String.fromCharCode(c.charCodeAt(0) - 3)).join("").split("").reverse().join("");
-  str = typeof atob === "function" ? atob(str) : Buffer.from(str, "base64").toString("utf-8");
+  str = Buffer.from(str, "base64").toString("utf-8");
   const result = JSON.parse(str);
   const streamUrl = result.direct_access_url || (result.source && result.source.find(s => s.direct_access_url?.startsWith("http"))?.direct_access_url);
   return streamUrl ? { title: "Voe", streamUrl: streamUrl } : null;
