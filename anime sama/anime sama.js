@@ -168,7 +168,7 @@ async function extractStreamUrl(url) {
         }
 
         console.log(`[VoirAnime] J'ai trouvé ${liensPropres.length} lecteurs uniques ! Envoi au Global Extractor...`);
-
+        console.log(`[VoirAnime] Les liens trouvés sont : ${JSON.stringify(liensPropres)}`); // <- AJOUTE CETTE LIGNE
         // 5. Envoi au Global Extractor
         let providerTest = {};
         liensPropres.forEach((lien) => {
