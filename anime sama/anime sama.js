@@ -111,36 +111,58 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. LE LECTEUR (Version Simplifiée sans Global Extractor) ---
 async function extractStreamUrl(url) {
     try {
         const response = await fetchv2(url);
         const html = await response.text();
         let streams = [];
 
-        // On cherche toutes les iframes
-        const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-        let match;
-        while ((match = iframeRegex.exec(html)) !== null) {
-            let iframeUrl = match[1];
-            if (iframeUrl.startsWith('//')) iframeUrl = "https:" + iframeUrl;
+        // 1. On cherche l'iframe de Vidmoly sur la page
+        const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+        if (!iframeMatch) return JSON.stringify([]);
 
-            // Au lieu d'utiliser un extracteur complexe, on utilise le "Mode Web" direct
-            // C'est 100% fiable et ça ne marque jamais "Stream not found"
-            let label = "Lecteur";
-            if (iframeUrl.includes("vidmoly")) label = "Vidmoly";
-            if (iframeUrl.includes("voe")) label = "VOE";
-            if (iframeUrl.includes("streamtape")) label = "Streamtape";
+        let embedUrl = iframeMatch[1];
+        if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
+
+        // 2. ON EXTRAIT LE LIEN VIDÉO (Le cœur du moteur)
+        // On charge la page de l'iframe avec le Referer de VoirAnime
+        const embedRes = await fetchv2(embedUrl, { "Referer": BASE_URL });
+        const embedHtml = await embedRes.text();
+
+        // On cherche le fichier vidéo (souvent un .m3u8 ou .mp4)
+        // Vidmoly cache souvent ça dans une variable "file:"
+        const fileMatch = embedHtml.match(/file\s*:\s*["']([^"']+)["']/i);
+        
+        if (fileMatch) {
+            let videoUrl = fileMatch[1];
+
+            // 3. LE DÉGUISEMENT (Pour éviter le "Stream not found")
+            // On donne à Sora les Headers qu'il DOIT utiliser pour lire ce flux
+            const headers = {
+                "Referer": "https://vidmoly.to/",
+                "Origin": "https://vidmoly.to",
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            };
 
             streams.push({
-                title: `🌐 ${label}`,
-                streamUrl: `webview://${iframeUrl}`,
-                headers: {}
+                title: "Vidmoly (Lien Direct)",
+                streamUrl: videoUrl,
+                headers: headers
+            });
+        }
+
+        // Plan B : Si l'extraction directe échoue, on remet le lien normal (au cas où)
+        if (streams.length === 0) {
+            streams.push({
+                title: "Lecteur Externe",
+                streamUrl: embedUrl,
+                headers: { "Referer": BASE_URL }
             });
         }
 
         return JSON.stringify(streams);
     } catch (e) {
+        console.log("Erreur Vidmoly : " + e);
         return JSON.stringify([]);
     }
 }
