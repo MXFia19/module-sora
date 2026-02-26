@@ -111,32 +111,23 @@ async function extractEpisodes(url) {
         return JSON.stringify([]);
     }
 }
-
-// --- 4. VIDÉO (La Pieuvre - Spécial data-redirect) ---
 async function extractStreamUrl(url) {
     try {
         let streams = [];
-        
-        // 1. On charge la page principale de l'épisode
         const response = await fetchv2(url);
         const html = await response.text();
 
-        let pagesToFetch = [url]; // On garde la page de base
+        let pagesToFetch = [url];
         let lecteursTrouves = [];
 
-        // 2. On cherche toutes les options du menu déroulant
         const redirectRegex = /data-redirect=["']([^"']+)["']/gi;
         let match;
         
         while ((match = redirectRegex.exec(html)) !== null) {
             let redirectUrl = match[1];
-            
-            // On s'assure que le lien est complet
             if (redirectUrl.startsWith('/')) {
                 redirectUrl = 'https://v6.voiranime.com' + redirectUrl;
             }
-            
-            // On l'ajoute à notre liste de pages à fouiller
             if (!pagesToFetch.includes(redirectUrl)) {
                 pagesToFetch.push(redirectUrl);
             }
@@ -144,22 +135,17 @@ async function extractStreamUrl(url) {
 
         console.log(`[VoirAnime] Trouvé ${pagesToFetch.length} pages de lecteurs à fouiller...`);
 
-        // 3. LA PIEUVRE : On télécharge toutes les pages en MÊME TEMPS
         const fetchPromises = pagesToFetch.map(pageUrl => 
             fetchv2(pageUrl).then(res => res.text()).catch(() => "")
         );
-        const pagesHtml = await Promise.all(fetchPromises); // Magie du multi-tâches !
+        const pagesHtml = await Promise.all(fetchPromises);
 
-        // 4. On fouille chaque page téléchargée pour y voler l'iframe
         pagesHtml.forEach(pageSource => {
             const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
             let iframeMatch;
-            
             while ((iframeMatch = iframeRegex.exec(pageSource)) !== null) {
                 let iframeUrl = iframeMatch[1];
                 if (iframeUrl.startsWith('//')) iframeUrl = 'https:' + iframeUrl;
-                
-                // On garde les iframes valides et on évite les doublons
                 if (iframeUrl.startsWith('http') && !lecteursTrouves.includes(iframeUrl)) {
                     lecteursTrouves.push(iframeUrl);
                 }
@@ -167,46 +153,16 @@ async function extractStreamUrl(url) {
         });
 
         if (lecteursTrouves.length === 0) {
-            console.log("[VoirAnime] Aucun lecteur iframe trouvé.");
             return JSON.stringify([]);
         }
 
-        console.log(`[VoirAnime] Super ! J'ai aspiré ${lecteursTrouves.length} iframes uniques.`);
-        console.log(`[VoirAnime] Les voici : ${JSON.stringify(lecteursTrouves)}`);
+        // --- TES LOGS DE DEBUG ---
+        console.log(`[VoirAnime] J'ai trouvé ${lecteursTrouves.length} lecteurs uniques ! Envoi au Global Extractor...`);
+        console.log(`[VoirAnime] Les liens trouvés sont : ${JSON.stringify(lecteursTrouves)}`);
+        // -------------------------
 
-        // 5. On envoie tout au Global Extractor
         let providerTest = {};
         lecteursTrouves.forEach((lien) => {
-            let domain = lien.match(/https?:\/\/(?:www\.)?([^/]+)/i);
-            let providerName = domain ? domain[1].split('.')[0] : "inconnu";
-            providerTest[lien] = providerName;
-        });
-
-        const extracted = await multiExtractor(providerTest);
-
-        if (extracted && extracted.length > 0) {
-            extracted.forEach((ext, index) => {
-                streams.push({
-                    title: `Lecteur ${index + 1} (${ext.title || 'Auto'})`,
-                    streamUrl: ext.streamUrl,
-                    headers: ext.headers || {}
-                });
-            });
-        }
-
-        return JSON.stringify(streams);
-
-    } catch (err) {
-        console.log('[VoirAnime] Erreur extractStreamUrl: ' + err);
-        return JSON.stringify([]);
-    }
-}
-
-        console.log(`[VoirAnime] J'ai trouvé ${liensPropres.length} lecteurs uniques ! Envoi au Global Extractor...`);
-        console.log(`[VoirAnime] Les liens trouvés sont : ${JSON.stringify(liensPropres)}`); // <- AJOUTE CETTE LIGNE
-        // 5. Envoi au Global Extractor
-        let providerTest = {};
-        liensPropres.forEach((lien) => {
             let domain = lien.match(/https?:\/\/(?:www\.)?([^/]+)/i);
             let providerName = domain ? domain[1].split('.')[0] : "inconnu";
             providerTest[lien] = providerName;
