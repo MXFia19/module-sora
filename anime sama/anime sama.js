@@ -112,35 +112,71 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. VIDÉO ---
+// --- 4. VIDÉO (L'Aspirateur Universel) ---
 async function extractStreamUrl(url) {
     try {
         let streams = [];
         const response = await fetchv2(url);
         const html = await response.text();
 
-        const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-        let match;
         let lecteursTrouves = [];
 
+        // 1. Chercher les iframes classiques et lazy-loadées
+        const iframeRegex = /<iframe[^>]+(?:src|data-src)=["']([^"']+)["']/gi;
+        let match;
         while ((match = iframeRegex.exec(html)) !== null) {
-            let iframeUrl = match[1];
-            if (iframeUrl.startsWith('//')) iframeUrl = 'https:' + iframeUrl;
-            if (iframeUrl.startsWith('http')) lecteursTrouves.push(iframeUrl);
+            lecteursTrouves.push(match[1]);
         }
 
-        if (lecteursTrouves.length === 0) {
-            return JSON.stringify({ streams: [], subtitles: "" });
+        // 2. Chercher dans les boutons de serveurs (Spécialité VoirAnime)
+        const btnRegex = /(?:data-video|data-src|data-embed)=["']([^"']+)["']/gi;
+        while ((match = btnRegex.exec(html)) !== null) {
+            let contenuBouton = match[1];
+            // Parfois VoirAnime met carrément le code HTML de l'iframe dans le bouton !
+            if (contenuBouton.includes('<iframe')) {
+                let subMatch = contenuBouton.match(/src=["']([^"']+)["']/i);
+                if (subMatch) lecteursTrouves.push(subMatch[1]);
+            } else {
+                lecteursTrouves.push(contenuBouton);
+            }
         }
 
+        // 3. LE FILET DE SÉCURITÉ : On scanne TOUT le code source de la page à la recherche d'hébergeurs connus
+        const knownHosts = ['vidmoly', 'sibnet', 'sendvid', 'uqload', 'voe', 'streamtape', 'dood', 'filemoon', 'mixdrop'];
+        const allLinksRegex = /https?:\/\/[a-zA-Z0-9.\-]+\/[^"'\s<]+/gi;
+        while ((match = allLinksRegex.exec(html)) !== null) {
+            let link = match[0];
+            if (knownHosts.some(host => link.includes(host))) {
+                lecteursTrouves.push(link);
+            }
+        }
+
+        // 4. Nettoyage : On enlève les doublons et les parasites
+        let liensPropres = [];
+        for (let lien of lecteursTrouves) {
+            lien = lien.replace(/&amp;/g, '&'); // Nettoyage des caractères WordPress
+            if (lien.startsWith('//')) lien = 'https:' + lien;
+            
+            if (lien.startsWith('http') && !liensPropres.includes(lien)) {
+                liensPropres.push(lien);
+            }
+        }
+
+        if (liensPropres.length === 0) {
+            console.log("[VoirAnime] Aucun lecteur trouvé sur la page.");
+            return JSON.stringify([]);
+        }
+
+        console.log(`[VoirAnime] J'ai trouvé ${liensPropres.length} lecteurs uniques ! Envoi au Global Extractor...`);
+
+        // 5. Envoi au Global Extractor
         let providerTest = {};
-        lecteursTrouves.forEach((lien) => {
+        liensPropres.forEach((lien) => {
             let domain = lien.match(/https?:\/\/(?:www\.)?([^/]+)/i);
             let providerName = domain ? domain[1].split('.')[0] : "inconnu";
             providerTest[lien] = providerName;
         });
 
-        // Appel au Global Extractor (qui est maintenant défini plus bas !)
         const extracted = await multiExtractor(providerTest);
 
         if (extracted && extracted.length > 0) {
@@ -153,18 +189,11 @@ async function extractStreamUrl(url) {
             });
         }
 
-        lecteursTrouves.forEach((lienOrigine, index) => {
-            let aEteExtrait = streams.some(s => s.streamUrl !== lienOrigine && !s.streamUrl.includes('webview'));
-            if (!aEteExtrait) {
-                streams.push({ title: `Lecteur Web ${index + 1}`, streamUrl: `webview://${lienOrigine}` });
-            }
-        });
-
-        return JSON.stringify({ streams: streams, subtitles: "" });
+        return JSON.stringify(streams);
 
     } catch (err) {
         console.log('[VoirAnime] Erreur extractStreamUrl: ' + err);
-        return JSON.stringify({ streams: [], subtitles: "" });
+        return JSON.stringify([]);
     }
 }
 
@@ -200,6 +229,8 @@ async function extractStreamUrlByProvider(url, provider) {
     case "streamtape": return await streamtapeExtractor(url);
     case "mixdrop": return await mixdropExtractor(url);
     case "vidmoly": return await vidmolyExtractor(url);
+    case "video": // Le sous-domaine de Sibnet est video.sibnet.ru
+    case "sibnet": return await sibnetExtractor(url);
     case "uqload": return await uqloadExtractor(url);
     case "voe": return await voeExtractor(url);
     case "upvid": return await upvidExtractor(url);
@@ -211,66 +242,39 @@ async function extractStreamUrlByProvider(url, provider) {
   }
 }
 
-async function sendvidExtractor(url) {
-  const response = await soraFetch(url);
-  const match = (await response.text()).match(/var\s+video_source\s*=\s*"([^"]+)"/);
-  return match ? { title: "Sendvid", streamUrl: match[1] } : null;
-}
-
-async function smoothpreExtractor(url) {
-  const response = await soraFetch(url);
-  const obfuscatedScript = (await response.text()).match(/<script[^>]*>\s*(eval\(function\(p,a,c,k,e,d.*?\)[\s\S]*?)<\/script>/);
-  if (obfuscatedScript) {
-    const unpackedScript = unpack(obfuscatedScript[1]);
-    const hls2Match = unpackedScript.match(/"hls2"\s*:\s*"([^"]+)"/);
-    if (hls2Match) return { title: "Smoothpre", streamUrl: hls2Match[1] };
-  }
+// Nouvelle fonction ultra-puissante pour Vidmoly
+async function vidmolyExtractor(url) {
+  try {
+      const html = await (await soraFetch(url)).text();
+      // Test 1 : Lien en clair
+      let m3u8Match = html.match(/file:\s*"([^"]+\.m3u8[^"]*)"/);
+      if (m3u8Match) return { title: "Vidmoly", streamUrl: m3u8Match[1] };
+      
+      // Test 2 : Lien caché par l'obfuscateur (Le nouveau piège de Vidmoly !)
+      const packedMatch = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
+      if (packedMatch) {
+          const unpacked = unpack(packedMatch[0]);
+          m3u8Match = unpacked.match(/file:\s*"([^"]+\.m3u8[^"]*)"/);
+          if (m3u8Match) return { title: "Vidmoly", streamUrl: m3u8Match[1] };
+      }
+  } catch(e) {}
   return null;
 }
 
-async function doodExtractor(url) {
-  const response = await soraFetch(url);
-  const html = await response.text();
-  const md5Match = html.match(/\/pass_md5\/([a-zA-Z0-9_-]+)/);
-  const tokenMatch = html.match(/makePlay\('([^']+)'/);
-  if (!md5Match || !tokenMatch) return null;
-  const passUrl = `https://${url.split("/")[2]}/pass_md5/${md5Match[1]}`;
-  const passText = await (await soraFetch(passUrl, { headers: { Referer: url } })).text();
-  return { title: "Doodstream", streamUrl: `${passText}zUEJeL3mUN?token=${tokenMatch[1]}&expiry=${Date.now()}`, headers: { Referer: url } };
+// Nouvelle fonction pour hacker Sibnet
+async function sibnetExtractor(url) {
+  try {
+      const html = await (await soraFetch(url)).text();
+      const match = html.match(/player\.src\(\[\{src:\s*"([^"]+)"/);
+      if (match) {
+          let streamUrl = match[1];
+          if (streamUrl.startsWith('/')) streamUrl = "https://video.sibnet.ru" + streamUrl;
+          return { title: "Sibnet", streamUrl: streamUrl, headers: { Referer: url } };
+      }
+  } catch(e) {}
+  return null;
 }
 
-async function streamtapeExtractor(url) {
-  const html = await (await soraFetch(url)).text();
-  const scriptMatch = html.match(/document\.getElementById\('robotlink'\)\.innerHTML\s*=\s*(.*);/);
-  if (!scriptMatch) return null;
-  const parts = scriptMatch[1].split("+");
-  let finalUrl = "https:";
-  for (let part of parts) {
-    part = part.trim();
-    if (part.startsWith("'") || part.startsWith('"')) finalUrl += part.replace(/['"]/g, "");
-    else if (part.includes("substring")) {
-      const subMatch = part.match(/'([^']+)'\.substring\(([^)]+)\)/);
-      if (subMatch) finalUrl += subMatch[1].substring(eval(subMatch[2]));
-    }
-  }
-  return { title: "Streamtape", streamUrl: finalUrl };
-}
-
-async function mixdropExtractor(url) {
-  const html = await (await soraFetch(url)).text();
-  const packedMatch = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
-  if (!packedMatch) return null;
-  const urlMatch = unpack(packedMatch[0]).match(/MDCore\.wurl="(.*?)";/);
-  return urlMatch ? { title: "Mixdrop", streamUrl: urlMatch[1].startsWith("//") ? "https:" + urlMatch[1] : urlMatch[1] } : null;
-}
-
-async function vidmolyExtractor(url) {
-  const html = await (await soraFetch(url)).text();
-  const m3u8Match = html.match(/file:\s*"([^"]+\.m3u8[^"]*)"/);
-  if (m3u8Match) return { title: "Vidmoly", streamUrl: m3u8Match[1] };
-  const mp4Match = html.match(/file:\s*"([^"]+\.mp4[^"]*)"/);
-  return mp4Match ? { title: "Vidmoly", streamUrl: mp4Match[1] } : null;
-}
 
 async function uqloadExtractor(url) {
   const html = await (await soraFetch(url)).text();
