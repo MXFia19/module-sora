@@ -225,27 +225,59 @@ async function extractStreamUrlByProvider(url, provider) {
   }
 }
 
+// --- EXTRACTEUR VIDMOLY (Version Blindée) ---
 async function vidmolyExtractor(url) {
   try {
-      const options = { headers: { "Referer": BASE_URL + "/" } };
-      const response = await soraFetch(url, options);
+      const response = await soraFetch(url, { headers: { "Referer": "https://v6.voiranime.com/" } });
       const html = await response.text();
       const streamRegex = /(https:\/\/[a-zA-Z0-9_.-]+\/[^"']+\.(?:m3u8|mp4)[^"']*)/i;
+      
+      // On force le Referer sur le domaine exact du lien pour l'AVPlayer
       const playbackHeaders = {
           "Referer": "https://vidmoly.to/",
           "Origin": "https://vidmoly.to",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-          "Accept": "*/*"
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
       };
-      let directMatch = html.match(streamRegex);
-      if (directMatch) return { title: "Vidmoly", streamUrl: directMatch[1], headers: playbackHeaders };
-      const packedMatch = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
-      if (packedMatch) {
-          const unpacked = unpack(packedMatch[0]);
-          let unpackedMatch = unpacked.match(streamRegex);
-          if (unpackedMatch) return { title: "Vidmoly", streamUrl: unpackedMatch[1], headers: playbackHeaders };
+
+      let match = html.match(streamRegex);
+      if (!match) {
+          const packed = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
+          if (packed) match = unpack(packed[0]).match(streamRegex);
       }
-  } catch(e) {}
+
+      if (match) {
+          return { title: "Vidmoly", streamUrl: match[1], headers: playbackHeaders };
+      }
+  } catch(e) { console.log("Vidmoly Error: " + e); }
+  return null;
+}
+
+// --- EXTRACTEUR STREAMTAPE (Version Corrigée) ---
+async function streamtapeExtractor(url) {
+  try {
+      const response = await soraFetch(url);
+      const html = await response.text();
+      // On cherche le lien qui est construit dynamiquement
+      const scriptMatch = html.match(/document\.getElementById\(['"]robotlink['"]\)\.innerHTML\s*=\s*(.*?);/);
+      if (!scriptMatch) return null;
+
+      let parts = scriptMatch[1].split("+");
+      let finalUrl = "";
+      for (let part of parts) {
+          part = part.trim();
+          if (part.startsWith("'") || part.startsWith('"')) {
+              finalUrl += part.replace(/['"]/g, "");
+          } else if (part.includes("substring")) {
+              const subMatch = part.match(/'([^']+)'\.substring\(([^)]+)\)/);
+              if (subMatch) finalUrl += subMatch[1].substring(eval(subMatch[2]));
+          }
+      }
+      
+      if (finalUrl) {
+          if (!finalUrl.startsWith('http')) finalUrl = "https:" + finalUrl;
+          return { title: "Streamtape", streamUrl: finalUrl };
+      }
+  } catch(e) { console.log("Streamtape Error: " + e); }
   return null;
 }
 
@@ -261,26 +293,6 @@ async function sibnetExtractor(url) {
   } catch(e) {}
   return null;
 }
-
-async function streamtapeExtractor(url) {
-  try {
-    const html = await (await soraFetch(url)).text();
-    const scriptMatch = html.match(/document\.getElementById\('robotlink'\)\.innerHTML\s*=\s*(.*);/);
-    if (!scriptMatch) return null;
-    const parts = scriptMatch[1].split("+");
-    let finalUrl = "https:";
-    for (let part of parts) {
-      part = part.trim();
-      if (part.startsWith("'") || part.startsWith('"')) finalUrl += part.replace(/['"]/g, "");
-      else if (part.includes("substring")) {
-        const subMatch = part.match(/'([^']+)'\.substring\(([^)]+)\)/);
-        if (subMatch) finalUrl += subMatch[1].substring(eval(subMatch[2]));
-      }
-    }
-    return { title: "Streamtape", streamUrl: finalUrl };
-  } catch(e) { return null; }
-}
-
 async function sendvidExtractor(url) {
   const response = await soraFetch(url);
   const match = (await response.text()).match(/var\s+video_source\s*=\s*"([^"]+)"/);
