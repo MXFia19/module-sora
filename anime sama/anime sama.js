@@ -242,25 +242,45 @@ async function extractStreamUrlByProvider(url, provider) {
   }
 }
 
-// Nouvelle fonction ultra-puissante pour Vidmoly
+// --- NOUVEL EXTRACTEUR VIDMOLY (Anti-Blocage) ---
 async function vidmolyExtractor(url) {
   try {
-      const html = await (await soraFetch(url)).text();
-      // Test 1 : Lien en clair
-      let m3u8Match = html.match(/file:\s*"([^"]+\.m3u8[^"]*)"/);
-      if (m3u8Match) return { title: "Vidmoly", streamUrl: m3u8Match[1] };
+      // 1. On met notre déguisement (Referer et User-Agent)
+      const options = {
+          headers: {
+              "Referer": "https://v6.voiranime.com/",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+      };
       
-      // Test 2 : Lien caché par l'obfuscateur (Le nouveau piège de Vidmoly !)
+      const response = await soraFetch(url, options);
+      const html = await response.text();
+
+      // L'astuce magique : une expression régulière universelle pour chasser les .m3u8 et .mp4
+      const streamRegex = /(https:\/\/[a-zA-Z0-9_.-]+\/[^"']+\.(?:m3u8|mp4)[^"']*)/i;
+
+      // 2. Test 1 : Le lien est-il en clair dans la page ?
+      let directMatch = html.match(streamRegex);
+      if (directMatch) {
+          return { title: "Vidmoly", streamUrl: directMatch[1], headers: { "Referer": url } };
+      }
+
+      // 3. Test 2 : Le lien est-il crypté par le packer JavaScript ?
       const packedMatch = html.match(/eval\(function\(p,a,c,k,e,d\).*?split\('\|'\).*?\)/);
       if (packedMatch) {
           const unpacked = unpack(packedMatch[0]);
-          m3u8Match = unpacked.match(/file:\s*"([^"]+\.m3u8[^"]*)"/);
-          if (m3u8Match) return { title: "Vidmoly", streamUrl: m3u8Match[1] };
+          let unpackedMatch = unpacked.match(streamRegex);
+          if (unpackedMatch) {
+              return { title: "Vidmoly (Décodé)", streamUrl: unpackedMatch[1], headers: { "Referer": url } };
+          }
       }
-  } catch(e) {}
+
+      console.log("[Vidmoly] Échec de l'extraction : Aucun flux trouvé dans le code source.");
+  } catch(e) {
+      console.log("[Vidmoly] Erreur critique : " + e);
+  }
   return null;
 }
-
 // Nouvelle fonction pour hacker Sibnet
 async function sibnetExtractor(url) {
   try {
