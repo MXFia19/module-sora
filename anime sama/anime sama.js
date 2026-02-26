@@ -115,54 +115,80 @@ async function extractStreamUrl(url) {
     try {
         const response = await fetchv2(url);
         const html = await response.text();
+        
+        let pagesToFetch = [url]; // On commence avec la page actuelle
         let streams = [];
 
-        // 1. On cherche l'iframe de Vidmoly sur la page
-        const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-        if (!iframeMatch) return JSON.stringify([]);
+        // 1. REQUÊTE "PIEUVRE" : On récupère tous les liens du menu déroulant (data-redirect)
+        const redirectRegex = /data-redirect=["']([^"']+)["']/gi;
+        let match;
+        while ((match = redirectRegex.exec(html)) !== null) {
+            let redirectUrl = match[1];
+            if (redirectUrl.startsWith('/')) redirectUrl = "https://v6.voiranime.com" + redirectUrl;
+            if (!pagesToFetch.includes(redirectUrl)) {
+                pagesToFetch.push(redirectUrl);
+            }
+        }
 
-        let embedUrl = iframeMatch[1];
-        if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
+        // 2. TÉLÉCHARGEMENT SIMULTANÉ de toutes les pages de lecteurs
+        const pagesHtml = await Promise.all(
+            pagesToFetch.map(p => fetchv2(p).then(res => res.text()).catch(() => ""))
+        );
 
-        // 2. ON EXTRAIT LE LIEN VIDÉO (Le cœur du moteur)
-        // On charge la page de l'iframe avec le Referer de VoirAnime
-        const embedRes = await fetchv2(embedUrl, { "Referer": BASE_URL });
-        const embedHtml = await embedRes.text();
+        // 3. EXTRACTION DES IFRAMES ET DES LIENS VIDÉOS
+        for (const pageSource of pagesHtml) {
+            const iframeMatch = pageSource.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+            if (!iframeMatch) continue;
 
-        // On cherche le fichier vidéo (souvent un .m3u8 ou .mp4)
-        // Vidmoly cache souvent ça dans une variable "file:"
-        const fileMatch = embedHtml.match(/file\s*:\s*["']([^"']+)["']/i);
-        
-        if (fileMatch) {
-            let videoUrl = fileMatch[1];
+            let embedUrl = iframeMatch[1];
+            if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
 
-            // 3. LE DÉGUISEMENT (Pour éviter le "Stream not found")
-            // On donne à Sora les Headers qu'il DOIT utiliser pour lire ce flux
+            // Identification du nom du lecteur pour l'affichage
+            let label = "Lecteur";
+            if (embedUrl.includes("voe")) label = "VOE";
+            else if (embedUrl.includes("vidmoly")) label = "Vidmoly";
+            else if (embedUrl.includes("streamtape")) label = "Stape";
+            else if (embedUrl.includes("mixdrop")) label = "Mixdrop";
+            else if (embedUrl.includes("uqload")) label = "Uqload";
+
+            // Tentative d'extraction directe pour éviter le "Stream not found"
+            // On se concentre sur les headers que VLC et Safari utilisent
             const headers = {
-                "Referer": "https://vidmoly.to/",
-                "Origin": "https://vidmoly.to",
-                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+                "Referer": "https://vidmoly.to/", // Valide pour bcp d'hébergeurs
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+                "Origin": "https://vidmoly.to"
             };
 
+            // On ajoute deux options par lecteur pour être sûr :
+            // A. Le lien vers l'embed (qui peut marcher si Sora gère l'iframe)
             streams.push({
-                title: "Vidmoly (Lien Direct)",
-                streamUrl: videoUrl,
-                headers: headers
-            });
-        }
-
-        // Plan B : Si l'extraction directe échoue, on remet le lien normal (au cas où)
-        if (streams.length === 0) {
-            streams.push({
-                title: "Lecteur Externe",
+                title: `${label} (Embed)`,
                 streamUrl: embedUrl,
-                headers: { "Referer": BASE_URL }
+                headers: { "Referer": "https://v6.voiranime.com/" }
             });
+
+            // B. On tente de fouiller l'intérieur de l'iframe si c'est Vidmoly
+            if (embedUrl.includes("vidmoly")) {
+                try {
+                    const vidRes = await fetchv2(embedUrl, { "Referer": "https://v6.voiranime.com/" });
+                    const vidHtml = await vidRes.text();
+                    const fileMatch = vidHtml.match(/file\s*:\s*["']([^"']+)["']/i);
+                    if (fileMatch) {
+                        streams.push({
+                            title: `${label} (Lien Direct)`,
+                            streamUrl: fileMatch[1],
+                            headers: headers
+                        });
+                    }
+                } catch (e) {}
+            }
         }
 
-        return JSON.stringify(streams);
+        // Suppression des doublons de liens
+        const uniqueStreams = streams.filter((v, i, a) => a.findIndex(t => t.streamUrl === v.streamUrl) === i);
+
+        return JSON.stringify(uniqueStreams);
     } catch (e) {
-        console.log("Erreur Vidmoly : " + e);
         return JSON.stringify([]);
     }
 }
