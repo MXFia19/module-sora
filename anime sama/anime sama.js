@@ -112,60 +112,95 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. VIDÉO (L'Aspirateur Universel) ---
+// --- 4. VIDÉO (La Pieuvre - Spécial data-redirect) ---
 async function extractStreamUrl(url) {
     try {
         let streams = [];
+        
+        // 1. On charge la page principale de l'épisode
         const response = await fetchv2(url);
         const html = await response.text();
 
+        let pagesToFetch = [url]; // On garde la page de base
         let lecteursTrouves = [];
 
-        // 1. Chercher les iframes classiques et lazy-loadées
-        const iframeRegex = /<iframe[^>]+(?:src|data-src)=["']([^"']+)["']/gi;
+        // 2. On cherche toutes les options du menu déroulant
+        const redirectRegex = /data-redirect=["']([^"']+)["']/gi;
         let match;
-        while ((match = iframeRegex.exec(html)) !== null) {
-            lecteursTrouves.push(match[1]);
-        }
-
-        // 2. Chercher dans les boutons de serveurs (Spécialité VoirAnime)
-        const btnRegex = /(?:data-video|data-src|data-embed)=["']([^"']+)["']/gi;
-        while ((match = btnRegex.exec(html)) !== null) {
-            let contenuBouton = match[1];
-            // Parfois VoirAnime met carrément le code HTML de l'iframe dans le bouton !
-            if (contenuBouton.includes('<iframe')) {
-                let subMatch = contenuBouton.match(/src=["']([^"']+)["']/i);
-                if (subMatch) lecteursTrouves.push(subMatch[1]);
-            } else {
-                lecteursTrouves.push(contenuBouton);
-            }
-        }
-
-        // 3. LE FILET DE SÉCURITÉ : On scanne TOUT le code source de la page à la recherche d'hébergeurs connus
-        const knownHosts = ['vidmoly', 'sibnet', 'sendvid', 'uqload', 'voe', 'streamtape', 'dood', 'filemoon', 'mixdrop'];
-        const allLinksRegex = /https?:\/\/[a-zA-Z0-9.\-]+\/[^"'\s<]+/gi;
-        while ((match = allLinksRegex.exec(html)) !== null) {
-            let link = match[0];
-            if (knownHosts.some(host => link.includes(host))) {
-                lecteursTrouves.push(link);
-            }
-        }
-
-        // 4. Nettoyage : On enlève les doublons et les parasites
-        let liensPropres = [];
-        for (let lien of lecteursTrouves) {
-            lien = lien.replace(/&amp;/g, '&'); // Nettoyage des caractères WordPress
-            if (lien.startsWith('//')) lien = 'https:' + lien;
+        
+        while ((match = redirectRegex.exec(html)) !== null) {
+            let redirectUrl = match[1];
             
-            if (lien.startsWith('http') && !liensPropres.includes(lien)) {
-                liensPropres.push(lien);
+            // On s'assure que le lien est complet
+            if (redirectUrl.startsWith('/')) {
+                redirectUrl = 'https://v6.voiranime.com' + redirectUrl;
+            }
+            
+            // On l'ajoute à notre liste de pages à fouiller
+            if (!pagesToFetch.includes(redirectUrl)) {
+                pagesToFetch.push(redirectUrl);
             }
         }
 
-        if (liensPropres.length === 0) {
-            console.log("[VoirAnime] Aucun lecteur trouvé sur la page.");
+        console.log(`[VoirAnime] Trouvé ${pagesToFetch.length} pages de lecteurs à fouiller...`);
+
+        // 3. LA PIEUVRE : On télécharge toutes les pages en MÊME TEMPS
+        const fetchPromises = pagesToFetch.map(pageUrl => 
+            fetchv2(pageUrl).then(res => res.text()).catch(() => "")
+        );
+        const pagesHtml = await Promise.all(fetchPromises); // Magie du multi-tâches !
+
+        // 4. On fouille chaque page téléchargée pour y voler l'iframe
+        pagesHtml.forEach(pageSource => {
+            const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
+            let iframeMatch;
+            
+            while ((iframeMatch = iframeRegex.exec(pageSource)) !== null) {
+                let iframeUrl = iframeMatch[1];
+                if (iframeUrl.startsWith('//')) iframeUrl = 'https:' + iframeUrl;
+                
+                // On garde les iframes valides et on évite les doublons
+                if (iframeUrl.startsWith('http') && !lecteursTrouves.includes(iframeUrl)) {
+                    lecteursTrouves.push(iframeUrl);
+                }
+            }
+        });
+
+        if (lecteursTrouves.length === 0) {
+            console.log("[VoirAnime] Aucun lecteur iframe trouvé.");
             return JSON.stringify([]);
         }
+
+        console.log(`[VoirAnime] Super ! J'ai aspiré ${lecteursTrouves.length} iframes uniques.`);
+        console.log(`[VoirAnime] Les voici : ${JSON.stringify(lecteursTrouves)}`);
+
+        // 5. On envoie tout au Global Extractor
+        let providerTest = {};
+        lecteursTrouves.forEach((lien) => {
+            let domain = lien.match(/https?:\/\/(?:www\.)?([^/]+)/i);
+            let providerName = domain ? domain[1].split('.')[0] : "inconnu";
+            providerTest[lien] = providerName;
+        });
+
+        const extracted = await multiExtractor(providerTest);
+
+        if (extracted && extracted.length > 0) {
+            extracted.forEach((ext, index) => {
+                streams.push({
+                    title: `Lecteur ${index + 1} (${ext.title || 'Auto'})`,
+                    streamUrl: ext.streamUrl,
+                    headers: ext.headers || {}
+                });
+            });
+        }
+
+        return JSON.stringify(streams);
+
+    } catch (err) {
+        console.log('[VoirAnime] Erreur extractStreamUrl: ' + err);
+        return JSON.stringify([]);
+    }
+}
 
         console.log(`[VoirAnime] J'ai trouvé ${liensPropres.length} lecteurs uniques ! Envoi au Global Extractor...`);
         console.log(`[VoirAnime] Les liens trouvés sont : ${JSON.stringify(liensPropres)}`); // <- AJOUTE CETTE LIGNE
