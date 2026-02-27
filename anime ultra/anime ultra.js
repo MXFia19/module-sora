@@ -72,7 +72,7 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Correction des Saisons) ---
+// --- 3. ÉPISODES (Affichage direct / Force Saison 1) ---
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
@@ -90,16 +90,6 @@ async function extractEpisodes(url) {
         }
 
         if (!newsId) return JSON.stringify([]);
-
-        // ----------------------------------------------------
-        // NOUVEAUTÉ : Détection automatique de la saison
-        // ----------------------------------------------------
-        let seasonNum = 1;
-        // On cherche "saison-2", "saison 2", etc. dans l'URL ou le HTML
-        const seasonMatch = url.match(/saison[-_]?(\d+)/i) || html.match(/saison\s*(\d+)/i);
-        if (seasonMatch) {
-            seasonNum = parseInt(seasonMatch[1]);
-        }
 
         // 2. Appel AJAX
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
@@ -135,8 +125,7 @@ async function extractEpisodes(url) {
                     href: epHref,
                     title: titleMatch ? titleMatch[1] : "Épisode",
                     number: numMatch ? parseInt(numMatch[1]) : (results.length + 1),
-                    // On donne à Sora le VRAI numéro de saison trouvé plus haut !
-                    season: seasonNum
+                    season: 1 // <--- LA MAGIE EST ICI : On force tout dans l'onglet principal
                 });
             }
         }
