@@ -72,7 +72,7 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Affichage direct / Force Saison 1) ---
+// --- 3. ÉPISODES (Force l'affichage dans un seul bloc) ---
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
@@ -124,8 +124,10 @@ async function extractEpisodes(url) {
                 results.push({
                     href: epHref,
                     title: titleMatch ? titleMatch[1] : "Épisode",
-                    number: numMatch ? parseInt(numMatch[1]) : (results.length + 1),
-                    season: 1 // <--- LA MAGIE EST ICI : On force tout dans l'onglet principal
+                    // On garde le numéro pour le tri, mais...
+                    number: numMatch ? parseInt(numMatch[1]) : (results.length + 1)
+                    // ... ON ENLÈVE LA LIGNE "season: ..." !!
+                    // Sans cette ligne, Sora arrêtera de trier par saisons et fera une seule longue liste.
                 });
             }
         }
