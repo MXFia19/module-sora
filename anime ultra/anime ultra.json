@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://nakios.site/",
     "searchBaseUrl": "https://api.nakios.site/api/search",
-    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/nakios/nakios.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/anime%20ultra/anime%20ultra.js",
     "type": "anime/shows/movies",
     "downloadSupport": true,
     "asyncJS": true,
