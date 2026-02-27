@@ -172,82 +172,98 @@ async function extractEpisodes(url) {
         return JSON.stringify([]);
     }
 }
-// --- 4. LECTEUR (Extraction des différents serveurs AnimesUltra) ---
+// --- 4. LECTEUR (Via full-story.php - Découverte de génie) ---
 async function extractStreamUrl(url) {
+    console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
+    
     try {
-        const response = await fetchv2(url);
-        const html = await response.text();
+        // 1. On retrouve le newsId depuis l'URL (ex: 1221)
+        const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
+        if (!idMatch) {
+            console.log("[Lecteur] ❌ Impossible de trouver l'ID dans l'URL");
+            return JSON.stringify([]);
+        }
+
+        const newsId = idMatch[1];
+        const episodeNum = idMatch[2]; // ex: "1"
+        const dataId = `${newsId}-${episodeNum}`; // ex: "1221-1"
+        console.log(`[Lecteur] 🔎 Recherche des lecteurs pour data-id = ${dataId}`);
+
+        // 2. On appelle full-story.php
+        const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
+        const ajaxRes = await fetchv2(ajaxUrl);
+        const ajaxText = await ajaxRes.text();
+        
+        let html = "";
+        try {
+            html = JSON.parse(ajaxText).html || ajaxText;
+        } catch (e) {
+            html = ajaxText;
+        }
+
         let streams = [];
 
-        // 1. On cherche tous les ID de serveurs (les fameux boutons Mytv, Sibnet, Sendvid...)
-        const serverRegex = /data-server-id=["'](\d+)["']/gi;
-        let serverMatches = [...html.matchAll(serverRegex)];
+        // 3. Il faut trouver où commence la ligne de notre épisode dans ce gros fichier
+        // Le site est malin : l'épisode 1 a les lecteurs 1 à 5, l'épisode 2 les lecteurs 6 à 10...
+        // MAIS pour être sûr, on va scanner TOUS les div de type content_player_X 
+        // L'astuce c'est qu'on a besoin de la page de l'épisode pour connaître le nom des boutons.
+        
+        // Finalement, le plus simple est de télécharger la page de l'épisode JUSTE pour avoir le nom des boutons
+        const episodeRes = await fetchv2(url);
+        const episodeHtml = await episodeRes.text();
+        
+        const serverRegex = /data-server-id=["']([^"']+)["']/gi;
+        let serverMatches = [...episodeHtml.matchAll(serverRegex)];
+        console.log(`[Lecteur] 🔍 Boutons trouvés sur la page de l'épisode : ${serverMatches.length}`);
 
         for (let match of serverMatches) {
-            let serverId = match[1];
+            let serverId = match[1]; // ex: "1v", "5sen"
             
-            // 2. On cherche le lien caché associé à ce bouton (ex: content_player_1)
-            let playerRegex = new RegExp(`id=["']content_player_${serverId}["'][^>]*>([^<]+)`, 'i');
+            // 4. On cherche CE serveur précis dans le gros HTML de full-story.php !
+            let playerRegex = new RegExp(`id=["']content_player_${serverId}["'][^>]*>([^<]+)<\\/div>`, 'i');
             let playerMatch = html.match(playerRegex);
 
             if (playerMatch) {
                 let videoUrl = playerMatch[1].trim();
+                console.log(`[Lecteur] 🔗 Lien trouvé pour ${serverId} : ${videoUrl}`);
 
-                // Astuce AnimesUltra : Parfois ils cachent Sibnet sous une simple suite de chiffres
+                // Astuces Sibnet
                 if (/^\d+$/.test(videoUrl)) {
                     videoUrl = `https://video.sibnet.ru/shell.php?videoid=${videoUrl}`;
+                } else if (!videoUrl.startsWith('http') && videoUrl.length > 10) {
+                     // Astuce Mytv (ils mettent juste un code, ex: "ex31u8xgqst...")
+                     videoUrl = `https://lb.daisukianime.xyz/dist/embedm.html?id=${videoUrl}`;
                 }
 
-                // S'il y a plusieurs liens collés
                 let urls = videoUrl.replace(/,$/, "").split(",");
 
                 for (let embedUrl of urls) {
+                    embedUrl = embedUrl.trim();
                     if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
                     if (!embedUrl.startsWith('http')) continue;
 
-                    // 3. On nomme joliment le lecteur pour que tu puisses choisir dans Sora
                     let label = "Lecteur Externe";
                     if (embedUrl.includes("sibnet")) label = "Sibnet";
                     else if (embedUrl.includes("sendvid")) label = "Sendvid";
-                    else if (embedUrl.includes("mytv") || embedUrl.includes("my.mail.ru")) label = "MyTV";
+                    else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) label = "Daisuki/MyTV";
                     else if (embedUrl.includes("vidmoly")) label = "Vidmoly";
                     else if (embedUrl.includes("voe")) label = "VOE";
 
-                    // 4. On l'ajoute à la liste avec la sécurité Webview
+                    console.log(`[Lecteur] ✅ Ajout: [${label}] -> ${embedUrl}`);
                     streams.push({
-                        title: `🌐 ${label}`,
-                        streamUrl: `webview://${embedUrl}`,
+                        title: label,
+                        streamUrl: embedUrl,
                         headers: { "Referer": BASE_URL }
                     });
                 }
             }
         }
 
-        // PLAN B : Si le site a changé son code, on cherche bêtement les iframes
-        if (streams.length === 0) {
-            const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
-            let iframeMatch;
-            while ((iframeMatch = iframeRegex.exec(html)) !== null) {
-                let iframeUrl = iframeMatch[1];
-                if (iframeUrl.startsWith('//')) iframeUrl = "https:" + iframeUrl;
-                if (iframeUrl.startsWith('http')) {
-                    
-                    let label = "Lecteur Web";
-                    if (iframeUrl.includes("sibnet")) label = "Sibnet";
-                    else if (iframeUrl.includes("sendvid")) label = "Sendvid";
-
-                    streams.push({
-                        title: `🌐 ${label}`,
-                        streamUrl: `webview://${iframeUrl}`,
-                        headers: { "Referer": BASE_URL }
-                    });
-                }
-            }
-        }
-
+        console.log(`[Lecteur] 🎉 Terminé. Flux envoyés : ${streams.length}`);
         return JSON.stringify(streams);
+        
     } catch (e) {
-        console.log("Erreur Lecteur AnimesUltra: " + e);
+        console.log(`[Lecteur] 🚨 Erreur : ${e}`);
         return JSON.stringify([]);
     }
 }
