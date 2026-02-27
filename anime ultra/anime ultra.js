@@ -72,7 +72,7 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Force l'affichage dans un seul bloc) ---
+// --- 3. ÉPISODES (Sans aucun système de saison) ---
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
@@ -121,13 +121,11 @@ async function extractEpisodes(url) {
                 let epHref = hrefMatch[1];
                 if (epHref.startsWith('/')) epHref = BASE_URL + epHref;
 
+                // Ajout de l'épisode (sans aucune clé "season")
                 results.push({
                     href: epHref,
                     title: titleMatch ? titleMatch[1] : "Épisode",
-                    // On garde le numéro pour le tri, mais...
                     number: numMatch ? parseInt(numMatch[1]) : (results.length + 1)
-                    // ... ON ENLÈVE LA LIGNE "season: ..." !!
-                    // Sans cette ligne, Sora arrêtera de trier par saisons et fera une seule longue liste.
                 });
             }
         }
@@ -142,6 +140,7 @@ async function extractEpisodes(url) {
             }
         }
 
+        // Renvoi de la liste du premier au dernier
         return JSON.stringify(uniqueResults.reverse());
 
     } catch (e) {
