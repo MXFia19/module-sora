@@ -72,17 +72,16 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Version Renforcée) ---
+// --- 3. ÉPISODES (Correction des Saisons) ---
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
         const html = await response.text();
 
-        // 1. Trouver l'ID (Le plus fiable sur ce site, c'est dans l'URL !)
-        // Exemple : https://animesultra.org/anime-vostfr/1225-sword-art-online... -> ID = 1225
+        // 1. Trouver l'ID
         let newsId = null;
         const urlIdMatch = url.match(/\/(\d+)-[^/]+\.html/i);
-        const htmlIdMatch = html.match(/id=["']post_id["']\s+value=["'](\d+)["']/i); // Sécurité supplémentaire
+        const htmlIdMatch = html.match(/id=["']post_id["']\s+value=["'](\d+)["']/i);
 
         if (urlIdMatch) {
             newsId = urlIdMatch[1];
@@ -90,12 +89,19 @@ async function extractEpisodes(url) {
             newsId = htmlIdMatch[1];
         }
 
-        if (!newsId) {
-            console.log("Impossible de trouver l'ID de l'anime.");
-            return JSON.stringify([]);
+        if (!newsId) return JSON.stringify([]);
+
+        // ----------------------------------------------------
+        // NOUVEAUTÉ : Détection automatique de la saison
+        // ----------------------------------------------------
+        let seasonNum = 1;
+        // On cherche "saison-2", "saison 2", etc. dans l'URL ou le HTML
+        const seasonMatch = url.match(/saison[-_]?(\d+)/i) || html.match(/saison\s*(\d+)/i);
+        if (seasonMatch) {
+            seasonNum = parseInt(seasonMatch[1]);
         }
 
-        // 2. Appel AJAX vers le serveur d'AnimesUltra
+        // 2. Appel AJAX
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
         const ajaxRes = await fetchv2(ajaxUrl);
         const ajaxText = await ajaxRes.text();
@@ -105,22 +111,18 @@ async function extractEpisodes(url) {
             const ajaxJson = JSON.parse(ajaxText);
             ajaxHtml = ajaxJson.html || ajaxText; 
         } catch (e) {
-            ajaxHtml = ajaxText; // Cas où le site renvoie directement du texte
+            ajaxHtml = ajaxText;
         }
 
         let results = [];
         
-        // 3. Extraction flexible (peu importe l'ordre des attributs class, href, title)
+        // 3. Extraction
         const epTagRegex = /<a[^>]+class=["'][^"']*ep-item[^"']*["'][^>]*>/gi;
         let match;
-        
-        // On cherche dans le résultat AJAX en priorité, sinon sur la page de base
         let sourceToScan = ajaxHtml.includes("ep-item") ? ajaxHtml : html;
 
         while ((match = epTagRegex.exec(sourceToScan)) !== null) {
             let tag = match[0];
-            
-            // On fouille l'intérieur de la balise <a> isolée
             let hrefMatch = tag.match(/href=["']([^"']+)["']/i);
             let titleMatch = tag.match(/title=["']([^"']+)["']/i);
             let numMatch = tag.match(/data-number=["'](\d+)["']/i);
@@ -133,12 +135,13 @@ async function extractEpisodes(url) {
                     href: epHref,
                     title: titleMatch ? titleMatch[1] : "Épisode",
                     number: numMatch ? parseInt(numMatch[1]) : (results.length + 1),
-                    season: 1
+                    // On donne à Sora le VRAI numéro de saison trouvé plus haut !
+                    season: seasonNum
                 });
             }
         }
 
-        // 4. Nettoyage des doublons éventuels
+        // 4. Nettoyage des doublons
         let uniqueResults = [];
         let hrefsSet = new Set();
         for (let ep of results) {
@@ -148,8 +151,6 @@ async function extractEpisodes(url) {
             }
         }
 
-        // AnimesUltra trie parfois ses épisodes du plus récent au plus ancien.
-        // Reverse remet l'épisode 1 en haut de la liste pour Sora.
         return JSON.stringify(uniqueResults.reverse());
 
     } catch (e) {
