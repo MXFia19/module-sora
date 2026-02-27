@@ -51,27 +51,49 @@ async function searchResults(keyword) {
     }
 }
 
-// --- 2. DÉTAILS ---
+// --- 2. DÉTAILS (Spécial AnimesUltra) ---
 async function extractDetails(url) {
     try {
         const response = await fetchv2(url);
         const html = await response.text();
-        
-        // On cherche la description (à adapter selon le code source exact du site)
-        const descMatch = html.match(/<div class="description"[^>]*>([\s\S]*?)<\/div>/i) || 
-                          html.match(/<div class="film-poster-text"[^>]*>([\s\S]*?)<\/div>/i);
-                          
+
         let description = "Pas de description disponible.";
-        if (descMatch) {
-            description = descMatch[1].replace(/<[^>]+>/g, '').trim();
+
+        // On cible EXACTEMENT la structure du site : <div class="film-description..."><div class="text">...</div>
+        const descMatch = html.match(/<div class=["'][^"']*film-description[^"']*["'][^>]*>\s*<div class=["']text["']>([\s\S]*?)<\/div>/i);
+
+        if (descMatch && descMatch[1]) {
+            description = descMatch[1]
+                // 1. On supprime la pub "Vous Regarder XYZ en streaming" qui pollue le résumé
+                .replace(/<p>\s*Vous\s*<strong[^>]*>.*?<\/strong>.*?<\/p>/gi, '') 
+                // 2. On nettoie les balises HTML restantes (<p>, <br>, etc.)
+                .replace(/<[^>]+>/g, '') 
+                .replace(/&amp;/g, '&')
+                .replace(/&#039;/g, "'")
+                .replace(/&quot;/g, '"')
+                .trim();
+        } else {
+            // Plan de secours : balise meta SEO (og:description)
+            const metaDescMatch = html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i);
+            if (metaDescMatch && metaDescMatch[1]) {
+                description = metaDescMatch[1].trim();
+            }
         }
 
-        return JSON.stringify([{ description, aliases: "AnimesUltra", airdate: "N/A" }]);
+        // On récupère l'année exactement où elle est rangée (<span class="item-head">Année:</span>)
+        let airdate = "N/A";
+        const yearMatch = html.match(/<span class=["']item-head["']>Année:<\/span>\s*<span class=["']name["']><a[^>]*>(\d{4})<\/a><\/span>/i) || 
+                          html.match(/\/xfsearch\/year\/(\d{4})\//i);
+        if (yearMatch) {
+            airdate = yearMatch[1];
+        }
+
+        return JSON.stringify([{ description, aliases: "AnimesUltra", airdate }]);
     } catch (e) {
-        return JSON.stringify([{ description: "Erreur de chargement", aliases: "Erreur", airdate: "N/A" }]);
+        console.log("Erreur Détails AnimesUltra: " + e);
+        return JSON.stringify([{ description: "Erreur de chargement", aliases: "AnimesUltra", airdate: "N/A" }]);
     }
 }
-
 // --- 3. ÉPISODES (Le Tri Parfait) ---
 async function extractEpisodes(url) {
     try {
