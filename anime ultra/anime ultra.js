@@ -172,12 +172,82 @@ async function extractEpisodes(url) {
         return JSON.stringify([]);
     }
 }
-// --- 4. LECTEUR (Brouillon temporaire pour tester) ---
+// --- 4. LECTEUR (Extraction des différents serveurs AnimesUltra) ---
 async function extractStreamUrl(url) {
-    // On mettra la vraie logique ici après avoir validé les étapes 1, 2 et 3 !
-    return JSON.stringify([{
-        title: "Lecteur Web (Test)",
-        streamUrl: `webview://${url}`,
-        headers: {}
-    }]);
+    try {
+        const response = await fetchv2(url);
+        const html = await response.text();
+        let streams = [];
+
+        // 1. On cherche tous les ID de serveurs (les fameux boutons Mytv, Sibnet, Sendvid...)
+        const serverRegex = /data-server-id=["'](\d+)["']/gi;
+        let serverMatches = [...html.matchAll(serverRegex)];
+
+        for (let match of serverMatches) {
+            let serverId = match[1];
+            
+            // 2. On cherche le lien caché associé à ce bouton (ex: content_player_1)
+            let playerRegex = new RegExp(`id=["']content_player_${serverId}["'][^>]*>([^<]+)`, 'i');
+            let playerMatch = html.match(playerRegex);
+
+            if (playerMatch) {
+                let videoUrl = playerMatch[1].trim();
+
+                // Astuce AnimesUltra : Parfois ils cachent Sibnet sous une simple suite de chiffres
+                if (/^\d+$/.test(videoUrl)) {
+                    videoUrl = `https://video.sibnet.ru/shell.php?videoid=${videoUrl}`;
+                }
+
+                // S'il y a plusieurs liens collés
+                let urls = videoUrl.replace(/,$/, "").split(",");
+
+                for (let embedUrl of urls) {
+                    if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
+                    if (!embedUrl.startsWith('http')) continue;
+
+                    // 3. On nomme joliment le lecteur pour que tu puisses choisir dans Sora
+                    let label = "Lecteur Externe";
+                    if (embedUrl.includes("sibnet")) label = "Sibnet";
+                    else if (embedUrl.includes("sendvid")) label = "Sendvid";
+                    else if (embedUrl.includes("mytv") || embedUrl.includes("my.mail.ru")) label = "MyTV";
+                    else if (embedUrl.includes("vidmoly")) label = "Vidmoly";
+                    else if (embedUrl.includes("voe")) label = "VOE";
+
+                    // 4. On l'ajoute à la liste avec la sécurité Webview
+                    streams.push({
+                        title: `🌐 ${label}`,
+                        streamUrl: `webview://${embedUrl}`,
+                        headers: { "Referer": BASE_URL }
+                    });
+                }
+            }
+        }
+
+        // PLAN B : Si le site a changé son code, on cherche bêtement les iframes
+        if (streams.length === 0) {
+            const iframeRegex = /<iframe[^>]+src=["']([^"']+)["']/gi;
+            let iframeMatch;
+            while ((iframeMatch = iframeRegex.exec(html)) !== null) {
+                let iframeUrl = iframeMatch[1];
+                if (iframeUrl.startsWith('//')) iframeUrl = "https:" + iframeUrl;
+                if (iframeUrl.startsWith('http')) {
+                    
+                    let label = "Lecteur Web";
+                    if (iframeUrl.includes("sibnet")) label = "Sibnet";
+                    else if (iframeUrl.includes("sendvid")) label = "Sendvid";
+
+                    streams.push({
+                        title: `🌐 ${label}`,
+                        streamUrl: `webview://${iframeUrl}`,
+                        headers: { "Referer": BASE_URL }
+                    });
+                }
+            }
+        }
+
+        return JSON.stringify(streams);
+    } catch (e) {
+        console.log("Erreur Lecteur AnimesUltra: " + e);
+        return JSON.stringify([]);
+    }
 }
