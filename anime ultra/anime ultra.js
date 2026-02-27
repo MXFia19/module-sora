@@ -72,7 +72,7 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Sans aucun système de saison) ---
+// --- 3. ÉPISODES (Le Tri Parfait) ---
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
@@ -121,11 +121,11 @@ async function extractEpisodes(url) {
                 let epHref = hrefMatch[1];
                 if (epHref.startsWith('/')) epHref = BASE_URL + epHref;
 
-                // Ajout de l'épisode (sans aucune clé "season")
                 results.push({
                     href: epHref,
                     title: titleMatch ? titleMatch[1] : "Épisode",
-                    number: numMatch ? parseInt(numMatch[1]) : (results.length + 1)
+                    number: numMatch ? parseInt(numMatch[1]) : (results.length + 1),
+                    season: 1 // On force tout proprement dans la Saison 1
                 });
             }
         }
@@ -140,8 +140,10 @@ async function extractEpisodes(url) {
             }
         }
 
-        // Renvoi de la liste du premier au dernier
-        return JSON.stringify(uniqueResults.reverse());
+        // LE CORRECTIF EST ICI : On trie strictement de 1 à 25
+        uniqueResults.sort((a, b) => a.number - b.number);
+
+        return JSON.stringify(uniqueResults);
 
     } catch (e) {
         console.log("Erreur Episodes AnimesUltra: " + e);
