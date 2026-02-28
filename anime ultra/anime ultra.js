@@ -2,10 +2,7 @@ const BASE_URL = "https://animesultra.org";
 
 async function searchResults(keyword) {
     try {
-        // Nouvelle URL de recherche basée sur ton retour
         const searchUrl = `${BASE_URL}/?story=${encodeURIComponent(keyword)}&do=search&subaction=search`;
-        
-        // Un header simple pour passer pour un navigateur
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         };
@@ -14,17 +11,11 @@ async function searchResults(keyword) {
         const html = await response.text();
         const results = [];
 
-        // On découpe le HTML par bloc de résultat ("flw-item")
         const items = html.split('class="flw-item"');
         
-        // On commence à 1 car l'index 0 contient l'en-tête de la page
         for (let i = 1; i < items.length; i++) {
             let item = items[i];
-            
-            // On cherche le lien et le titre dans la balise <a> (film-poster-ahref)
             let linkMatch = item.match(/<a[^>]+href=["']([^"']+)["'][^>]+class=["'][^"']*film-poster-ahref[^"']*["'][^>]+title=["']([^"']+)["']/i);
-            
-            // On cherche l'image (data-src en priorité à cause du lazyload que tu m'as montré)
             let imgMatch = item.match(/<img[^>]+data-src=["']([^"']+)["']/i) || item.match(/<img[^>]+src=["']([^"']+)["']/i);
 
             if (linkMatch) {
@@ -32,12 +23,10 @@ async function searchResults(keyword) {
                 let title = linkMatch[2].replace(/&amp;/g, '&').replace(/&#039;/g, "'").trim();
                 let image = imgMatch ? imgMatch[1] : "";
                 
-                // Si l'image commence par "/", on rajoute https://animesultra.org devant
                 if (image.startsWith('/')) {
                     image = BASE_URL + image;
                 }
 
-                // On vérifie qu'on n'a pas déjà ajouté ce lien
                 if (!results.find(r => r.href === href)) {
                     results.push({ title, image, href });
                 }
@@ -51,7 +40,6 @@ async function searchResults(keyword) {
     }
 }
 
-// --- 2. DÉTAILS (Spécial AnimesUltra) ---
 async function extractDetails(url) {
     try {
         const response = await fetchv2(url);
@@ -59,28 +47,23 @@ async function extractDetails(url) {
 
         let description = "Pas de description disponible.";
 
-        // On cible EXACTEMENT la structure du site : <div class="film-description..."><div class="text">...</div>
         const descMatch = html.match(/<div class=["'][^"']*film-description[^"']*["'][^>]*>\s*<div class=["']text["']>([\s\S]*?)<\/div>/i);
 
         if (descMatch && descMatch[1]) {
             description = descMatch[1]
-                // 1. On supprime la pub "Vous Regarder XYZ en streaming" qui pollue le résumé
                 .replace(/<p>\s*Vous\s*<strong[^>]*>.*?<\/strong>.*?<\/p>/gi, '') 
-                // 2. On nettoie les balises HTML restantes (<p>, <br>, etc.)
                 .replace(/<[^>]+>/g, '') 
                 .replace(/&amp;/g, '&')
                 .replace(/&#039;/g, "'")
                 .replace(/&quot;/g, '"')
                 .trim();
         } else {
-            // Plan de secours : balise meta SEO (og:description)
             const metaDescMatch = html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']+)["']/i);
             if (metaDescMatch && metaDescMatch[1]) {
                 description = metaDescMatch[1].trim();
             }
         }
 
-        // On récupère l'année exactement où elle est rangée (<span class="item-head">Année:</span>)
         let airdate = "N/A";
         const yearMatch = html.match(/<span class=["']item-head["']>Année:<\/span>\s*<span class=["']name["']><a[^>]*>(\d{4})<\/a><\/span>/i) || 
                           html.match(/\/xfsearch\/year\/(\d{4})\//i);
@@ -94,13 +77,12 @@ async function extractDetails(url) {
         return JSON.stringify([{ description: "Erreur de chargement", aliases: "AnimesUltra", airdate: "N/A" }]);
     }
 }
-// --- 3. ÉPISODES (Le Tri Parfait) ---
+
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
         const html = await response.text();
 
-        // 1. Trouver l'ID
         let newsId = null;
         const urlIdMatch = url.match(/\/(\d+)-[^/]+\.html/i);
         const htmlIdMatch = html.match(/id=["']post_id["']\s+value=["'](\d+)["']/i);
@@ -113,7 +95,6 @@ async function extractEpisodes(url) {
 
         if (!newsId) return JSON.stringify([]);
 
-        // 2. Appel AJAX
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
         const ajaxRes = await fetchv2(ajaxUrl);
         const ajaxText = await ajaxRes.text();
@@ -127,8 +108,6 @@ async function extractEpisodes(url) {
         }
 
         let results = [];
-        
-        // 3. Extraction
         const epTagRegex = /<a[^>]+class=["'][^"']*ep-item[^"']*["'][^>]*>/gi;
         let match;
         let sourceToScan = ajaxHtml.includes("ep-item") ? ajaxHtml : html;
@@ -146,13 +125,11 @@ async function extractEpisodes(url) {
                 results.push({
                     href: epHref,
                     title: titleMatch ? titleMatch[1] : "Épisode",
-                    number: numMatch ? parseInt(numMatch[1]) : (results.length + 1),
-                    season: 1 // On force tout proprement dans la Saison 1
+                    number: numMatch ? parseInt(numMatch[1]) : (results.length + 1)
                 });
             }
         }
 
-        // 4. Nettoyage des doublons
         let uniqueResults = [];
         let hrefsSet = new Set();
         for (let ep of results) {
@@ -162,9 +139,7 @@ async function extractEpisodes(url) {
             }
         }
 
-        // LE CORRECTIF EST ICI : On trie strictement de 1 à 25
         uniqueResults.sort((a, b) => a.number - b.number);
-
         return JSON.stringify(uniqueResults);
 
     } catch (e) {
@@ -172,17 +147,15 @@ async function extractEpisodes(url) {
         return JSON.stringify([]);
     }
 }
-// --- 4. LECTEUR (Interception de la redirection dynamique Sibnet) ---
+
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
     
     try {
         const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
-        if (!idMatch) return JSON.stringify({ type: "none" });
+        if (!idMatch) return JSON.stringify([]);
 
         const newsId = idMatch[1];
-        const episodeNum = idMatch[2];
-        const dataId = `${newsId}-${episodeNum}`;
 
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
         const ajaxRes = await fetchv2(ajaxUrl);
@@ -224,18 +197,17 @@ async function extractStreamUrl(url) {
                     if (embedUrl.includes("sibnet")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
                         try {
-                            const req = await fetchv2(embedUrl);
+                            const req = await fetchv2(embedUrl, { 
+                                "Referer": BASE_URL,
+                                "Accept-Encoding": "identity" 
+                            });
                             const sibHtml = await req.text();
                             const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i) || 
                                              sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
                             
                             if (mp4Match) {
                                 let directUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
-                                console.log(`[Lecteur] 🔄 Lien de redirection Sibnet : ${directUrl}`);
                                 
-                                // ---------------------------------------------------------
-                                // 🏴‍☠️ INTERCEPTION DU CDN SIBNET AVEC LOCATION
-                                // ---------------------------------------------------------
                                 try {
                                     const redirectReq = await fetch(directUrl, {
                                         method: "GET",
@@ -243,21 +215,16 @@ async function extractStreamUrl(url) {
                                             "Referer": embedUrl,
                                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                                         },
-                                        redirect: "manual" // Bloque la redirection pour lire l'URL
+                                        redirect: "manual"
                                     });
                                     
-                                    // On récupère la vraie adresse secrète !
                                     const location = redirectReq.headers.get("location") || redirectReq.headers.get("Location");
                                     if (location) {
                                         directUrl = location.startsWith("//") ? "https:" + location : location;
-                                        console.log(`[Lecteur] 🎯 VRAI CDN SIBNET TROUVÉ (Location) : ${directUrl}`);
                                     } else if (redirectReq.url && redirectReq.url !== directUrl) {
                                         directUrl = redirectReq.url;
-                                        console.log(`[Lecteur] 🎯 VRAI CDN SIBNET TROUVÉ (URL) : ${directUrl}`);
                                     }
-                                } catch(e) {
-                                    console.log(`[Lecteur] ⚠️ Interception CDN échouée : ${e}`);
-                                }
+                                } catch(e) {}
 
                                 streams.push({
                                     title: "Sibnet (MP4)",
@@ -267,12 +234,8 @@ async function extractStreamUrl(url) {
                                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                                     }
                                 });
-                            } else {
-                                streams.push({ title: "Sibnet (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
                             }
-                        } catch (e) { 
-                            streams.push({ title: "Sibnet (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
-                        }
+                        } catch (e) {}
                     }
                     else if (embedUrl.includes("sendvid")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sendvid en cours...`);
@@ -288,12 +251,8 @@ async function extractStreamUrl(url) {
                                     streamUrl: mp4Match[1],
                                     headers: { "Referer": embedUrl }
                                 });
-                            } else {
-                                streams.push({ title: "Sendvid (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
                             }
-                        } catch (e) { 
-                            streams.push({ title: "Sendvid (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
-                        }
+                        } catch (e) {}
                     }
                     else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) {
                         console.log(`[Lecteur] 🕵️ Extraction Daisuki en cours...`);
@@ -312,33 +271,29 @@ async function extractStreamUrl(url) {
                                     streamUrl: directUrl,
                                     headers: { "Referer": embedUrl }
                                 });
-                            } else {
-                                streams.push({ title: "Daisuki (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
                             }
-                        } catch (e) { 
-                            streams.push({ title: "Daisuki (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
-                        }
-                    }
-                    else {
-                        let label = "Lecteur Web (Embed)";
-                        if (embedUrl.includes("vidmoly")) label = "Vidmoly (Embed)";
-                        if (embedUrl.includes("voe")) label = "VOE (Embed)";
-                        
-                        streams.push({
-                            title: label,
-                            streamUrl: embedUrl,
-                            headers: { "Referer": BASE_URL }
-                        });
+                        } catch (e) {}
                     }
                 }
             }
         }
 
-        console.log(`[Lecteur] 🎉 Terminé. Flux envoyés : ${streams.length}`);
+ // Le Filtre Anti-Crash vital pour iOS : 
+        let safeStreams = streams.filter(s => 
+            s.streamUrl.includes('.mp4') || 
+            s.streamUrl.includes('.m3u8')
+        );
+
+        console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
         
-        if (streams.length > 0) {
-            return JSON.stringify({ type: "servers", streams: streams });
+        // LE BON FORMAT (Grâce à ton log !)
+        if (safeStreams.length > 0) {
+            return JSON.stringify({ 
+                type: "servers", 
+                streams: safeStreams 
+            });
         } else {
+            // Si on n'a rien trouvé ou que tout a été filtré
             return JSON.stringify({ type: "none" });
         }
         
