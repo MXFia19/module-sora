@@ -172,66 +172,45 @@ async function extractEpisodes(url) {
         return JSON.stringify([]);
     }
 }
-// --- 4. LECTEUR (Via full-story.php - Découverte de génie) ---
+// --- 4. LECTEUR (Interception de la redirection dynamique Sibnet) ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
     
     try {
-        // 1. On retrouve le newsId depuis l'URL (ex: 1221)
         const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
-        if (!idMatch) {
-            console.log("[Lecteur] ❌ Impossible de trouver l'ID dans l'URL");
-            return JSON.stringify([]);
-        }
+        if (!idMatch) return JSON.stringify({ type: "none" });
 
         const newsId = idMatch[1];
-        const episodeNum = idMatch[2]; // ex: "1"
-        const dataId = `${newsId}-${episodeNum}`; // ex: "1221-1"
-        console.log(`[Lecteur] 🔎 Recherche des lecteurs pour data-id = ${dataId}`);
+        const episodeNum = idMatch[2];
+        const dataId = `${newsId}-${episodeNum}`;
 
-        // 2. On appelle full-story.php
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
         const ajaxRes = await fetchv2(ajaxUrl);
         const ajaxText = await ajaxRes.text();
         
         let html = "";
-        try {
-            html = JSON.parse(ajaxText).html || ajaxText;
-        } catch (e) {
-            html = ajaxText;
-        }
+        try { html = JSON.parse(ajaxText).html || ajaxText; } 
+        catch (e) { html = ajaxText; }
 
         let streams = [];
-
-        // 3. Il faut trouver où commence la ligne de notre épisode dans ce gros fichier
-        // Le site est malin : l'épisode 1 a les lecteurs 1 à 5, l'épisode 2 les lecteurs 6 à 10...
-        // MAIS pour être sûr, on va scanner TOUS les div de type content_player_X 
-        // L'astuce c'est qu'on a besoin de la page de l'épisode pour connaître le nom des boutons.
         
-        // Finalement, le plus simple est de télécharger la page de l'épisode JUSTE pour avoir le nom des boutons
         const episodeRes = await fetchv2(url);
         const episodeHtml = await episodeRes.text();
         
         const serverRegex = /data-server-id=["']([^"']+)["']/gi;
         let serverMatches = [...episodeHtml.matchAll(serverRegex)];
-        console.log(`[Lecteur] 🔍 Boutons trouvés sur la page de l'épisode : ${serverMatches.length}`);
 
         for (let match of serverMatches) {
-            let serverId = match[1]; // ex: "1v", "5sen"
-            
-            // 4. On cherche CE serveur précis dans le gros HTML de full-story.php !
+            let serverId = match[1]; 
             let playerRegex = new RegExp(`id=["']content_player_${serverId}["'][^>]*>([^<]+)<\\/div>`, 'i');
             let playerMatch = html.match(playerRegex);
 
             if (playerMatch) {
                 let videoUrl = playerMatch[1].trim();
-                console.log(`[Lecteur] 🔗 Lien trouvé pour ${serverId} : ${videoUrl}`);
 
-                // Astuces Sibnet
                 if (/^\d+$/.test(videoUrl)) {
                     videoUrl = `https://video.sibnet.ru/shell.php?videoid=${videoUrl}`;
                 } else if (!videoUrl.startsWith('http') && videoUrl.length > 10) {
-                     // Astuce Mytv (ils mettent juste un code, ex: "ex31u8xgqst...")
                      videoUrl = `https://lb.daisukianime.xyz/dist/embedm.html?id=${videoUrl}`;
                 }
 
@@ -241,29 +220,130 @@ async function extractStreamUrl(url) {
                     embedUrl = embedUrl.trim();
                     if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
                     if (!embedUrl.startsWith('http')) continue;
+                    
+                    if (embedUrl.includes("sibnet")) {
+                        console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
+                        try {
+                            const req = await fetchv2(embedUrl);
+                            const sibHtml = await req.text();
+                            const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i) || 
+                                             sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
+                            
+                            if (mp4Match) {
+                                let directUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
+                                console.log(`[Lecteur] 🔄 Lien de redirection Sibnet : ${directUrl}`);
+                                
+                                // ---------------------------------------------------------
+                                // 🏴‍☠️ INTERCEPTION DU CDN SIBNET AVEC LOCATION
+                                // ---------------------------------------------------------
+                                try {
+                                    const redirectReq = await fetch(directUrl, {
+                                        method: "GET",
+                                        headers: { 
+                                            "Referer": embedUrl,
+                                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                        },
+                                        redirect: "manual" // Bloque la redirection pour lire l'URL
+                                    });
+                                    
+                                    // On récupère la vraie adresse secrète !
+                                    const location = redirectReq.headers.get("location") || redirectReq.headers.get("Location");
+                                    if (location) {
+                                        directUrl = location.startsWith("//") ? "https:" + location : location;
+                                        console.log(`[Lecteur] 🎯 VRAI CDN SIBNET TROUVÉ (Location) : ${directUrl}`);
+                                    } else if (redirectReq.url && redirectReq.url !== directUrl) {
+                                        directUrl = redirectReq.url;
+                                        console.log(`[Lecteur] 🎯 VRAI CDN SIBNET TROUVÉ (URL) : ${directUrl}`);
+                                    }
+                                } catch(e) {
+                                    console.log(`[Lecteur] ⚠️ Interception CDN échouée : ${e}`);
+                                }
 
-                    let label = "Lecteur Externe";
-                    if (embedUrl.includes("sibnet")) label = "Sibnet";
-                    else if (embedUrl.includes("sendvid")) label = "Sendvid";
-                    else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) label = "Daisuki/MyTV";
-                    else if (embedUrl.includes("vidmoly")) label = "Vidmoly";
-                    else if (embedUrl.includes("voe")) label = "VOE";
-
-                    console.log(`[Lecteur] ✅ Ajout: [${label}] -> ${embedUrl}`);
-                    streams.push({
-                        title: label,
-                        streamUrl: embedUrl,
-                        headers: { "Referer": BASE_URL }
-                    });
+                                streams.push({
+                                    title: "Sibnet (MP4)",
+                                    streamUrl: directUrl,
+                                    headers: { 
+                                        "Referer": embedUrl,
+                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                    }
+                                });
+                            } else {
+                                streams.push({ title: "Sibnet (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
+                            }
+                        } catch (e) { 
+                            streams.push({ title: "Sibnet (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
+                        }
+                    }
+                    else if (embedUrl.includes("sendvid")) {
+                        console.log(`[Lecteur] 🕵️ Extraction Sendvid en cours...`);
+                        try {
+                            const req = await fetchv2(embedUrl);
+                            const sendHtml = await req.text();
+                            const mp4Match = sendHtml.match(/<source[^>]+src=["']([^"']+\.mp4)["']/i) ||
+                                             sendHtml.match(/video_source\s*=\s*["']([^"']+)["']/i);
+                            
+                            if (mp4Match) {
+                                streams.push({
+                                    title: "Sendvid (MP4)",
+                                    streamUrl: mp4Match[1],
+                                    headers: { "Referer": embedUrl }
+                                });
+                            } else {
+                                streams.push({ title: "Sendvid (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
+                            }
+                        } catch (e) { 
+                            streams.push({ title: "Sendvid (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
+                        }
+                    }
+                    else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) {
+                        console.log(`[Lecteur] 🕵️ Extraction Daisuki en cours...`);
+                        try {
+                            const req = await fetchv2(embedUrl);
+                            const daiHtml = await req.text();
+                            const mediaMatch = daiHtml.match(/source\s*:\s*["']([^"']+)["']/i) ||
+                                               daiHtml.match(/file\s*:\s*["']([^"']+)["']/i) ||
+                                               daiHtml.match(/src=["']([^"']+\.(m3u8|mp4)[^"']*)["']/i);
+                            
+                            if (mediaMatch) {
+                                const directUrl = mediaMatch[1];
+                                const typeStr = directUrl.includes(".m3u8") ? "HLS" : "MP4";
+                                streams.push({
+                                    title: `Daisuki (${typeStr})`,
+                                    streamUrl: directUrl,
+                                    headers: { "Referer": embedUrl }
+                                });
+                            } else {
+                                streams.push({ title: "Daisuki (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
+                            }
+                        } catch (e) { 
+                            streams.push({ title: "Daisuki (Embed)", streamUrl: embedUrl, headers: { "Referer": BASE_URL } });
+                        }
+                    }
+                    else {
+                        let label = "Lecteur Web (Embed)";
+                        if (embedUrl.includes("vidmoly")) label = "Vidmoly (Embed)";
+                        if (embedUrl.includes("voe")) label = "VOE (Embed)";
+                        
+                        streams.push({
+                            title: label,
+                            streamUrl: embedUrl,
+                            headers: { "Referer": BASE_URL }
+                        });
+                    }
                 }
             }
         }
 
         console.log(`[Lecteur] 🎉 Terminé. Flux envoyés : ${streams.length}`);
-        return JSON.stringify(streams);
+        
+        if (streams.length > 0) {
+            return JSON.stringify({ type: "servers", streams: streams });
+        } else {
+            return JSON.stringify({ type: "none" });
+        }
         
     } catch (e) {
         console.log(`[Lecteur] 🚨 Erreur : ${e}`);
-        return JSON.stringify([]);
+        return JSON.stringify({ type: "none" });
     }
 }
