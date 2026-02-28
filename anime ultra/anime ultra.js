@@ -194,20 +194,27 @@ async function extractStreamUrl(url) {
                     if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
                     if (!embedUrl.startsWith('http')) continue;
                     
+  // --- MOTEUR SIBNET ---
                     if (embedUrl.includes("sibnet")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
                         try {
+                            // L'ASTUCE EST ICI : On force l'encodage russe !
                             const req = await fetchv2(embedUrl, { 
                                 "Referer": BASE_URL,
-                                "Accept-Encoding": "identity" 
+                                "encoding": "windows-1251",
+                                "Accept-Charset": "windows-1251, utf-8;q=0.7,*;q=0.3" 
                             });
+                            
                             const sibHtml = await req.text();
-                            const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i) || 
-                                             sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
+                            
+                            // On utilise ta Regex ultra-précise
+                            const mp4Match = sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i) || 
+                                             sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i);
                             
                             if (mp4Match) {
                                 let directUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
                                 
+                                // Tentative de récupérer l'URL finale (Location)
                                 try {
                                     const redirectReq = await fetch(directUrl, {
                                         method: "GET",
@@ -235,7 +242,9 @@ async function extractStreamUrl(url) {
                                     }
                                 });
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            console.log(`[Lecteur] Erreur Sibnet : ${e}`);
+                        }
                     }
                     else if (embedUrl.includes("sendvid")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sendvid en cours...`);
