@@ -1,6 +1,6 @@
 const BASE_URL = "https://v6.voiranime.com";
 
-// --- 1. RECHERCHE (Multi-pages, Camouflage & Année de Sortie) ---
+// --- 1. RECHERCHE (Multi-pages, Camouflage & Filtre Anti-déchets) ---
 async function searchResults(keyword) {
     console.log(`[Recherche] 🔍 Lancement multi-pages pour : "${keyword}"`);
     try {
@@ -22,12 +22,10 @@ async function searchResults(keyword) {
         });
 
         const pagesHtml = await Promise.all(fetchPromises);
-        console.log(`[Recherche] 📥 ${pagesHtml.length} pages téléchargées avec succès.`);
 
         for (const html of pagesHtml) {
             if (!html) continue;
 
-            // On découpe la page selon le mode d'affichage (Liste = c-tabs-item__content, Grille = page-item-detail ou c-image)
             let blocks = [];
             if (html.includes('c-tabs-item__content')) {
                 blocks = html.split('c-tabs-item__content');
@@ -37,19 +35,22 @@ async function searchResults(keyword) {
                 blocks = html.split('class="c-image"');
             }
 
-            // On boucle sur chaque bloc d'anime
             for (let i = 1; i < blocks.length; i++) {
                 let block = blocks[i];
                 
                 let hrefMatch = block.match(/href=["']([^"']+)["']/i);
                 let titleMatch = block.match(/title=["']([^"']+)["']/i) || block.match(/alt=["']([^"']+)["']/i);
                 let imgMatch = block.match(/data-src=["']([^"']+)["']/i) || block.match(/src=["']([^"']+)["']/i);
-                
-                // 🎯 LA NOUVEAUTÉ : Extraction de l'année de sortie
                 let yearMatch = block.match(/release-year[^>]*>\s*<a[^>]*>(\d{4})<\/a>/i);
 
                 if (hrefMatch && titleMatch) {
                     let href = hrefMatch[1];
+                    
+                    // 🛡️ FILTRE ANTI-DÉCHETS : On ignore les scripts, le CSS et le fameux RSD
+                    if (href.includes('.css') || href.includes('.js') || href.includes('wp-') || titleMatch[1].includes('RSD')) {
+                        continue;
+                    }
+
                     let title = titleMatch[1].replace(/&amp;/g, '&').replace(/&#039;/g, "'").trim();
                     let image = imgMatch ? imgMatch[1] : "";
                     if (image.startsWith('/')) image = BASE_URL + image;
@@ -58,44 +59,17 @@ async function searchResults(keyword) {
 
                     if (!results.find(r => r.href === href)) {
                         let item = { title, image, href };
-                        
-                        // Si on a trouvé une année, on l'ajoute au résultat envoyé à Sora
-                        if (year) {
-                            item.year = year; 
-                        }
-                        
+                        if (year) item.year = year; 
                         results.push(item);
                     }
                 }
             }
-
-            // PLAN B : Cas extrême sans images (Recherche par titre H3)
-            if (blocks.length <= 1) {
-                const blocksH3 = html.split('<h3 class="h4">');
-                for (let i = 1; i < blocksH3.length; i++) {
-                    let block = blocksH3[i];
-                    let linkMatch = block.match(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
-                    
-                    if (linkMatch) {
-                        let href = linkMatch[1];
-                        let title = linkMatch[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();
-                        if (!results.find(r => r.href === href)) {
-                            results.push({ href, title, image: "" });
-                        }
-                    }
-                }
-            }
         }
-        
-        console.log(`[Recherche] 🚀 Fin. Nombre total d'animes extraits : ${results.length}`);
         return JSON.stringify(results);
-
-    } catch (e) { 
-        console.log(`[Recherche] 🚨 Erreur Multi-pages : ${e}`);
-        return JSON.stringify([]); 
-    }
+    } catch (e) { return JSON.stringify([]); }
 }
-// --- 2. DÉTAILS ---
+
+// --- 2. DÉTAILS (Avec le Bulldozer à Années) ---
 async function extractDetails(url) {
     try {
         const response = await fetchv2(url);
@@ -110,22 +84,25 @@ async function extractDetails(url) {
                 .replace(/<[^>]+>/g, '') // Enlève les balises HTML
                 .replace(/&amp;/g, '&')
                 .replace(/&#039;/g, "'")
-                .replace(/&#8217;/g, "'") // Apostrophes
-                .replace(/&#8230;/g, "...") // Points de suspension
+                .replace(/&#8217;/g, "'")
+                .replace(/&#8230;/g, "...")
                 .replace(/&quot;/g, '"')
                 .trim();
         }
 
         let airdate = "N/A";
         
-        // LA TACTIQUE ULTIME : On cherche un lien cliquable qui pointe vers la catégorie "release"
-        // Exemple : href="https://v6.voiranime.com/anime-release/2012/" > 2012 </a>
-        const yearMatch = html.match(/href=["'][^"']*(?:anime-release|release)[^"']*["'][^>]*>\s*(\d{4})\s*<\/a>/i) || 
-                          html.match(/<h5>\s*(?:Année|Release|Sortie)[\s\S]*?<\/h5>\s*<\/div>\s*<div[^>]*>[\s\S]*?<a[^>]*>\s*(\d{4})\s*<\/a>/i);
+        // 🚜 LE BULLDOZER : On trouve le bloc "Année" et on aspire le premier nombre à 4 chiffres qui commence par 19.. ou 20..
+        const yearBlockMatch = html.match(/<h5>\s*(?:Année|Release|Sortie|Year)[^<]*<\/h5>[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>/i);
+        if (yearBlockMatch) {
+            const yMatch = yearBlockMatch[1].match(/\b(19\d{2}|20\d{2})\b/);
+            if (yMatch) airdate = yMatch[1];
+        }
         
-        if (yearMatch) {
-            // yearMatch[1] correspond à la première Regex, yearMatch[2] à la deuxième (plan B)
-            airdate = yearMatch[1] ? yearMatch[1] : yearMatch[2];
+        // Plan de secours
+        if (airdate === "N/A") {
+            const altMatch = html.match(/href=["'][^"']*(?:anime-release|release)[^"']*["'][^>]*>\s*(\d{4})\s*<\/a>/i);
+            if (altMatch) airdate = altMatch[1];
         }
 
         return JSON.stringify([{ description, aliases: "Voiranime", airdate }]);
