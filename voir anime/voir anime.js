@@ -106,15 +106,32 @@ async function extractDetails(url) {
                           html.match(/<div class=["']description-summary[^>]*>([\s\S]*?)<\/div>/i);
 
         if (descMatch && descMatch[1]) {
-            description = descMatch[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#039;/g, "'").replace(/&quot;/g, '"').trim();
+            description = descMatch[1]
+                .replace(/<[^>]+>/g, '') // Enlève les balises HTML
+                .replace(/&amp;/g, '&')
+                .replace(/&#039;/g, "'")
+                .replace(/&#8217;/g, "'") // Apostrophes
+                .replace(/&#8230;/g, "...") // Points de suspension
+                .replace(/&quot;/g, '"')
+                .trim();
         }
 
         let airdate = "N/A";
-        const yearMatch = html.match(/<div class=["']summary-heading["']>\s*<h5>Release<\/h5>\s*<\/div>\s*<div class=["']summary-content["']>\s*<a[^>]*>(\d{4})<\/a>/i);
-        if (yearMatch) airdate = yearMatch[1];
+        
+        // LA TACTIQUE ULTIME : On cherche un lien cliquable qui pointe vers la catégorie "release"
+        // Exemple : href="https://v6.voiranime.com/anime-release/2012/" > 2012 </a>
+        const yearMatch = html.match(/href=["'][^"']*(?:anime-release|release)[^"']*["'][^>]*>\s*(\d{4})\s*<\/a>/i) || 
+                          html.match(/<h5>\s*(?:Année|Release|Sortie)[\s\S]*?<\/h5>\s*<\/div>\s*<div[^>]*>[\s\S]*?<a[^>]*>\s*(\d{4})\s*<\/a>/i);
+        
+        if (yearMatch) {
+            // yearMatch[1] correspond à la première Regex, yearMatch[2] à la deuxième (plan B)
+            airdate = yearMatch[1] ? yearMatch[1] : yearMatch[2];
+        }
 
         return JSON.stringify([{ description, aliases: "Voiranime", airdate }]);
-    } catch (e) { return JSON.stringify([{ description: "Erreur de chargement", aliases: "Voiranime", airdate: "N/A" }]); }
+    } catch (e) { 
+        return JSON.stringify([{ description: "Erreur de chargement", aliases: "Voiranime", airdate: "N/A" }]); 
+    }
 }
 
 // --- 3. ÉPISODES ---
