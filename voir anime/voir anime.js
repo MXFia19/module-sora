@@ -1,11 +1,13 @@
 const BASE_URL = "https://v6.voiranime.com";
 
-// --- 1. RECHERCHE (Multi-pages ultra-rapide) ---
+// --- 1. RECHERCHE (Multi-pages, Camouflage & Année de Sortie) ---
 async function searchResults(keyword) {
     console.log(`[Recherche] 🔍 Lancement multi-pages pour : "${keyword}"`);
     try {
         const headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://v6.voiranime.com/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
         };
 
         const results = [];
@@ -25,13 +27,26 @@ async function searchResults(keyword) {
         for (const html of pagesHtml) {
             if (!html) continue;
 
-            const blocks = html.split('class="c-image"');
+            // On découpe la page selon le mode d'affichage (Liste = c-tabs-item__content, Grille = page-item-detail ou c-image)
+            let blocks = [];
+            if (html.includes('c-tabs-item__content')) {
+                blocks = html.split('c-tabs-item__content');
+            } else if (html.includes('page-item-detail')) {
+                blocks = html.split('page-item-detail');
+            } else {
+                blocks = html.split('class="c-image"');
+            }
 
+            // On boucle sur chaque bloc d'anime
             for (let i = 1; i < blocks.length; i++) {
                 let block = blocks[i];
+                
                 let hrefMatch = block.match(/href=["']([^"']+)["']/i);
                 let titleMatch = block.match(/title=["']([^"']+)["']/i) || block.match(/alt=["']([^"']+)["']/i);
                 let imgMatch = block.match(/data-src=["']([^"']+)["']/i) || block.match(/src=["']([^"']+)["']/i);
+                
+                // 🎯 LA NOUVEAUTÉ : Extraction de l'année de sortie
+                let yearMatch = block.match(/release-year[^>]*>\s*<a[^>]*>(\d{4})<\/a>/i);
 
                 if (hrefMatch && titleMatch) {
                     let href = hrefMatch[1];
@@ -39,12 +54,22 @@ async function searchResults(keyword) {
                     let image = imgMatch ? imgMatch[1] : "";
                     if (image.startsWith('/')) image = BASE_URL + image;
 
+                    let year = yearMatch ? yearMatch[1] : null;
+
                     if (!results.find(r => r.href === href)) {
-                        results.push({ title, image, href });
+                        let item = { title, image, href };
+                        
+                        // Si on a trouvé une année, on l'ajoute au résultat envoyé à Sora
+                        if (year) {
+                            item.year = year; 
+                        }
+                        
+                        results.push(item);
                     }
                 }
             }
 
+            // PLAN B : Cas extrême sans images (Recherche par titre H3)
             if (blocks.length <= 1) {
                 const blocksH3 = html.split('<h3 class="h4">');
                 for (let i = 1; i < blocksH3.length; i++) {
@@ -61,10 +86,15 @@ async function searchResults(keyword) {
                 }
             }
         }
+        
+        console.log(`[Recherche] 🚀 Fin. Nombre total d'animes extraits : ${results.length}`);
         return JSON.stringify(results);
-    } catch (e) { return JSON.stringify([]); }
-}
 
+    } catch (e) { 
+        console.log(`[Recherche] 🚨 Erreur Multi-pages : ${e}`);
+        return JSON.stringify([]); 
+    }
+}
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
     try {
