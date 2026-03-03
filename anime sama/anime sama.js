@@ -147,7 +147,7 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Liste Propre et Unifiée) ---
+// --- 3. ÉPISODES (Liste Propre et Mappage TMDB) ---
 async function extractEpisodes(url) {
     console.log(`[Episodes AS] 📂 Analyse multi-saisons : ${url}`);
     try {
@@ -179,9 +179,9 @@ async function extractEpisodes(url) {
         }
 
         let results = [];
-        let globalEpIndex = 1;
+        let fallbackSeason = 1;
 
-        // 2. On parcourt les onglets trouvés (On garde 1 seule ligne par épisode !)
+        // 2. On parcourt les onglets trouvés
         for (let tab of tabs) {
             try {
                 let jsUrl = tab.url;
@@ -217,20 +217,35 @@ async function extractEpisodes(url) {
                 }
 
                 if (maxEpisodes > 0) {
-                    // Nettoyage du nom pour l'affichage (on enlève VOSTFR/VF du titre puisqu'on les mélange après)
                     let cleanTabName = tab.name.replace(/\(?(VOSTFR|VF)\)?/i, '').trim();
                     
+                    // 🌟 ASTUCE TMDB : Analyse intelligente du numéro de saison
+                    let currentSeason = fallbackSeason;
+                    let seasonMatch = cleanTabName.match(/saison\s*(\d+)/i);
+                    
+                    if (seasonMatch) {
+                        currentSeason = parseInt(seasonMatch[1]);
+                    } else if (cleanTabName.toLowerCase().includes('film') || cleanTabName.toLowerCase().includes('oav')) {
+                        currentSeason = 0; // 0 est le dossier des Films/Spéciaux sur TMDB
+                    }
+
                     for (let i = 0; i < maxEpisodes; i++) {
                         let separator = jsUrl.includes('?') ? '&' : '?';
                         let epHref = `${jsUrl}${separator}episode_index=${i}`;
-                        let epTitle = maxEpisodes === 1 ? cleanTabName : `${cleanTabName} - Épisode ${i + 1}`;
+                        let epTitle = maxEpisodes === 1 ? cleanTabName : `Épisode ${i + 1}`;
                         
                         results.push({
                             title: epTitle,
+                            name: epTitle,
                             href: epHref,
-                            number: globalEpIndex
+                            number: i + 1,            // On remet le numéro à 1 pour chaque début de saison !
+                            season: currentSeason     // On indique à l'application dans quelle saison on est
                         });
-                        globalEpIndex++;
+                    }
+                    
+                    // On incrémente le backup au cas où le prochain onglet ne s'appelle pas "saison X"
+                    if (!cleanTabName.toLowerCase().includes('film')) {
+                        fallbackSeason++;
                     }
                 }
 
