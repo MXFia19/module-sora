@@ -76,31 +76,57 @@ async function trySearch(domain, keyword) {
     }
 }
 
-// Fonction principale de recherche (Séquentielle : 1 par 1)
+// Fonction principale de recherche (Séquentielle, Sécurisée & Radar Strict Code 200)
 async function searchResults(keyword) {
-    const domains = await getDomainsList();
-    
-    // On boucle sur tous les domaines, un par un
-    for (let i = 0; i < domains.length; i++) {
-        let currentDomain = domains[i];
-        console.log(`[Recherche AS] ⏳ Test du domaine ${i + 1}/${domains.length} : ${currentDomain}`);
+    try {
+        const domains = await getDomainsList();
+        console.log(`[Recherche AS] 🔍 Démarrage de la recherche sur ${domains.length} domaines.`);
         
-        // On attend la réponse de CE domaine avant de passer au suivant
-        let results = await trySearch(currentDomain, keyword);
-        
-        // Si on a trouvé des résultats, on s'arrête là et on renvoie les données !
-        if (results && results.length > 0) {
-            console.log(`[Recherche AS] 🚀 Succès sur ${currentDomain} ! ${results.length} résultats extraits.`);
-            return JSON.stringify(results);
-        }
-        
-        // Sinon, on affiche un message et la boucle passera au domaine suivant
-        console.log(`[Recherche AS] 🔄 Échec sur ${currentDomain}. Passage au domaine suivant...`);
-    }
+        for (let i = 0; i < domains.length; i++) {
+            let currentDomain = domains[i];
+            console.log(`[Recherche AS] 📡 Vérification du radar pour : ${currentDomain}...`);
+            
+            // 1. LE RADAR (Filtre strict Code 200)
+            try {
+                const checkRes = await fetchv2(
+                    `https://anime-sama.pw/?check=${currentDomain}`, 
+                    { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }, 
+                    "GET"
+                );
+                const checkData = JSON.parse(await checkRes.text());
+                
+                // Si ce n'est pas un 200 parfait (online), on dégage !
+                if (checkData.code !== 200) {
+                    console.log(`[Recherche AS] ⏭️ ${currentDomain} ignoré (Status: ${checkData.status}, Code: ${checkData.code}).`);
+                    continue; // On zappe instantanément le domaine
+                }
+                console.log(`[Recherche AS] 🟢 ${currentDomain} est 100% EN LIGNE ! Lancement de la recherche...`);
+            } catch (e) {
+                console.log(`[Recherche AS] ⚠️ Radar indisponible pour ${currentDomain}, on tente quand même au cas où.`);
+            }
 
-    // Si la boucle se termine sans avoir fait de "return", c'est que tous les domaines ont échoué
-    console.log(`[Recherche AS] ❌ Aucun résultat trouvé après avoir testé les ${domains.length} domaines.`);
-    return JSON.stringify([]);
+            // 2. LA RECHERCHE (Seulement sur les survivants)
+            try {
+                let results = await trySearch(currentDomain, keyword);
+                
+                if (results && results.length > 0) {
+                    console.log(`[Recherche AS] 🚀 Succès sur ${currentDomain} ! ${results.length} résultats extraits.`);
+                    return JSON.stringify(results);
+                } else {
+                    console.log(`[Recherche AS] 🔄 Aucun résultat ou blocage Cloudflare sur ${currentDomain}.`);
+                }
+            } catch (err) {
+                console.log(`[Recherche AS] ⚠️ Erreur interceptée sur ${currentDomain}.`);
+            }
+        }
+
+        console.log(`[Recherche AS] ❌ Aucun résultat trouvé après avoir testé tous les domaines.`);
+        return JSON.stringify([]);
+
+    } catch (globalErr) {
+        console.log(`[Recherche AS] 🚨 Crash global évité : ${globalErr}`);
+        return JSON.stringify([]);
+    }
 }
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
