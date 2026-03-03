@@ -26,7 +26,6 @@ async function getDomainsList() {
 async function trySearch(domain, keyword) {
     console.log(`[Recherche AS] 🔍 Tentative sur : ${domain} pour "${keyword}"`);
     try {
-        // En-têtes obligatoires
         const headers = {
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
@@ -34,7 +33,6 @@ async function trySearch(domain, keyword) {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         };
 
-        // ⚠️ CORRECTION ICI : La syntaxe spécifique à Sora pour fetchv2 (4 arguments séparés)
         const response = await fetchv2(
             `https://${domain}/template-php/defaut/fetch.php`,
             headers,
@@ -45,24 +43,18 @@ async function trySearch(domain, keyword) {
         const html = await response.text();
         const results = [];
         
-        // Regex calibrée exactement sur le format de réponse de l'API
         const regex = /<a[^>]+href=["']([^"']+)["'][\s\S]*?<img[^>]+src=["']([^"']+)["'][\s\S]*?<h3[^>]*>(.*?)<\/h3>/gi;
         let match;
         
         while ((match = regex.exec(html)) !== null) {
             let href = match[1].trim();
             let image = match[2].trim();
-            // Nettoyage des balises et entités HTML dans le titre
             let title = match[3].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#039;/g, "'").replace(/&#8211;/g, "-").trim();
             
-            // Formatage des liens s'ils sont relatifs
             if (href.startsWith('/')) href = `https://${domain}${href}`;
             if (image.startsWith('/')) image = `https://${domain}${image}`;
             
-            // On ajoute notre sécurité Referer, même si l'image vient de GitHub
-            if (image) {
-                image = image + `|Referer=https://${domain}/&User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36`;
-            }
+            // 🗑️ CORRECTION : On a retiré le "|Referer=..." ici car GitHub n'en a pas besoin ! 🗑️
 
             if (!results.find(r => r.href === href)) {
                 results.push({ title, image, href });
