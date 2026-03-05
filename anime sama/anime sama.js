@@ -261,7 +261,7 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. LECTEUR (La Pieuvre 2.0 : VOSTFR + VF & Patchs Vidmoly/Sibnet) ---
+// --- 4. LECTEUR (Pieuvre 3.0 : Sans VK, avec Patch Sibnet Anti-Cyrillique) ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur AS] 🎬 Démarrage pour : ${url}`);
     try {
@@ -323,7 +323,7 @@ async function extractStreamUrl(url) {
             let urlLower = embedUrl.toLowerCase();
             let prefix = `[${embed.lang}]`;
 
-            // LECTEUR VOE
+            // 1. LECTEUR VOE
             if (urlLower.includes("voe.sx") || urlLower.includes("voe.network") || urlLower.includes("voe") || urlLower.includes("lancewhosedifficult")) {
                 try {
                     const voeRes = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
@@ -331,7 +331,7 @@ async function extractStreamUrl(url) {
                     if (streamUrl) streams.push({ title: `${prefix} VOE`, streamUrl: streamUrl, headers: { "Referer": embedUrl } });
                 } catch(e) {}
             }
-            // LECTEUR STREAMTAPE
+            // 2. LECTEUR STREAMTAPE
             else if (urlLower.includes("streamtape")) {
                 try {
                     const stRes = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
@@ -344,7 +344,7 @@ async function extractStreamUrl(url) {
                     }
                 } catch (e) {}
             }
-            // LECTEUR VIDMOLY (Patch .biz)
+            // 3. LECTEUR VIDMOLY (Patch .biz)
             else if (urlLower.includes("vidmoly")) {
                 try {
                     let fixedVidUrl = embedUrl.replace(/vidmoly\.(to|me|net|ru|is)/i, "vidmoly.biz");
@@ -354,49 +354,32 @@ async function extractStreamUrl(url) {
                     if (fileMatch) streams.push({ title: `${prefix} Vidmoly`, streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
                 } catch (e) {}
             }
-            // 🛡️ LECTEUR SIBNET (Patch Anti-Redirection Rapide) 🛡️
+            // 4. LECTEUR SIBNET (🛡️ Patch Anti-Cyrillique 🛡️)
             else if (urlLower.includes("sibnet")) {
                 try {
-                    const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
-                    const sibHtml = await req.text();
-                    const mp4Match = sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i) || sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i);
+                    let directUrl = "";
+                    let videoIdMatch = embedUrl.match(/videoid=(\d+)/i);
                     
-                    if (mp4Match) {
-                        let directUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
-                        
+                    if (videoIdMatch) {
+                        // Génération du lien brut sans lire la page russe
+                        directUrl = `https://video.sibnet.ru/v/${videoIdMatch[1]}.mp4`;
+                    }
+                    
+                    if (directUrl) {
                         try {
-                            // ASTUCE : On demande "HEAD" (juste l'en-tête, sans télécharger la vidéo)
-                            const resolveRes = await fetchv2(directUrl, { 
-                                "Referer": embedUrl, 
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
-                            }, "HEAD");
-                            
-                            // On vérifie juste si l'URL a changé (Redirection réussie) sans chercher le mot "cvs"
-                            if (resolveRes.url && resolveRes.url !== directUrl) {
-                                directUrl = resolveRes.url;
-                            } else {
-                                // Plan B si l'application bloque le "HEAD" : on tente un GET
+                            const resolveRes = await fetchv2(directUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "HEAD");
+                            if (resolveRes.url && resolveRes.url !== directUrl) directUrl = resolveRes.url;
+                            else {
                                 const fallbackRes = await fetchv2(directUrl, { "Referer": embedUrl }, "GET");
-                                if (fallbackRes.url && fallbackRes.url !== directUrl) {
-                                    directUrl = fallbackRes.url;
-                                }
+                                if (fallbackRes.url && fallbackRes.url !== directUrl) directUrl = fallbackRes.url;
                             }
-                        } catch(resolveErr) {
-                            console.log(`[Lecteur AS] ⚠️ Impossible de pré-résoudre Sibnet : ${resolveErr}`);
-                        }
+                        } catch(e) {}
 
-                        streams.push({ 
-                            title: `${prefix} Sibnet`, 
-                            streamUrl: directUrl, 
-                            headers: { 
-                                "Referer": embedUrl,
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                            } 
-                        });
+                        streams.push({ title: `${prefix} Sibnet`, streamUrl: directUrl, headers: { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" } });
                     }
                 } catch (e) {}
             }
-            // LECTEUR SENDVID
+            // 5. LECTEUR SENDVID
             else if (urlLower.includes("sendvid")) {
                 try {
                     const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
