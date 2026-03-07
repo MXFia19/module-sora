@@ -15,10 +15,10 @@ async function getDomainsList() {
         }
         
         console.log(`[Domaines] ✅ Domaines trouvés : ${domains.join(', ')}`);
-        return domains.length > 0 ? domains : ["anime-sama.fr"];
+        return domains.length > 0 ? domains : ["anime-sama.to"];
     } catch (err) {
         console.log(`[Domaines] 🚨 Erreur, fallback sur anime-sama.fr`);
-        return ["anime-sama.fr"];
+        return ["anime-sama.to"];
     }
 }
 
@@ -354,28 +354,57 @@ async function extractStreamUrl(url) {
                     if (fileMatch) streams.push({ title: `${prefix} Vidmoly`, streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
                 } catch (e) {}
             }
-            // 4. LECTEUR SIBNET (🛡️ Patch Anti-Cyrillique 🛡️)
+// LECTEUR SIBNET (📱 App extrait dv97 -> 📡 Worker extrait cvs)
             else if (urlLower.includes("sibnet")) {
                 try {
-                    let directUrl = "";
-                    let videoIdMatch = embedUrl.match(/videoid=(\d+)/i);
+                    // 1. On télécharge la page Web pour avoir le jeton de session (hash)
+                    const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
+                    const sibHtml = await req.text();
                     
-                    if (videoIdMatch) {
-                        // Génération du lien brut sans lire la page russe
-                        directUrl = `https://video.sibnet.ru/v/${videoIdMatch[1]}.mp4`;
-                    }
+                    // 2. On extrait le lien COMPLET avec le hash (ex: /v/c7c3.../4738490.mp4)
+                    const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i) || sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
                     
-                    if (directUrl) {
+                    if (mp4Match) {
+                        let hashedUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
+                        let intermediateUrl = "";
+
+                        // 3. L'application demande elle-même la redirection pour obtenir le dv97 (avec noip=1)
                         try {
-                            const resolveRes = await fetchv2(directUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "HEAD");
-                            if (resolveRes.url && resolveRes.url !== directUrl) directUrl = resolveRes.url;
-                            else {
-                                const fallbackRes = await fetchv2(directUrl, { "Referer": embedUrl }, "GET");
-                                if (fallbackRes.url && fallbackRes.url !== directUrl) directUrl = fallbackRes.url;
+                            const resolveRes = await fetchv2(hashedUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "HEAD");
+                            if (resolveRes.url && resolveRes.url !== hashedUrl) {
+                                intermediateUrl = resolveRes.url;
+                            } else {
+                                // Fallback si HEAD ne suffit pas
+                                const getRes = await fetchv2(hashedUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "GET");
+                                if (getRes.url && getRes.url !== hashedUrl) intermediateUrl = getRes.url;
                             }
                         } catch(e) {}
 
-                        streams.push({ title: `${prefix} Sibnet`, streamUrl: directUrl, headers: { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" } });
+                        // 4. Si on a bien obtenu le lien dv97...
+                        if (intermediateUrl && intermediateUrl.includes(".mp4")) {
+                            console.log(`[Lecteur AS] 📱 Lien intermédiaire trouvé : ${intermediateUrl}`);
+                            
+                            // 🛑 TON WORKER CLOUDFLARE 🛑
+                            let myWorkerUrl = "https://shiny-lab-d171.kurzmathis4.workers.dev";
+                            
+                            try {
+                                // 5. On donne le dv97 au Worker pour qu'il trouve le cvs final
+                                console.log(`[Lecteur AS] 📡 Demande au Worker de dérouler : ${intermediateUrl}`);
+                                const workerRes = await fetchv2(`${myWorkerUrl}/?url=${encodeURIComponent(intermediateUrl)}`, {}, "GET");
+                                const finalCvsUrl = await workerRes.text();
+                                
+                                // 6. On ajoute le lien final pour le lecteur !
+                                if (finalCvsUrl && finalCvsUrl.startsWith("http")) {
+                                    streams.push({ 
+                                        title: `${prefix} Sibnet (Final Worker)`, 
+                                        streamUrl: finalCvsUrl, 
+                                        headers: { "User-Agent": "Mozilla/5.0" } // Plus de Referer requis
+                                    });
+                                }
+                            } catch(workerErr) {
+                                console.log(`[Lecteur AS] ⚠️ Erreur du Worker : ${workerErr}`);
+                            }
+                        }
                     }
                 } catch (e) {}
             }
