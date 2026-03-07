@@ -354,54 +354,51 @@ async function extractStreamUrl(url) {
                     if (fileMatch) streams.push({ title: `${prefix} Vidmoly`, streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
                 } catch (e) {}
             }
-// LECTEUR SIBNET (📱 App extrait dv97 -> 📡 Worker extrait cvs)
+// LECTEUR SIBNET (🤝 Stratégie Hybride : Worker (Yeux) + iPhone (Jambes))
             else if (urlLower.includes("sibnet")) {
                 try {
-                    // 1. On extrait le lien COMPLET avec le hash via regex
-                    const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
-                    const sibHtml = await req.text();
+                    let myWorkerUrl = "https://shiny-lab-d171.kurzmathis4.workers.dev";
                     
-                    const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i) || sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
+                    console.log(`[Lecteur AS] 📡 Demande au Worker de lire le HTML russe pour : ${embedUrl}`);
                     
-                    if (mp4Match) {
-                        let hashedUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
+                    // 1. On récupère le lien Hash via le Worker
+                    const workerRes = await fetchv2(`${myWorkerUrl}/?url=${encodeURIComponent(embedUrl)}`, {}, "GET");
+                    const hashedUrl = await workerRes.text();
+                    
+                    if (hashedUrl && hashedUrl.startsWith("http")) {
+                        console.log(`[Lecteur AS] ✅ Lien Hash reçu du Worker : ${hashedUrl}`);
                         let intermediateUrl = "";
 
-                        // 3. On utilise HEAD pour récupérer la redirection (dv97) SANS télécharger le .mp4
+                        // 2. L'iPhone (avec sa vraie adresse IP) demande la redirection dv97 !
                         try {
                             const resolveRes = await fetchv2(hashedUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "HEAD");
                             if (resolveRes.url && resolveRes.url !== hashedUrl) {
                                 intermediateUrl = resolveRes.url;
                             } else {
-                                // IMPORTANT : Si on utilise GET en fallback, il faut vérifier qu'on ne crashe pas sur le décodage !
+                                // Au cas où HEAD échoue, on tente GET sans lire le texte (pour éviter le crash binaire)
                                 const getRes = await fetchv2(hashedUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "GET");
                                 if (getRes.url && getRes.url !== hashedUrl) intermediateUrl = getRes.url;
                             }
-                        } catch(e) {}
-
-                        // 4. On donne le lien dv97 au Worker
-                        if (intermediateUrl && intermediateUrl.includes(".mp4")) {
-                            console.log(`[Lecteur AS] 📱 Lien intermédiaire trouvé : ${intermediateUrl}`);
-                            let myWorkerUrl = "https://shiny-lab-d171.kurzmathis4.workers.dev";
-                            
-                            try {
-                                console.log(`[Lecteur AS] 📡 Demande au Worker de dérouler : ${intermediateUrl}`);
-                                const workerRes = await fetchv2(`${myWorkerUrl}/?url=${encodeURIComponent(intermediateUrl)}`, {}, "GET");
-                                const finalCvsUrl = await workerRes.text();
-                                
-                                if (finalCvsUrl && finalCvsUrl.startsWith("http")) {
-                                    streams.push({ 
-                                        title: `${prefix} Sibnet (Final Worker)`, 
-                                        streamUrl: finalCvsUrl, 
-                                        headers: { "User-Agent": "Mozilla/5.0" }
-                                    });
-                                }
-                            } catch(workerErr) {
-                                console.log(`[Lecteur AS] ⚠️ Erreur du Worker : ${workerErr}`);
-                            }
+                        } catch(e) {
+                            console.log(`[Lecteur AS] ⚠️ Erreur lors de la résolution par l'iPhone : ${e}`);
                         }
+
+                        // 3. On envoie le dv97 au lecteur !
+                        if (intermediateUrl && intermediateUrl.includes(".mp4")) {
+                            console.log(`[Lecteur AS] 🍿 Lien direct trouvé par l'iPhone : ${intermediateUrl}`);
+                            streams.push({ 
+                                title: `${prefix} Sibnet (Direct)`, 
+                                streamUrl: intermediateUrl, 
+                                headers: { "User-Agent": "Mozilla/5.0" } 
+                            });
+                        }
+                    } else {
+                        // 🚨 MODIFICATION ICI : On affiche la réponse brute du Worker ! 🚨
+                        console.log(`[Lecteur AS] ⚠️ Réponse inattendue du Worker : \n${hashedUrl}`);
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.log(`[Lecteur AS] 🚨 Crash global Sibnet : ${e}`);
+                }
             }
             // 5. LECTEUR SENDVID
             else if (urlLower.includes("sendvid")) {
