@@ -85,10 +85,13 @@ async function extractEpisodes(href) {
         if (type === 'movie') {
             episodes.push({
                 number: 1,
+                episode: 1, // 👈 Ajout pour Sora
+                season: 1,  // 👈 Ajout pour Sora
                 title: details.title || "Le Film",
                 description: details.overview || "",
                 image: details.backdrop_path ? `https://image.tmdb.org/t/p/w500${details.backdrop_path}` : "",
-                href: `stream|movie|${id}`
+                href: `stream|movie|${id}`,
+                url: `stream|movie|${id}` // 👈 Ajout pour Sora
             });
         } else if (type === 'tv') {
             for (const season of details.seasons) {
@@ -103,11 +106,13 @@ async function extractEpisodes(href) {
                     sData.episodes.forEach(ep => {
                         episodes.push({
                             number: ep.episode_number,
+                            episode: ep.episode_number, // 👈 Ajout pour Sora
                             season: sNum,
                             title: `S${sNum}E${ep.episode_number} - ${ep.name}`,
                             description: ep.overview || "",
                             image: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : "",
-                            href: `stream|tv|${id}|${sNum}|${ep.episode_number}`
+                            href: `stream|tv|${id}|${sNum}|${ep.episode_number}`,
+                            url: `stream|tv|${id}|${sNum}|${ep.episode_number}` // 👈 Ajout pour Sora
                         });
                     });
                 } catch (err) {}
