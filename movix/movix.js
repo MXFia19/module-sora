@@ -49,8 +49,9 @@ async function searchResults(keyword) {
 
         (tvData.results || []).forEach(item => {
             if (item.poster_path) {
+                // 🌟 NOUVEAU: Titre propre sans préfixe
                 allResults.push({
-                    title: item.name, // 🌟 Modifié : On renvoie juste le nom pur
+                    title: item.name, 
                     image: `https://image.tmdb.org/t/p/w500${item.poster_path}`,
                     href: `movix/tv/${item.id}`,
                     popularity: item.popularity + (item.original_language === 'ja' ? 1000 : 0)
@@ -61,7 +62,7 @@ async function searchResults(keyword) {
         (movieData.results || []).forEach(item => {
             if (item.poster_path) {
                 allResults.push({
-                    title: item.title, // 🌟 Modifié : On renvoie juste le titre pur
+                    title: item.title,
                     image: `https://image.tmdb.org/t/p/w500${item.poster_path}`,
                     href: `movix/movie/${item.id}`,
                     popularity: item.popularity
@@ -70,20 +71,12 @@ async function searchResults(keyword) {
         });
 
         allResults.sort((a, b) => b.popularity - a.popularity);
-        
-        // On nettoie un peu le JSON retourné pour Sora
-        return JSON.stringify(allResults.map(item => ({
-            title: item.title,
-            image: item.image,
-            href: item.href
-        })));
-        
+        return JSON.stringify(allResults);
     } catch (e) {
         console.log(`[Movix] 🚨 Erreur searchResults : ${e.message}`);
         return JSON.stringify([]);
     }
 }
-
 
 // --- 2. DÉTAILS ---
 async function extractDetails(href) {
@@ -113,7 +106,7 @@ async function extractDetails(href) {
     }
 }
 
-// --- 3. ÉPISODES (Avec restauration des titres TMDB) ---
+// --- 3. ÉPISODES (100% TMDB pour les miniatures) ---
 async function extractEpisodes(href) {
     try {
         href = decodeURIComponent(href);
@@ -128,14 +121,15 @@ async function extractEpisodes(href) {
         const res = await soraFetch(detailsUrl);
         if (!res) return JSON.stringify([]);
         
-        const details = JSON.parse(await res.text());
+        const text = typeof res === "string" ? res : await res.text();
+        const details = JSON.parse(text);
 
         if (type === 'movie') {
             episodes.push({
-                href: `stream/movie/${id}`,
                 number: 1,
                 title: details.title || "Le Film",
-                image: details.backdrop_path ? `https://image.tmdb.org/t/p/w500${details.backdrop_path}` : ""
+                image: details.backdrop_path ? `https://image.tmdb.org/t/p/w500${details.backdrop_path}` : "",
+                href: `stream/movie/${id}`
             });
         } else if (type === 'tv') {
             if (details.seasons) {
@@ -148,25 +142,22 @@ async function extractEpisodes(href) {
                         const sRes = await soraFetch(seasonUrl);
                         if (!sRes) continue;
                         
-                        const sData = JSON.parse(await sRes.text());
+                        const sText = typeof sRes === "string" ? sRes : await sRes.text();
+                        const sData = JSON.parse(sText);
 
                         if (sData.episodes) {
                             sData.episodes.forEach(ep => {
-                                // 🌟 Restauration du Titre et de l'Image TMDB
-                                let epTitle = ep.name ? `S${sNum}E${ep.episode_number} - ${ep.name}` : `Épisode ${ep.episode_number}`;
-                                let epImage = ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : "";
-
                                 episodes.push({
-                                    href: `stream/tv/${id}/${sNum}/${ep.episode_number}`,
                                     number: ep.episode_number,
                                     season: sNum,
-                                    title: epTitle,
-                                    image: epImage
+                                    title: ep.name ? `S${sNum}E${ep.episode_number} - ${ep.name}` : `Épisode ${ep.episode_number}`,
+                                    image: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : "",
+                                    href: `stream/tv/${id}/${sNum}/${ep.episode_number}`
                                 });
                             });
                         }
                     } catch (err) {
-                        console.log(`[Movix] ⚠️ Erreur saison ${sNum}: ${err.message}`);
+                        console.log(`[Movix] ⚠️ Erreur lors du chargement de la saison ${sNum}: ${err.message}`);
                     }
                 }
             }
@@ -425,39 +416,44 @@ async function resolveAnyLink(url, sourceName, lang) {
                 }
             }
         }
-        // 🌟 Détection Sibnet (Avec encodage windows-1251 pour éviter l'erreur de décodage UTF-8)
+  // 🌟 Détection Sibnet
         else if (urlLower.includes('sibnet.') || sourceLower === 'sibnet') {
             console.log(`[Movix] 📡 Extraction directe Sibnet...`);
+            let res = await fetchv2(url, { "Referer": "https://video.sibnet.ru/" }, "GET");
+            let html = typeof res === "string" ? res : await res.text();
             
-            // 🌟 CORRECTIF: On précise "windows-1251" pour que fetchv2 ne plante pas !
-            let res = await soraFetch(url, { 
-                headers: { "Referer": "https://video.sibnet.ru/" },
-                encoding: "windows-1251" 
-            });
+            const match = html.match(/src\s*:\s*["']([^"']*\.mp4[^"']*)['"]/i) || html.match(/["']((?:https?:)?\/\/[^"'\s]+\.mp4[^"'\s]*)["']/i);
             
-            if (res) {
-                let html = typeof res === "string" ? res : await res.text();
-                const match = html.match(/src\s*:\s*["']([^"']*\.mp4[^"']*)['"]/i) || html.match(/["']((?:https?:)?\/\/[^"'\s]+\.mp4[^"'\s]*)["']/i);
-                if (match && match[1]) {
-                    let videoUrl = match[1].startsWith('//') ? "https:" + match[1] : (match[1].startsWith('/') ? "https://video.sibnet.ru" + match[1] : match[1]);
-                    finalUrl = videoUrl; isDirect = true; headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; 
+            if (match && match[1]) {
+                let videoUrl = match[1].startsWith('//') ? "https:" + match[1] : (match[1].startsWith('/') ? "https://video.sibnet.ru" + match[1] : match[1]);
+                
+                finalUrl = videoUrl; 
+                isDirect = true; 
+                headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; 
 
-                    try {
-                        const resolveOptions = Object.assign({}, headers, { redirect: "manual" });
-                        const resolveRes = await fetchv2(finalUrl, resolveOptions, "GET"); 
-                        
-                        let locationHeader = null;
-                        if (resolveRes && resolveRes.headers) {
-                            if (typeof resolveRes.headers.get === 'function') locationHeader = resolveRes.headers.get('location') || resolveRes.headers.get('Location');
-                            else locationHeader = resolveRes.headers['location'] || resolveRes.headers['Location'];
+                // 🌟 LE CORRECTIF : Résolution manuelle de la redirection anti-hotlink
+                try {
+                    console.log(`[Movix] 🔄 Suivi de la redirection Sibnet en cours...`);
+                    const resolveOptions = Object.assign({}, headers, { redirect: "manual" });
+                    const resolveRes = await fetchv2(finalUrl, resolveOptions, "GET");
+                    
+                    let locationHeader = null;
+                    if (resolveRes && resolveRes.headers) {
+                        if (typeof resolveRes.headers.get === 'function') {
+                            locationHeader = resolveRes.headers.get('location') || resolveRes.headers.get('Location');
+                        } else {
+                            locationHeader = resolveRes.headers['location'] || resolveRes.headers['Location'];
                         }
+                    }
 
-                        if (locationHeader) {
-                            finalUrl = locationHeader.startsWith('//') ? 'https:' + locationHeader : locationHeader;
-                        } else if (resolveRes && resolveRes.url && resolveRes.url !== finalUrl) {
-                            finalUrl = resolveRes.url;
-                        } 
-                    } catch (e) { }
+                    if (locationHeader) {
+                        finalUrl = locationHeader.startsWith('//') ? 'https:' + locationHeader : locationHeader;
+                        console.log(`[Movix] ⚡ Vrai lien Sibnet trouvé (Contournement réussi) !`);
+                    } else if (resolveRes && resolveRes.url && resolveRes.url !== finalUrl) {
+                        finalUrl = resolveRes.url;
+                    } 
+                } catch (e) {
+                    console.log(`[Movix] ⚠️ Erreur lors de la redirection Sibnet : ${e.message}`);
                 }
             }
         }
@@ -546,7 +542,7 @@ async function extractStreamUrl(href) {
 
                         if (bestMatch) { 
                             animeDataFound = bestMatch; 
-                            console.log(`[Movix] 📚 Fichier Anime trouvé : ${animeDataFound.title}`);
+                            console.log(`[Movix] 📚 Fichier Anime trouvé : ${animeDataFound.title || animeDataFound.name || "Inconnu"}`);
                             break; 
                         }
                     }
