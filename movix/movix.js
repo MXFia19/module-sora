@@ -226,9 +226,7 @@ function unpack(code) {
         let match;
         
         while ((match = scriptRegex.exec(code)) !== null) {
-            console.log("[Movix] 📦 Code Packer obfusqué détecté ! Démarrage du décodeur...");
             let block = match[0];
-            
             const splitRegex = /,\s*(\d+|\[\])\s*,\s*(\d+)\s*,\s*['"]([^'"]*?)['"]\.split\(['"]\|['"]\)/;
             const endMatch = block.match(splitRegex);
             
@@ -260,12 +258,9 @@ function unpack(code) {
             }
             
             const unpacked = payload.replace(/\b\w+\b/g, lookup);
-            console.log(`[Movix] 🔓 Décompression réussie ! (Radix: ${radix})`);
             result = result.replace(block, unpacked);
         }
-    } catch (err) {
-        console.log("[Movix] 🚨 Crash de la fonction unpack :", err);
-    }
+    } catch (err) {}
     return result;
 }
 
@@ -315,12 +310,9 @@ async function resolveAnyLink(url, sourceName, lang) {
     let headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" };
     let isDirect = false;
 
-    console.log(`[Movix] ⚙️ Tentative de résolution pour : [${lang}] ${sourceName} -> ${url}`);
-
     try {
         // 🌟 Détection Vidhide / Vidmoly / Movearnpre / FILEMOON
         if (urlLower.includes('vidmoly.') || urlLower.includes('vidhide') || urlLower.includes('movearnpre') || urlLower.includes('smoothpre') || urlLower.includes('filemoon') || urlLower.includes('lukefirst') || sourceLower.includes('vidmoly') || sourceLower.includes('vidhide') || sourceLower.includes('filemoon')) {
-            console.log(`[Movix] 🛡️ Décodage Vidmoly/Vidhide/Filemoon en cours...`);
             let fetchUrl = url;
             if (url.includes('vidmoly')) fetchUrl = url.replace(/vidmoly\.(net|to|ru|is)/, 'vidmoly.me');
             if (url.includes('filemoon')) fetchUrl = url.replace(/filemoon\.(sx|to|is)/, 'filemoon.sx');
@@ -339,7 +331,6 @@ async function resolveAnyLink(url, sourceName, lang) {
             
             let unpackCount = 0;
             while (html.match(/eval\s*\(\s*function/i) && unpackCount < 3) {
-                console.log(`[Movix] 🔄 Lancement de la boucle de décompression (${unpackCount + 1})...`);
                 let unpackedHtml = unpack(html);
                 if (unpackedHtml === html) break;
                 html = unpackedHtml;
@@ -350,11 +341,7 @@ async function resolveAnyLink(url, sourceName, lang) {
                           html.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i) ||
                           html.match(/(https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)/i);
                           
-            if (match) { 
-                finalUrl = match[1]; 
-                isDirect = true; 
-                console.log(`[Movix] ⚡ Succès Vidmoly/Vidhide : Lien direct trouvé !`);
-            }
+            if (match) { finalUrl = match[1]; isDirect = true; }
         } 
         // 🌟 Détection Uqload
         else if (urlLower.includes('uqload.') || sourceLower === 'uqload') {
@@ -385,23 +372,19 @@ async function resolveAnyLink(url, sourceName, lang) {
                 if (match) { finalUrl = match[1]; isDirect = true; }
             }
         }
-        // 🌟 Détection Doodstream / Doply
+        // 🌟 Détection Doodstream
         else if (urlLower.includes('dood') || urlLower.includes('doply') || urlLower.includes('myvidplay') || sourceLower.includes('dood')) {
-            console.log(`[Movix] 🛡️ Décodage Doodstream en cours...`);
             let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
             if (res) {
                 let html = typeof res === "string" ? res : await res.text();
-                
                 const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
                 if (iframeMatch && (iframeMatch[1].includes('dood') || iframeMatch[1].includes('myvidplay'))) {
                     url = iframeMatch[1].startsWith('http') ? iframeMatch[1] : 'https:' + iframeMatch[1];
                     res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
                     if (res) html = typeof res === "string" ? res : await res.text();
                 }
-
                 const passMd5Match = html.match(/\/pass_md5\/([^"']+)/i);
                 const tokenMatch = html.match(/[?&]token=([a-z0-9]+)[&'"]/i);
-
                 if (passMd5Match && tokenMatch) {
                     const md5Url = url.match(/^https?:\/\/[^\/]+/)[0] + '/pass_md5/' + passMd5Match[1];
                     let md5Res = await soraFetch(md5Url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
@@ -421,7 +404,6 @@ async function resolveAnyLink(url, sourceName, lang) {
             let res = await soraFetch(currentUrl, { headers: voeHeaders });
             if (res) {
                 let html = typeof res === "string" ? res : await res.text();
-                
                 const titleMatch = html.match(/<title>(.*?)<\/title>/i);
                 if (titleMatch && titleMatch[1].toLowerCase().includes("redirect")) {
                     const match = html.match(/window\.location\.href\s*=\s*["'](.*?)["']/i);
@@ -432,7 +414,6 @@ async function resolveAnyLink(url, sourceName, lang) {
                         if (res2) html = typeof res2 === "string" ? res2 : await res2.text();
                     }
                 }
-
                 let extractedVoeUrl = voeExtractor(html);
                 if (extractedVoeUrl) {
                     finalUrl = extractedVoeUrl; headers = voeHeaders; isDirect = true;
@@ -445,7 +426,6 @@ async function resolveAnyLink(url, sourceName, lang) {
         }
         // 🌟 Détection Sibnet
         else if (urlLower.includes('sibnet.') || sourceLower === 'sibnet') {
-            console.log(`[Movix] 📡 Extraction directe Sibnet...`);
             let res = await soraFetch(url, { headers: { "Referer": "https://video.sibnet.ru/" } });
             if (res) {
                 let html = typeof res === "string" ? res : await res.text();
@@ -456,7 +436,7 @@ async function resolveAnyLink(url, sourceName, lang) {
 
                     try {
                         const resolveOptions = Object.assign({}, headers, { redirect: "manual" });
-                        const resolveRes = await fetchv2(finalUrl, resolveOptions, "GET"); // on garde fetchv2 ici car on a besoin des headers de redirection précis
+                        const resolveRes = await fetchv2(finalUrl, resolveOptions, "GET"); 
                         
                         let locationHeader = null;
                         if (resolveRes && resolveRes.headers) {
@@ -502,7 +482,6 @@ async function extractStreamUrl(href) {
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7"
         };
 
-        console.log(`[Movix] 📡 Appel de l'API TMDB pour l'ID: ${id}`);
         const tmdbUrl = `https://api.themoviedb.org/3/${type}/${id}?api_key=${TMDB_KEY}&language=fr-FR&append_to_response=alternative_titles,external_ids`;
         const resTmdb = await soraFetch(tmdbUrl);
         if (!resTmdb) throw new Error("TMDB injoignable");
@@ -511,7 +490,7 @@ async function extractStreamUrl(href) {
         const isAnime = type === 'tv' && tmdbDetails.original_language === 'ja';
 
         if (isAnime) {
-            console.log(`[Movix] 🌸 Anime détecté ! Lancement de la recherche Anime-Sama...`);
+            console.log(`[Movix] 🌸 Anime détecté ! Lancement de l'algorithme intelligent...`);
             let searchName = tmdbDetails.name;
             let titlesToTry = [searchName]; 
             if (tmdbDetails.original_name) titlesToTry.push(tmdbDetails.original_name);
@@ -544,12 +523,25 @@ async function extractStreamUrl(href) {
                     if (Array.isArray(parsed) && parsed.length > 0) { 
                         const withSeasons = parsed.filter(item => item.seasons && item.seasons.length > 0);
                         
-                        let bestMatch = withSeasons.find(item => item.title && item.title.toLowerCase() === t.toLowerCase());
-                        if (!bestMatch) bestMatch = withSeasons.find(item => item.title && item.title.toLowerCase().includes(t.toLowerCase()));
+                        let bestMatch = null;
+                        const searchStr = t.trim().toLowerCase();
+
+                        // 🎯 1. On cherche d'abord la correspondance EXACTE
+                        bestMatch = withSeasons.find(item => item.title && item.title.trim().toLowerCase() === searchStr);
+                        
+                        // 🎯 2. Si on ne trouve pas l'exactitude, on prend le PLUS COURT qui contient le mot.
+                        // (Cela évite de prendre "Sword Art Online Alternative: Gun Gale" quand on cherche juste "Sword Art Online")
+                        if (!bestMatch) {
+                            let matching = withSeasons.filter(item => item.title && item.title.toLowerCase().includes(searchStr));
+                            matching.sort((a, b) => a.title.length - b.title.length);
+                            if (matching.length > 0) bestMatch = matching[0];
+                        }
+
                         if (!bestMatch && withSeasons.length > 0) bestMatch = withSeasons[0];
 
                         if (bestMatch) { 
                             animeDataFound = bestMatch; 
+                            console.log(`[Movix] 📚 Fichier Anime trouvé : ${animeDataFound.title}`);
                             break; 
                         }
                     }
@@ -559,8 +551,10 @@ async function extractStreamUrl(href) {
             if (animeDataFound && animeDataFound.seasons) {
                 let seasonObj = null;
                 const searchNameLower = searchName.toLowerCase();
+                const isSpinOff = searchNameLower.includes(':') || searchNameLower.includes('-');
                 
-                if (searchNameLower.includes(':') || searchNameLower.includes('-')) {
+                // A. Spin-off ? On fouille dans les saisons pour trouver le nom du spin-off
+                if (isSpinOff) {
                     const keywords = searchNameLower.split(/[:\-]/).map(k => k.trim()).filter(k => k.length > 3);
                     for (const sea of animeDataFound.seasons) {
                         const seaNameLower = sea.name.toLowerCase();
@@ -569,25 +563,27 @@ async function extractStreamUrl(href) {
                             break;
                         }
                     }
-                } else {
-                    for (const sea of animeDataFound.seasons) {
-                        if (sea.name.toLowerCase().includes(searchNameLower) && searchNameLower !== animeDataFound.title.toLowerCase()) {
-                            seasonObj = sea;
-                            break;
-                        }
-                    }
-                }
-
+                } 
+                
+                // B. Saison Classique ? On force la recherche stricte "Saison X" ou "Season X"
                 if (!seasonObj) {
                     seasonObj = animeDataFound.seasons.find(sea => {
-                        const sn = sea.name.toLowerCase();
-                        return sn === `saison ${s}` || sn === `season ${s}`;
+                        const sn = sea.name.toLowerCase().trim();
+                        return sn.includes(`saison ${s}`) || sn.includes(`saison 0${s}`) || sn.includes(`season ${s}`) || sn === `s${s}` || sn === s.toString();
                     });
                 }
 
-                if (!seasonObj) seasonObj = animeDataFound.seasons[s - 1];
+                // C. Fallback logique : On prend l'index de la saison (en évitant de tomber sur un spin-off)
+                if (!seasonObj) {
+                    const cleanSeasons = animeDataFound.seasons.filter(sea => {
+                        const sn = sea.name.toLowerCase();
+                        return sn.includes('saison') || sn.includes('season') || sn.length < 15; 
+                    });
+                    seasonObj = cleanSeasons[s - 1] || animeDataFound.seasons[s - 1];
+                }
 
                 if (seasonObj && seasonObj.episodes) {
+                    console.log(`[Movix] 🎯 Saison ciblée : ${seasonObj.name}`);
                     const epObj = seasonObj.episodes.find(ep => ep.index === parseInt(e)) || seasonObj.episodes[parseInt(e) - 1];
                     if (epObj && epObj.streaming_links) {
                         epObj.streaming_links.forEach(linkObj => {
@@ -612,14 +608,13 @@ async function extractStreamUrl(href) {
             }
         }
 
+        // 🌟 L'API UNIQUE POUR TOUT LE RESTE
         if (!isAnime || rawLinks.length === 0) {
-            console.log(`[Movix] 🎬 Lancement de l'API Globale TMDB...`);
             try {
                 let apiUrl = type === 'movie' 
                     ? `https://api.movix.blog/api/tmdb/movie/${id}` 
                     : `https://api.movix.blog/api/tmdb/tv/${id}?season=${s}&episode=${e}`;
                     
-                console.log(`[Movix] 🔍 Scan de la source TMDB : ${apiUrl}`);
                 const resApi = await soraFetch(apiUrl, { headers: movixHeaders });
                 if (resApi) {
                     const dataApi = JSON.parse(typeof resApi === "string" ? resApi : await resApi.text());
@@ -657,8 +652,6 @@ async function extractStreamUrl(href) {
         }
 
         console.log(`[Movix] 🍿 Fin de l'extraction. Total des liens récupérés : ${streams.length}`);
-        
-        // 🌟 RETOUR STANDARDISÉ POUR SORA (Avec "subtitles: null" ou "")
         return JSON.stringify({ streams: streams, subtitles: "" });
 
     } catch (err) {
