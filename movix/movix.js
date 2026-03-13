@@ -30,7 +30,6 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
     }
 }
 
-
 // --- 1. RECHERCHE (100% TMDB pour la fiabilité) ---
 async function searchResults(keyword) {
     console.log(`[Movix] 🔍 Recherche TMDB pour : "${keyword}"`);
@@ -337,6 +336,85 @@ async function resolveAnyLink(url, sourceName, lang) {
                           
             if (match) { finalUrl = match[1]; isDirect = true; }
         } 
+        // 🌟 Détection Wish / Wishonly
+        else if (urlLower.includes('wishonly.') || urlLower.includes('wish') || sourceLower.includes('wish')) {
+            let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
+            if (res) {
+                let html = typeof res === "string" ? res : await res.text();
+                let unpackCount = 0;
+                while (html.match(/eval\s*\(\s*function/i) && unpackCount < 3) {
+                    let unpackedHtml = unpack(html);
+                    if (unpackedHtml === html) break;
+                    html = unpackedHtml;
+                    unpackCount++;
+                }
+                const match = html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i) || 
+                              html.match(/src\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i) ||
+                              html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+                if (match) { finalUrl = match[1]; isDirect = true; headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; }
+            }
+        }
+        // 🌟 Détection LuluStream
+        else if (urlLower.includes('lulustream.') || sourceLower.includes('lulu')) {
+            let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
+            if (res) {
+                let html = typeof res === "string" ? res : await res.text();
+                let unpackCount = 0;
+                while (html.match(/eval\s*\(\s*function/i) && unpackCount < 3) {
+                    let unpackedHtml = unpack(html);
+                    if (unpackedHtml === html) break;
+                    html = unpackedHtml;
+                    unpackCount++;
+                }
+                const match = html.match(/(?:file|sources|src)\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || 
+                              html.match(/(https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)/i);
+                if (match) { finalUrl = match[1]; isDirect = true; headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; }
+            }
+        }
+        // 🌟 Détection Veed / Veev
+        else if (urlLower.includes('veev.to') || urlLower.includes('veed') || sourceLower.includes('veed')) {
+            let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
+            if (res) {
+                let html = typeof res === "string" ? res : await res.text();
+                let unpackCount = 0;
+                while (html.match(/eval\s*\(\s*function/i) && unpackCount < 3) {
+                    let unpackedHtml = unpack(html);
+                    if (unpackedHtml === html) break;
+                    html = unpackedHtml;
+                    unpackCount++;
+                }
+                const match = html.match(/(?:file|hls)\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i) || 
+                              html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+                if (match) { finalUrl = match[1]; isDirect = true; headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; }
+            }
+        }
+        // 🌟 Détection DHTPRE
+        else if (urlLower.includes('dhtpre.') || sourceLower.includes('dhtpre')) {
+            let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": url } });
+            if (res) {
+                let html = typeof res === "string" ? res : await res.text();
+                let unpackCount = 0;
+                while (html.match(/eval\s*\(\s*function/i) && unpackCount < 3) {
+                    let unpackedHtml = unpack(html);
+                    if (unpackedHtml === html) break;
+                    html = unpackedHtml;
+                    unpackCount++;
+                }
+                const match = html.match(/(?:file|sources|hls)\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || 
+                              html.match(/(https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)/i);
+                if (match) { finalUrl = match[1]; isDirect = true; headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; }
+            }
+        }
+        // 🌟 Détection Coflix UPN
+        else if (urlLower.includes('coflix.upn.') || sourceLower.includes('coflix')) {
+            let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://coflix.upn.one/" } });
+            if (res) {
+                let html = typeof res === "string" ? res : await res.text();
+                const match = html.match(/source\s*:\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || 
+                              html.match(/(https?:\/\/[^\s"'<>]+\.(?:m3u8|mp4)[^\s"'<>]*)/i);
+                if (match) { finalUrl = match[1]; isDirect = true; headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; }
+            }
+        }
         // 🌟 Détection Uqload
         else if (urlLower.includes('uqload.') || sourceLower === 'uqload') {
             let res = await soraFetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://uqload.is/" } });
@@ -418,44 +496,42 @@ async function resolveAnyLink(url, sourceName, lang) {
                 }
             }
         }
-  // 🌟 Détection Sibnet
+        // 🌟 Détection Sibnet (Avec Cloudflare Worker)
         else if (urlLower.includes('sibnet.') || sourceLower === 'sibnet') {
-            console.log(`[Movix] 📡 Extraction directe Sibnet...`);
-            let res = await fetchv2(url, { "Referer": "https://video.sibnet.ru/" }, "GET");
-            let html = typeof res === "string" ? res : await res.text();
-            
-            const match = html.match(/src\s*:\s*["']([^"']*\.mp4[^"']*)['"]/i) || html.match(/["']((?:https?:)?\/\/[^"'\s]+\.mp4[^"'\s]*)["']/i);
-            
-            if (match && match[1]) {
-                let videoUrl = match[1].startsWith('//') ? "https:" + match[1] : (match[1].startsWith('/') ? "https://video.sibnet.ru" + match[1] : match[1]);
+            console.log(`[Movix] 📡 Extraction directe Sibnet via Worker...`);
+            let res = await soraFetch(url, { headers: { "Referer": "https://video.sibnet.ru/" }, encoding: 'UTF-8' });
+            if (res) {
+                let html = typeof res === "string" ? res : await res.text();
                 
-                finalUrl = videoUrl; 
-                isDirect = true; 
-                headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; 
-
-                // 🌟 LE CORRECTIF : Résolution manuelle de la redirection anti-hotlink
-                try {
-                    console.log(`[Movix] 🔄 Suivi de la redirection Sibnet en cours...`);
-                    const resolveOptions = Object.assign({}, headers, { redirect: "manual" });
-                    const resolveRes = await fetchv2(finalUrl, resolveOptions, "GET");
+                const videoMatch = html.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i) || 
+                                   html.match(/src\s*:\s*["']([^"']*\.mp4[^"']*)['"]/i) || 
+                                   html.match(/["']((?:https?:)?\/\/[^"'\s]+\.mp4[^"'\s]*)["']/i);
+                
+                if (videoMatch && videoMatch[1]) {
+                    let videoPath = videoMatch[1];
+                    let intermediateUrl = videoPath.startsWith("http") ? videoPath : (videoPath.startsWith('//') ? "https:" + videoPath : `https://video.sibnet.ru${videoPath}`);
                     
-                    let locationHeader = null;
-                    if (resolveRes && resolveRes.headers) {
-                        if (typeof resolveRes.headers.get === 'function') {
-                            locationHeader = resolveRes.headers.get('location') || resolveRes.headers.get('Location');
-                        } else {
-                            locationHeader = resolveRes.headers['location'] || resolveRes.headers['Location'];
+                    try {
+                        // ⚠️ N'OUBLIE PAS DE REMPLACER L'URL DU WORKER CI-DESSOUS ⚠️
+                        const workerUrl = `https://shiny-lab-d171.kurzmathis4.workers.dev?url=${encodeURIComponent(intermediateUrl)}`;
+                        console.log(`[Movix] 🔄 Demande de décodage Sibnet au Worker...`);
+                        
+                        const workerRes = await soraFetch(workerUrl);
+                        if (workerRes) {
+                            const workerData = JSON.parse(typeof workerRes === "string" ? workerRes : await workerRes.text());
+                            if (workerData && workerData.finalUrl) {
+                                finalUrl = workerData.finalUrl;
+                                isDirect = true;
+                                console.log(`[Movix] ⚡ Lien absolu renvoyé par le Worker !`);
+                                headers = { "User-Agent": "Mozilla/5.0" }; 
+                            }
                         }
+                    } catch (err) {
+                        console.log(`[Movix] ⚠️ Échec du Worker Sibnet : ${err.message}`);
+                        finalUrl = intermediateUrl; 
+                        isDirect = true; 
+                        headers = { "Referer": url, "User-Agent": "Mozilla/5.0" }; 
                     }
-
-                    if (locationHeader) {
-                        finalUrl = locationHeader.startsWith('//') ? 'https:' + locationHeader : locationHeader;
-                        console.log(`[Movix] ⚡ Vrai lien Sibnet trouvé (Contournement réussi) !`);
-                    } else if (resolveRes && resolveRes.url && resolveRes.url !== finalUrl) {
-                        finalUrl = resolveRes.url;
-                    } 
-                } catch (e) {
-                    console.log(`[Movix] ⚠️ Erreur lors de la redirection Sibnet : ${e.message}`);
                 }
             }
         }
@@ -599,6 +675,11 @@ async function extractStreamUrl(href) {
                                 else if (urlLowerForServer.includes("movearnpre") || urlLowerForServer.includes("vidhide") || urlLowerForServer.includes("smoothpre")) server = "Vidhide";
                                 else if (urlLowerForServer.includes("voe") || urlLowerForServer.includes("dingtezuni")) server = "Voe";
                                 else if (urlLowerForServer.includes("dood") || urlLowerForServer.includes("doply")) server = "Doodstream";
+                                else if (urlLowerForServer.includes("wish") || urlLowerForServer.includes("wishonly")) server = "Wish";
+                                else if (urlLowerForServer.includes("lulu")) server = "LuluStream";
+                                else if (urlLowerForServer.includes("veev") || urlLowerForServer.includes("veed")) server = "Veed";
+                                else if (urlLowerForServer.includes("dhtpre")) server = "Dhtpre";
+                                else if (urlLowerForServer.includes("coflix")) server = "Coflix";
                                 
                                 rawLinks.push({ url, server, lang });
                             });
