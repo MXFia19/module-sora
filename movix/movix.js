@@ -5,7 +5,7 @@
 const TMDB_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
 // --- GESTIONNAIRE DE REQUÊTES ROBUSTE (soraFetch) ---
-async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
+async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'UTF-8' }) {
     try {
         if (typeof fetchv2 !== 'undefined') {
             return await fetchv2(
@@ -14,7 +14,7 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
                 options.method ?? 'GET',
                 options.body ?? null,
                 true,
-                options.encoding ?? 'utf-8'
+                options.encoding ?? 'UTF-8'
             );
         } else {
             return await fetch(url, options);
