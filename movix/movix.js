@@ -5,6 +5,7 @@
 const TMDB_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
 // --- GESTIONNAIRE DE REQUÊTES ROBUSTE (soraFetch) ---
+// 🌟 CORRECTION DU DÉVELOPPEUR : "UTF-8" en majuscules !
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'UTF-8' }) {
     try {
         if (typeof fetchv2 !== 'undefined') {
@@ -14,7 +15,7 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
                 options.method ?? 'GET',
                 options.body ?? null,
                 true,
-                options.encoding ?? 'UTF-8'
+                options.encoding ?? 'UTF-8' // 🌟 CORRECTION ICI AUSSI
             );
         } else {
             return await fetch(url, options);
@@ -28,6 +29,7 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
         }
     }
 }
+
 
 // --- 1. RECHERCHE (100% TMDB pour la fiabilité) ---
 async function searchResults(keyword) {
