@@ -1,3 +1,106 @@
+// ==========================================
+// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// ==========================================
+
+const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
+const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
+const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+
+// 1. Tracker pour les Recherches
+async function sendTracker(moduleName, keyword, results) {
+    try {
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        
+        if (results.length > 0) {
+            desc += `\n**Top résultats :**\n`;
+            let top = results.slice(0, 5);
+            for (let r of top) { desc += `🎬 ${r.title}\n`; }
+            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
+        } else {
+            desc += `\n❌ Aucun média trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `📊 Recherche sur ${moduleName}`,
+                description: desc,
+                color: 5814783, // Bleu
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
+}
+
+// 2. Tracker pour les clics sur les affiches (Détails)
+async function sendDetailsTracker(moduleName, url) {
+    try {
+        let readableName = url;
+        // Extraction du nom depuis l'URL Purstream (ex: https://purstream.me/serie/123-titre-de-la-serie)
+        let match = url.match(/\/(movie|serie)\/\d+-([^/]+)/i);
+        if (match) {
+            let type = match[1] === "movie" ? "Film" : "Série";
+            readableName = `[${type}] ` + match[2].replace(/-/g, ' ').toUpperCase();
+        }
+
+        const payload = {
+            embeds: [{
+                title: `🖱️ Clic sur une affiche (${moduleName})`,
+                description: `**Média sélectionné :** \`${readableName}\``,
+                color: 16766720, // Jaune/Orange
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Details : " + e); }
+}
+
+// 3. Tracker pour le Lecteur
+async function sendPlayerTracker(moduleName, url, streams) {
+    try {
+        let readableInfo = url;
+        
+        // Sur Purstream, l'URL de l'épisode ressemble à "123/movie" ou "456/1/2" (ID/Saison/Episode)
+        if (url.includes('movie')) {
+            let parts = url.split('/');
+            readableInfo = `🎬 **Film** (ID API: ${parts[0]})`;
+        } else {
+            let parts = url.split('/');
+            if (parts.length >= 3) {
+                readableInfo = `📺 **Série** (ID API: ${parts[0]})\nSaison : **${parts[1]}**\nÉpisode : **${parts[2]}**`;
+            }
+        }
+
+        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        
+        if (streams.length > 0) {
+            for (let s of streams) { desc += `✅ ${s.title}\n`; }
+        } else {
+            desc += `❌ Aucun lien vidéo valide trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `▶️ Lancement Vidéo sur ${moduleName}`,
+                description: desc,
+                color: 5763719, // Vert
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
+}
+
+// ==========================================
+// ⚙️ LOGIQUE DU MODULE PURSTREAM
+// ==========================================
+
 let WORKING_DOMAIN = null;
 
 async function getWorkingDomain() {
@@ -31,23 +134,19 @@ async function searchResults(keyword) {
         let isCatalog = false;
 
         // --- GESTION DES COMMANDES COMBINÉES ---
-        // Si le texte contient au moins un "!", on active le mode catalogue
         if (cleanKeyword.includes("!")) {
             isCatalog = true;
 
-            // 1. Définition du TYPE (Par défaut : étoile * = tout)
             let typeParam = "*";
             if (cleanKeyword.includes("!anime")) typeParam = "anime";
             else if (cleanKeyword.includes("!movie") || cleanKeyword.includes("!film")) typeParam = "movie";
             else if (cleanKeyword.includes("!serie") || cleanKeyword.includes("!tv")) typeParam = "tv";
 
-            // 2. Définition du TRI (Par défaut : les ajouts récents)
             let sortParam = "recently-added";
             if (cleanKeyword.includes("!trend") || cleanKeyword.includes("!populaire")) sortParam = "most-viewed";
             else if (cleanKeyword.includes("!top")) sortParam = "best-rated";
             else if (cleanKeyword.includes("!new")) sortParam = "newest";
 
-            // On fabrique l'URL sur mesure en combinant les deux !
             apiUrl = `https://api.${domain}/api/v1/catalog/movies?page=1&sortBy=${sortParam}&types=${typeParam}&categoriesIds=*&franchisesIds=*&displayMode=large&perPage=50`;
         } 
         else {
@@ -59,7 +158,6 @@ async function searchResults(keyword) {
         const responseText = await soraFetch(apiUrl);
         const data = await responseText.json();
 
-        // --- FONCTION CHERCHEUSE DE TABLEAU (Le Labyrinthe) ---
         function findArrayInObject(obj) {
             if (Array.isArray(obj)) return obj;
             if (obj && typeof obj === 'object') {
@@ -80,8 +178,8 @@ async function searchResults(keyword) {
             items = data?.data?.items?.movies?.items || [];
         }
 
-        // Sécurité finale
         if (!Array.isArray(items) || items.length === 0) {
+             await sendTracker("Purstream", keyword, []); // 🕵️ Tracker
              return JSON.stringify([]);
         }
 
@@ -91,7 +189,6 @@ async function searchResults(keyword) {
             let title = result.title || result.name || "Titre inconnu";
             let hrefType = (result.type === "movie") ? "movie" : "serie";
 
-            // Si l'API catalogue ne renvoie pas le champ "type", on force celui qu'on a demandé
             if (!result.type && isCatalog) {
                 if (cleanKeyword.includes("!anime") || cleanKeyword.includes("!serie") || cleanKeyword.includes("!tv")) hrefType = "serie";
                 if (cleanKeyword.includes("!movie") || cleanKeyword.includes("!film")) hrefType = "movie";
@@ -103,6 +200,9 @@ async function searchResults(keyword) {
                 href: `https://${domain}/${hrefType}/${result.id}-${slugify(title)}`
             };
         }).filter(Boolean);
+
+        // 🕵️ Tracker : Envoi des résultats sur Discord
+        await sendTracker("Purstream", keyword, transformedResults);
 
         return JSON.stringify(transformedResults);
         
@@ -124,6 +224,11 @@ function slugify(title) {
 }
 
 async function extractDetails(url) {
+    console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
+    
+    // 🕵️ Tracker : Envoi du clic sur l'affiche
+    await sendDetailsTracker("Purstream", url);
+
     try {
         const domain = await getWorkingDomain();
         let apiUrl = "";
@@ -171,7 +276,6 @@ async function extractDetails(url) {
     }
 }
 
-// --- C'EST ICI QUE TOUT SE JOUE POUR LES AFFICHES / SAISONS / DURÉES ---
 async function extractEpisodes(url) {
     try {
         const domain = await getWorkingDomain();
@@ -182,7 +286,6 @@ async function extractEpisodes(url) {
             if (!match) throw new Error("Invalid URL format");
             const movieId = match[1];
             
-            // Appel API pour récupérer l'image et la durée du film
             const responseText = await soraFetch(`https://api.${domain}/api/v1/media/${movieId}/sheet`, {
                 headers: {
                     "Referer": `https://${domain}/`,
@@ -219,7 +322,6 @@ async function extractEpisodes(url) {
             const data = json.data.items;
             let allEpisodes = [];
 
-            // On boucle sur toutes les saisons
             for (let i = 1; i <= data.seasons; i++) {
                 try {
                     const seasonResponseText = await soraFetch(`https://api.${domain}/api/v1/media/${showId}/season/${i}`, {
@@ -232,15 +334,14 @@ async function extractEpisodes(url) {
                     
                     if (seasonJson && seasonJson.data && seasonJson.data.items) {
                         const seasonData = seasonJson.data.items;
-                        // On boucle sur tous les épisodes de la saison
                         for (const episode of seasonData.episodes) {
                             allEpisodes.push({
                                 href: `${showId}/${i}/${episode.episode}`,
                                 number: episode.episode,
-                                season: i,                                 // On ajoute le numéro de saison
+                                season: i,
                                 title: episode.name || `Épisode ${episode.episode}`,
-                                image: episode.poster || "",               // On ajoute l'image de l'épisode
-                                duration: episode.runtime ? episode.runtime.human : "" // On ajoute la durée
+                                image: episode.poster || "",
+                                duration: episode.runtime ? episode.runtime.human : ""
                             });
                         }
                     }
@@ -303,6 +404,9 @@ async function extractStreamUrl(url) {
                 });
             }
         }
+
+        // 🕵️ Tracker : Envoi des flux trouvés sur Discord
+        await sendPlayerTracker("Purstream", url, streams);
 
         return JSON.stringify({ streams, subtitles: "" });
 
