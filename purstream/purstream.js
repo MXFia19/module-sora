@@ -1,5 +1,5 @@
 // ==========================================
-// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// 📊 TRACKERS DISCORD (Avec liens d'API)
 // ==========================================
 
 const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
@@ -7,9 +7,9 @@ const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pP
 const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
 
 // 1. Tracker pour les Recherches
-async function sendTracker(moduleName, keyword, results) {
+async function sendTracker(moduleName, keyword, results, apiUrl) {
     try {
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL de l'API :** ${apiUrl}\n`;
         
         if (results.length > 0) {
             desc += `\n**Top résultats :**\n`;
@@ -35,10 +35,9 @@ async function sendTracker(moduleName, keyword, results) {
 }
 
 // 2. Tracker pour les clics sur les affiches (Détails)
-async function sendDetailsTracker(moduleName, url) {
+async function sendDetailsTracker(moduleName, url, apiUrl) {
     try {
         let readableName = url;
-        // Extraction du nom depuis l'URL Purstream (ex: https://purstream.me/serie/123-titre-de-la-serie)
         let match = url.match(/\/(movie|serie)\/\d+-([^/]+)/i);
         if (match) {
             let type = match[1] === "movie" ? "Film" : "Série";
@@ -48,7 +47,7 @@ async function sendDetailsTracker(moduleName, url) {
         const payload = {
             embeds: [{
                 title: `🖱️ Clic sur une affiche (${moduleName})`,
-                description: `**Média sélectionné :** \`${readableName}\``,
+                description: `**Média sélectionné :** \`${readableName}\`\n**URL de l'API :** ${apiUrl}`,
                 color: 16766720, // Jaune/Orange
                 timestamp: new Date().toISOString()
             }]
@@ -60,11 +59,10 @@ async function sendDetailsTracker(moduleName, url) {
 }
 
 // 3. Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url, streams) {
+async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
     try {
         let readableInfo = url;
         
-        // Sur Purstream, l'URL de l'épisode ressemble à "123/movie" ou "456/1/2" (ID/Saison/Episode)
         if (url.includes('movie')) {
             let parts = url.split('/');
             readableInfo = `🎬 **Film** (ID API: ${parts[0]})`;
@@ -75,7 +73,7 @@ async function sendPlayerTracker(moduleName, url, streams) {
             }
         }
 
-        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        let desc = `${readableInfo}\n**URL de l'API :** ${apiUrl}\n\n**Serveurs extraits :** ${streams.length}\n`;
         
         if (streams.length > 0) {
             for (let s of streams) { desc += `✅ ${s.title}\n`; }
@@ -179,7 +177,7 @@ async function searchResults(keyword) {
         }
 
         if (!Array.isArray(items) || items.length === 0) {
-             await sendTracker("Purstream", keyword, []); // 🕵️ Tracker
+             await sendTracker("Purstream", keyword, [], apiUrl); // 🕵️ Tracker
              return JSON.stringify([]);
         }
 
@@ -201,8 +199,8 @@ async function searchResults(keyword) {
             };
         }).filter(Boolean);
 
-        // 🕵️ Tracker : Envoi des résultats sur Discord
-        await sendTracker("Purstream", keyword, transformedResults);
+        // 🕵️ Tracker : Envoi des résultats sur Discord avec l'URL de l'API
+        await sendTracker("Purstream", keyword, transformedResults, apiUrl);
 
         return JSON.stringify(transformedResults);
         
@@ -226,9 +224,6 @@ function slugify(title) {
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
     
-    // 🕵️ Tracker : Envoi du clic sur l'affiche
-    await sendDetailsTracker("Purstream", url);
-
     try {
         const domain = await getWorkingDomain();
         let apiUrl = "";
@@ -244,6 +239,9 @@ async function extractDetails(url) {
         } else {
             throw new Error("Invalid URL format");
         }
+
+        // 🕵️ Tracker : Maintenant qu'on a l'URL de l'API, on l'envoie !
+        await sendDetailsTracker("Purstream", url, apiUrl);
 
         const responseText = await soraFetch(apiUrl, {
             headers: {
@@ -405,8 +403,8 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // 🕵️ Tracker : Envoi des flux trouvés sur Discord
-        await sendPlayerTracker("Purstream", url, streams);
+        // 🕵️ Tracker : Envoi des flux trouvés sur Discord avec l'URL de l'API
+        await sendPlayerTracker("Purstream", url, streams, apiUrl);
 
         return JSON.stringify({ streams, subtitles: "" });
 
