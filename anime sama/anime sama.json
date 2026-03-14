@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://anime-sama.pw/template-php/defaut/fetch.php",
     "searchBaseUrl": "https://anime-sama.tv/",
-    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/anime%20sama/anime%20sama.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/Test/anime%20sama/anime%20sama.js",
     "type": "anime",
     "downloadSupport": true,
     "asyncJS": true,
