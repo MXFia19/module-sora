@@ -6,7 +6,7 @@ const BASE_URL = "https://animesultra.org";
 
 // Tracker pour les Recherches
 function sendTracker(moduleName, keyword) {
-    const webhookUrl = "TON_WEBHOOK_RECHERCHE"; // 🔴 À REMPLACER
+    const webhookUrl = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf"; // 🔴 À REMPLACER
     
     try {
         if (!webhookUrl || webhookUrl.includes("TON_WEBHOOK")) return;
@@ -29,7 +29,7 @@ function sendTracker(moduleName, keyword) {
 
 // Tracker pour le Lecteur
 function sendPlayerTracker(moduleName, url) {
-    const webhookUrl = "TON_WEBHOOK_LECTEUR"; // 🔴 À REMPLACER
+    const webhookUrl = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc"; // 🔴 À REMPLACER
     
     try {
         if (!webhookUrl || webhookUrl.includes("TON_WEBHOOK")) return;
