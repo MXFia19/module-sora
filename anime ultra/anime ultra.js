@@ -194,11 +194,10 @@ async function extractStreamUrl(url) {
                     if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
                     if (!embedUrl.startsWith('http')) continue;
                     
-  // --- MOTEUR SIBNET ---
+                    // --- MOTEUR SIBNET CLASSIQUE ---
                     if (embedUrl.includes("sibnet")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
                         try {
-                            // L'ASTUCE EST ICI : On force l'encodage russe !
                             const req = await fetchv2(embedUrl, { 
                                 "Referer": BASE_URL,
                                 "encoding": "windows-1251",
@@ -207,14 +206,12 @@ async function extractStreamUrl(url) {
                             
                             const sibHtml = await req.text();
                             
-                            // On utilise ta Regex ultra-précise
                             const mp4Match = sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i) || 
                                              sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i);
                             
                             if (mp4Match) {
                                 let directUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
                                 
-                                // Tentative de récupérer l'URL finale (Location)
                                 try {
                                     const redirectReq = await fetch(directUrl, {
                                         method: "GET",
@@ -246,6 +243,7 @@ async function extractStreamUrl(url) {
                             console.log(`[Lecteur] Erreur Sibnet : ${e}`);
                         }
                     }
+                    // --- MOTEUR SENDVID ---
                     else if (embedUrl.includes("sendvid")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sendvid en cours...`);
                         try {
@@ -263,31 +261,67 @@ async function extractStreamUrl(url) {
                             }
                         } catch (e) {}
                     }
+                    // --- NOUVEAU MOTEUR DAISUKI (API JSON) ---
                     else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) {
-                        console.log(`[Lecteur] 🕵️ Extraction Daisuki en cours...`);
+                        console.log(`[Lecteur] 🕵️ Extraction Daisuki API en cours...`);
                         try {
-                            const req = await fetchv2(embedUrl);
-                            const daiHtml = await req.text();
-                            const mediaMatch = daiHtml.match(/source\s*:\s*["']([^"']+)["']/i) ||
-                                               daiHtml.match(/file\s*:\s*["']([^"']+)["']/i) ||
-                                               daiHtml.match(/src=["']([^"']+\.(m3u8|mp4)[^"']*)["']/i);
+                            // 1. Extraire l'ID depuis l'URL (ex: ?id=4739152)
+                            const idMatch = embedUrl.match(/id=([^&]+)/i);
                             
-                            if (mediaMatch) {
-                                const directUrl = mediaMatch[1];
-                                const typeStr = directUrl.includes(".m3u8") ? "HLS" : "MP4";
-                                streams.push({
-                                    title: `Daisuki (${typeStr})`,
-                                    streamUrl: directUrl,
-                                    headers: { "Referer": embedUrl }
+                            if (idMatch && idMatch[1]) {
+                                const videoId = idMatch[1];
+                                // 2. Appeler l'API JSON secrète
+                                const apiUrl = `https://cdn2.daisukianime.xyz/sib/${videoId}?epid=null`;
+                                console.log(`[Lecteur] 📡 Appel API Daisuki : ${apiUrl}`);
+
+                                const req = await fetchv2(apiUrl, {
+                                    "Referer": embedUrl,
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                                 });
+                                
+                                const jsonText = await req.text();
+                                const data = JSON.parse(jsonText);
+
+                                // 3. Parcourir les sources JSON et ajouter les liens
+                                if (data && data.sources && data.sources.length > 0) {
+                                    for (let source of data.sources) {
+                                        if (source.file) {
+                                            const typeStr = source.file.includes(".m3u8") ? "HLS" : "MP4";
+                                            streams.push({
+                                                title: `Daisuki API (${typeStr})`,
+                                                streamUrl: source.file,
+                                                headers: { "Referer": embedUrl }
+                                            });
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Fallback : Au cas où l'URL n'a pas d'ID, on garde l'ancienne méthode de secours
+                                const req = await fetchv2(embedUrl);
+                                const daiHtml = await req.text();
+                                const mediaMatch = daiHtml.match(/source\s*:\s*["']([^"']+)["']/i) ||
+                                                   daiHtml.match(/file\s*:\s*["']([^"']+)["']/i) ||
+                                                   daiHtml.match(/src=["']([^"']+\.(m3u8|mp4)[^"']*)["']/i);
+                                
+                                if (mediaMatch) {
+                                    const directUrl = mediaMatch[1];
+                                    const typeStr = directUrl.includes(".m3u8") ? "HLS" : "MP4";
+                                    streams.push({
+                                        title: `Daisuki HTML (${typeStr})`,
+                                        streamUrl: directUrl,
+                                        headers: { "Referer": embedUrl }
+                                    });
+                                }
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            console.log(`[Lecteur] 🚨 Erreur API Daisuki : ${e}`);
+                        }
                     }
                 }
             }
         }
 
- // Le Filtre Anti-Crash vital pour iOS : 
+        // Le Filtre Anti-Crash vital pour iOS : 
         let safeStreams = streams.filter(s => 
             s.streamUrl.includes('.mp4') || 
             s.streamUrl.includes('.m3u8')
@@ -295,14 +329,12 @@ async function extractStreamUrl(url) {
 
         console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
         
-        // LE BON FORMAT (Grâce à ton log !)
         if (safeStreams.length > 0) {
             return JSON.stringify({ 
                 type: "servers", 
                 streams: safeStreams 
             });
         } else {
-            // Si on n'a rien trouvé ou que tout a été filtré
             return JSON.stringify({ type: "none" });
         }
         
