@@ -1,12 +1,12 @@
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
-// Variables globales qui vont stocker les adresses officielles
+// Variables globales
 let BASE_URL = "";
 let API_URL = "";
 let HOSTNAME = "";
 
 // ==========================================
-// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// 📊 TRACKERS DISCORD
 // ==========================================
 
 const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
@@ -31,24 +31,24 @@ async function sendTracker(moduleName, keyword, results, apiUrl) {
             embeds: [{
                 title: `📊 Recherche sur ${moduleName}`,
                 description: desc,
-                color: 5814783, // Bleu
+                color: 5814783,
                 timestamp: new Date().toISOString()
             }]
         };
 
         const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
         await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
+    } catch (e) {}
 }
 
 // 2. Tracker pour les clics sur les affiches (Détails)
 async function sendDetailsTracker(moduleName, url) {
     try {
         let readableName = url;
-        // Extraction depuis l'URL Nakios (ex: https://nakios.online/movie/12345)
-        let match = url.match(/\/(movie|tv)\/(\d+)/i);
+        // CORRECTION ICI : On accepte "series" en plus de "tv" et "movie"
+        let match = url.match(/\/(movie|series|tv)\/(\d+)/i);
         if (match) {
-            let type = match[1] === "movie" ? "Film" : "Série";
+            let type = match[1].toLowerCase() === "movie" ? "Film" : "Série";
             readableName = `[${type}] ID TMDB : ${match[2]}`;
         }
 
@@ -56,14 +56,14 @@ async function sendDetailsTracker(moduleName, url) {
             embeds: [{
                 title: `🖱️ Clic sur une affiche (${moduleName})`,
                 description: `**Média sélectionné :** \`${readableName}\`\n**Lien source :** ${url}`,
-                color: 16766720, // Jaune/Orange
+                color: 16766720,
                 timestamp: new Date().toISOString()
             }]
         };
 
         const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
         await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker Details : " + e); }
+    } catch (e) {}
 }
 
 // 3. Tracker pour le Lecteur
@@ -71,7 +71,6 @@ async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
     try {
         let readableInfo = url;
         
-        // Format Nakios : "12345/movie" ou "6789/1/2" (ID/Saison/Episode)
         if (url.includes('movie')) {
             let parts = url.split('/');
             readableInfo = `🎬 **Film** (ID TMDB: ${parts[0]})`;
@@ -94,30 +93,28 @@ async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
             embeds: [{
                 title: `▶️ Lancement Vidéo sur ${moduleName}`,
                 description: desc,
-                color: 5763719, // Vert
+                color: 5763719,
                 timestamp: new Date().toISOString()
             }]
         };
 
         const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
         await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
+    } catch (e) {}
 }
 
 // ==========================================
 // ⚙️ LOGIQUE DU MODULE NAKIOS
 // ==========================================
 
-// --- LE CERVEAU AUTO-RÉPARATEUR ---
 async function initUrls() {
-    if (BASE_URL !== "") return; // Si on l'a déjà trouvé, on ne refait pas la recherche
+    if (BASE_URL !== "") return;
 
     try {
         console.log("[Nakios] Recherche de la nouvelle adresse officielle sur nakios.online...");
         const response = await soraFetch("https://nakios.online/");
         const text = await response.text();
 
-        // On cherche le lien dans le bouton "Visiter le site"
         const match = text.match(/href="([^"]+)"[^>]*>.*?Visiter/i) || text.match(/(https:\/\/nakios\.[a-z]+)/i);
         
         if (match && match[1]) {
@@ -127,11 +124,9 @@ async function initUrls() {
             throw new Error("Aucun lien trouvé");
         }
     } catch (e) {
-        console.log("[Nakios] Impossible de récupérer l'adresse, utilisation de l'adresse de secours.");
-        BASE_URL = "https://nakios.site"; // Plan B
+        BASE_URL = "https://nakios.site";
     }
 
-    // On déduit l'API et le domaine à partir de l'adresse trouvée
     try {
         HOSTNAME = BASE_URL.replace(/^https?:\/\//, ''); 
         API_URL = `https://api.${HOSTNAME}`;
@@ -139,39 +134,34 @@ async function initUrls() {
         HOSTNAME = "nakios.site";
         API_URL = "https://api.nakios.site";
     }
-    
-    console.log(`[Nakios] Configuration terminée -> Base: ${BASE_URL} | API: ${API_URL}`);
 }
 
-// --- 1. RECHERCHE (VIA L'API OFFICIELLE DE NAKIOS) ---
+// --- 1. RECHERCHE ---
 async function searchResults(keyword) {
     try {
         await initUrls();
 
         const encodedKeyword = encodeURIComponent(keyword);
         const searchUrl = `${API_URL}/api/search/multi?query=${encodedKeyword}&page=1`;
-        console.log(`[Nakios] Lancement de la recherche interne : ${searchUrl}`);
         
         const responseText = await soraFetch(searchUrl, {
-            headers: {
-                "Origin": BASE_URL,
-                "Referer": `${BASE_URL}/`
-            }
+            headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` }
         });
         
         const data = await responseText.json();
-
-        // Transformation des résultats
         const items = data.results || data.data || data.items || data; 
 
         if (!Array.isArray(items)) {
-            console.log("[Nakios] Structure de recherche inattendue :", JSON.stringify(data).substring(0, 200));
-            await sendTracker("Nakios", keyword, [], searchUrl); // Tracker vide
+            await sendTracker("Nakios", keyword, [], searchUrl);
             return JSON.stringify([]);
         }
 
         const transformedResults = items.map(result => {
             let type = result.media_type || (result.name ? "tv" : "movie");
+            
+            // CORRECTION ICI : Remplacement strict de "tv" par "series" pour coller au site Nakios !
+            if (type === "tv") type = "series"; 
+
             let title = result.title || result.name || result.original_title;
             let id = result.id || result.tmdb_id;
             
@@ -186,70 +176,57 @@ async function searchResults(keyword) {
                 return {
                     title: title,
                     image: image,
-                    href: `${BASE_URL}/${type}/${id}`
+                    href: `${BASE_URL}/${type}/${id}` // Cela génèrera bien /series/ID
                 };
             }
         }).filter(Boolean);
 
-        // 🕵️ Tracker : Envoi des résultats sur Discord avec l'URL de l'API
         await sendTracker("Nakios", keyword, transformedResults, searchUrl);
-
         return JSON.stringify(transformedResults);
     } catch (error) {
-        console.log('[Nakios] Erreur fatale dans searchResults : ' + error);
         return JSON.stringify([]);
     }
 }
 
-// --- 2. DÉTAILS (MÉTHODE HYBRIDE TMDB + NAKIOS) ---
+// --- 2. DÉTAILS ---
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
-    
-    // 🕵️ Tracker : Envoi du clic sur l'affiche
     await sendDetailsTracker("Nakios", url);
 
     try {
         await initUrls();
         
         const isMovie = url.includes('movie');
-        const match = url.match(/(?:movie|tv)\/(\d+)/);
+        // CORRECTION ICI : On inclut "series" dans le regex
+        const match = url.match(/(?:movie|series|tv)\/(\d+)/);
         if (!match) throw new Error("Invalid URL format");
 
         const id = match[1];
         
-        // On tente d'abord de récupérer les belles données complètes via TMDB
         const tmdbUrl = isMovie 
             ? `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`
             : `https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`;
             
-        console.log(`[Nakios] Récupération des détails via TMDB : ${tmdbUrl}`);
-        
         let responseText = await soraFetch(tmdbUrl);
         let data = await responseText.json();
         
-        // Si TMDB ne connaît pas le film ou renvoie une erreur, on passe au Plan B (API Nakios)
         if (data.success === false || !data.id) {
-            console.log(`[Nakios] Échec TMDB. Basculement sur l'API Nakios...`);
             const nakiosUrl = isMovie ? `${API_URL}/api/movie/${id}` : `${API_URL}/api/series/${id}`;
             responseText = await soraFetch(nakiosUrl, { headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` } });
             data = await responseText.json();
-            data = data.data || data; // Adaptation au format Nakios
+            data = data.data || data; 
         }
 
-        // --- DÉTECTION INTELLIGENTE DE LA DURÉE ---
         let duration = 'Inconnue';
         if (data.runtime) {
-            duration = data.runtime; // Format Film (TMDB ou Nakios)
+            duration = data.runtime; 
         } else if (data.episode_run_time && data.episode_run_time.length > 0) {
-            duration = data.episode_run_time[0]; // Format Série TMDB
+            duration = data.episode_run_time[0]; 
         } else if (data.episodes && data.episodes.length > 0 && data.episodes[0].runtime) {
-            duration = data.episodes[0].runtime; // Format Série Nakios (Lecture de l'épisode 1)
+            duration = data.episodes[0].runtime; 
         }
 
-        // --- EXTRACTION DE LA DATE ---
         let releaseDate = data.release_date || data.first_air_date || data.air_date || 'Inconnue';
-
-        // --- EXTRACTION DU RÉSUMÉ ---
         let overview = data.overview || data.description || 'Aucune description disponible.';
 
         const transformedResults = [{
@@ -261,7 +238,6 @@ async function extractDetails(url) {
         return JSON.stringify(transformedResults);
         
     } catch (error) {
-        console.log('[Nakios] Erreur Details: ' + error);
         return JSON.stringify([{
             description: 'Erreur lors du chargement de la description',
             aliases: 'Durée : Inconnue',
@@ -270,13 +246,14 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (VIA L'API OFFICIELLE NAKIOS) ---
+// --- 3. ÉPISODES ---
 async function extractEpisodes(url) {
     try {
         await initUrls();
         
         const isMovie = url.includes('movie');
-        const match = url.match(/(?:movie|tv)\/(\d+)/);
+        // CORRECTION ICI : On inclut "series" dans le regex
+        const match = url.match(/(?:movie|series|tv)\/(\d+)/);
         if (!match) throw new Error("Invalid URL format");
         
         const id = match[1];
@@ -320,12 +297,11 @@ async function extractEpisodes(url) {
             return JSON.stringify(allEpisodes);
         }
     } catch (error) {
-        console.log('[Nakios] Erreur extractEpisodes: ' + error);
         return JSON.stringify([]);
     }    
 }
 
-// --- 4. EXTRACTION VIDÉO (SANS PROXY + SMART HEADERS) ---
+// --- 4. EXTRACTION VIDÉO ---
 async function extractStreamUrl(url) {
     try {
         await initUrls();
@@ -354,18 +330,14 @@ async function extractStreamUrl(url) {
         }
 
         const response = await soraFetch(apiUrl, {
-            headers: {
-                "Origin": BASE_URL,
-                "Referer": `${BASE_URL}/`
-            }
+            headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` }
         });
         
         let data = {};
         try {
             data = await response.json();
         } catch(e) {
-            console.log("[Nakios] L'API n'a pas renvoyé de JSON valide.");
-            await sendPlayerTracker("Nakios", url, [], apiUrl); // 🕵️ Tracker (Échec)
+            await sendPlayerTracker("Nakios", url, [], apiUrl);
             return JSON.stringify({ streams: [], subtitles: "" });
         }
         
@@ -414,13 +386,9 @@ async function extractStreamUrl(url) {
             }
         }
         
-        // Finalisation des liens
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
-            
-            if (item.url.startsWith('/')) {
-                finalUrl = `${API_URL}${item.url}`;
-            }
+            if (item.url.startsWith('/')) finalUrl = `${API_URL}${item.url}`;
 
             let streamHeaders = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
@@ -443,13 +411,10 @@ async function extractStreamUrl(url) {
             });
         }
 
-        // 🕵️ Tracker : Envoi des flux trouvés sur Discord avec l'URL de l'API Nakios
         await sendPlayerTracker("Nakios", url, streams, apiUrl);
-
         return JSON.stringify({ streams, subtitles: "" });
 
     } catch (error) {
-        console.log('[Nakios] Erreur extractStreamUrl: ' + error);
         return JSON.stringify({ streams: [], subtitles: "" });
     }
 }
