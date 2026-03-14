@@ -1,12 +1,14 @@
 const BASE_URL = "https://animesultra.org";
 
 // ==========================================
-// 📊 TRACKERS DISCORD (Statistiques Avancées)
+// 📊 TRACKERS DISCORD (3 Webhooks séparés)
 // ==========================================
 
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
+const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
+const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
 
-// 1. Tracker pour les Recherches (Affiche les résultats trouvés)
+// 1. Tracker pour les Recherches
 async function sendTracker(moduleName, keyword, results) {
     try {
         let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
@@ -30,8 +32,8 @@ async function sendTracker(moduleName, keyword, results) {
         };
 
         const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(DISCORD_WEBHOOK, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker : " + e); }
+        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
 }
 
 // 2. Tracker pour les clics sur les affiches (Détails)
@@ -51,11 +53,11 @@ async function sendDetailsTracker(moduleName, url) {
         };
 
         const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(DISCORD_WEBHOOK, headers, "POST", JSON.stringify(payload));
+        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
     } catch (e) { console.log("Erreur Tracker Details : " + e); }
 }
 
-// 3. Tracker pour le Lecteur (Affiche les flux trouvés)
+// 3. Tracker pour le Lecteur
 async function sendPlayerTracker(moduleName, url, streams) {
     try {
         let readableInfo = url;
@@ -86,7 +88,7 @@ async function sendPlayerTracker(moduleName, url, streams) {
         };
 
         const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(DISCORD_WEBHOOK, headers, "POST", JSON.stringify(payload));
+        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
     } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
 }
 
@@ -130,7 +132,7 @@ async function searchResults(keyword) {
             }
         }
 
-        // 🕵️ Appel du tracker avec les résultats !
+        // 🕵️ Appel du tracker Recherche
         await sendTracker("AnimesUltra", keyword, results);
 
         return JSON.stringify(results);
@@ -143,7 +145,7 @@ async function searchResults(keyword) {
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
     
-    // 🕵️ Appel du tracker de clic
+    // 🕵️ Appel du tracker Détails
     await sendDetailsTracker("AnimesUltra", url);
 
     try {
@@ -429,7 +431,7 @@ async function extractStreamUrl(url) {
 
         console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
         
-        // 🕵️ Appel du tracker avec les flux récupérés !
+        // 🕵️ Appel du tracker Lecteur
         await sendPlayerTracker("AnimesUltra", url, safeStreams);
         
         if (safeStreams.length > 0) {
