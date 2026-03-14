@@ -1,5 +1,113 @@
 // --- 1. RECHERCHE (Multi-Domaines Dynamiques & API Anime-Sama) ---
 
+// ==========================================
+// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// ==========================================
+
+const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
+const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
+const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+
+// 1. Tracker pour les Recherches
+async function sendTracker(moduleName, keyword, results) {
+    try {
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        
+        if (results.length > 0) {
+            desc += `\n**Top résultats :**\n`;
+            let top = results.slice(0, 5);
+            for (let r of top) { desc += `🎬 ${r.title}\n`; }
+            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
+        } else {
+            desc += `\n❌ Aucun anime trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `📊 Recherche sur ${moduleName}`,
+                description: desc,
+                color: 5814783, // Bleu
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
+}
+
+// 2. Tracker pour les clics sur les affiches (Détails)
+async function sendDetailsTracker(moduleName, url) {
+    try {
+        let readableName = url;
+        // Extraction du nom de l'anime depuis l'URL Anime-Sama (ex: https://anime-sama.fr/catalogue/naruto/)
+        let match = url.match(/\/catalogue\/([^/]+)\/?/i);
+        if (match) readableName = match[1].replace(/-/g, ' ').toUpperCase();
+
+        const payload = {
+            embeds: [{
+                title: `🖱️ Clic sur une affiche (${moduleName})`,
+                description: `**Anime sélectionné :** \`${readableName}\``,
+                color: 16766720, // Jaune/Orange
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Details : " + e); }
+}
+
+// 3. Tracker pour le Lecteur
+async function sendPlayerTracker(moduleName, url, streams) {
+    try {
+        let readableInfo = url;
+        
+        // Extraction spécifique pour Anime-Sama (ex: .../naruto/saison1/vostfr?episode_index=2)
+        let animeMatch = url.match(/\/catalogue\/([^/]+)\/(.+)/i);
+        if (animeMatch) {
+            let animeName = animeMatch[1].replace(/-/g, ' ').toUpperCase();
+            
+            // On essaie de trouver le numéro de l'épisode
+            let epNumber = "1"; // Par défaut 1 si on n'a pas l'index
+            let indexMatch = url.match(/episode_index=(\d+)/i);
+            if (indexMatch) {
+                epNumber = parseInt(indexMatch[1]) + 1; // L'index commence à 0 sur Anime-Sama
+            }
+            
+            // On essaie de trouver la saison/langue
+            let detailsMatch = animeMatch[2].split('?')[0].replace(/\//g, ' ');
+
+            readableInfo = `Anime : **${animeName}**\nDétails : ${detailsMatch}\nÉpisode : **${epNumber}**`;
+        } else {
+            readableInfo = `Lien brut : \`${url}\``;
+        }
+
+        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        
+        if (streams.length > 0) {
+            for (let s of streams) { desc += `✅ ${s.title}\n`; }
+        } else {
+            desc += `❌ Aucun lien vidéo valide trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `▶️ Lancement Vidéo sur ${moduleName}`,
+                description: desc,
+                color: 5763719, // Vert
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
+}
+
+// ==========================================
+
+
 // Récupération des domaines actifs du moment
 async function getDomainsList() {
     console.log(`[Domaines] 🌐 Récupération des domaines actifs...`);
@@ -53,8 +161,6 @@ async function trySearch(domain, keyword) {
             
             if (href.startsWith('/')) href = `https://${domain}${href}`;
             if (image.startsWith('/')) image = `https://${domain}${image}`;
-            
-            // 🗑️ CORRECTION : On a retiré le "|Referer=..." ici car GitHub n'en a pas besoin ! 🗑️
 
             if (!results.find(r => r.href === href)) {
                 results.push({ title, image, href });
@@ -68,17 +174,18 @@ async function trySearch(domain, keyword) {
     }
 }
 
-// Fonction principale de recherche (Séquentielle, Sécurisée & Radar Strict Code 200)
+// Fonction principale de recherche
 async function searchResults(keyword) {
     try {
         const domains = await getDomainsList();
         console.log(`[Recherche AS] 🔍 Démarrage de la recherche sur ${domains.length} domaines.`);
         
+        let finalResults = [];
+
         for (let i = 0; i < domains.length; i++) {
             let currentDomain = domains[i];
             console.log(`[Recherche AS] 📡 Vérification du radar pour : ${currentDomain}...`);
             
-            // 1. LE RADAR (Filtre strict Code 200)
             try {
                 const checkRes = await fetchv2(
                     `https://anime-sama.pw/?check=${currentDomain}`, 
@@ -87,42 +194,41 @@ async function searchResults(keyword) {
                 );
                 const checkData = JSON.parse(await checkRes.text());
                 
-                // Si ce n'est pas un 200 parfait (online), on dégage !
                 if (checkData.code !== 200) {
-                    console.log(`[Recherche AS] ⏭️ ${currentDomain} ignoré (Status: ${checkData.status}, Code: ${checkData.code}).`);
-                    continue; // On zappe instantanément le domaine
+                    console.log(`[Recherche AS] ⏭️ ${currentDomain} ignoré.`);
+                    continue; 
                 }
-                console.log(`[Recherche AS] 🟢 ${currentDomain} est 100% EN LIGNE ! Lancement de la recherche...`);
-            } catch (e) {
-                console.log(`[Recherche AS] ⚠️ Radar indisponible pour ${currentDomain}, on tente quand même au cas où.`);
-            }
+            } catch (e) {}
 
-            // 2. LA RECHERCHE (Seulement sur les survivants)
             try {
                 let results = await trySearch(currentDomain, keyword);
                 
                 if (results && results.length > 0) {
                     console.log(`[Recherche AS] 🚀 Succès sur ${currentDomain} ! ${results.length} résultats extraits.`);
-                    return JSON.stringify(results);
-                } else {
-                    console.log(`[Recherche AS] 🔄 Aucun résultat ou blocage Cloudflare sur ${currentDomain}.`);
+                    finalResults = results;
+                    break; // On a trouvé, on sort de la boucle !
                 }
-            } catch (err) {
-                console.log(`[Recherche AS] ⚠️ Erreur interceptée sur ${currentDomain}.`);
-            }
+            } catch (err) {}
         }
 
-        console.log(`[Recherche AS] ❌ Aucun résultat trouvé après avoir testé tous les domaines.`);
-        return JSON.stringify([]);
+        // 🕵️ Appel du tracker avec les résultats !
+        await sendTracker("Anime-Sama", keyword, finalResults);
+
+        return JSON.stringify(finalResults);
 
     } catch (globalErr) {
-        console.log(`[Recherche AS] 🚨 Crash global évité : ${globalErr}`);
+        console.log(`[Recherche AS] 🚨 Crash global : ${globalErr}`);
         return JSON.stringify([]);
     }
 }
 
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
+    console.log(`[Détails AS] 📖 Chargement des infos pour : ${url}`);
+    
+    // 🕵️ Appel du tracker Détails
+    await sendDetailsTracker("Anime-Sama", url);
+
     try {
         const response = await fetchv2(url);
         const html = await response.text();
@@ -162,7 +268,6 @@ async function extractEpisodes(url) {
         const response = await fetchv2(url, headers, "GET");
         const html = await response.text();
 
-        // 1. Chercher tous les onglets
         const seasonRegex = /panneauAnime\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/gi;
         let match;
         let tabs = [];
@@ -182,7 +287,6 @@ async function extractEpisodes(url) {
         let results = [];
         let fallbackSeason = 1;
 
-        // 2. On parcourt les onglets trouvés
         for (let tab of tabs) {
             try {
                 let jsUrl = tab.url;
@@ -219,15 +323,13 @@ async function extractEpisodes(url) {
 
                 if (maxEpisodes > 0) {
                     let cleanTabName = tab.name.replace(/\(?(VOSTFR|VF)\)?/i, '').trim();
-                    
-                    // 🌟 ASTUCE TMDB : Analyse intelligente du numéro de saison
                     let currentSeason = fallbackSeason;
                     let seasonMatch = cleanTabName.match(/saison\s*(\d+)/i);
                     
                     if (seasonMatch) {
                         currentSeason = parseInt(seasonMatch[1]);
                     } else if (cleanTabName.toLowerCase().includes('film') || cleanTabName.toLowerCase().includes('oav')) {
-                        currentSeason = 0; // 0 est le dossier des Films/Spéciaux sur TMDB
+                        currentSeason = 0; 
                     }
 
                     for (let i = 0; i < maxEpisodes; i++) {
@@ -239,24 +341,18 @@ async function extractEpisodes(url) {
                             title: epTitle,
                             name: epTitle,
                             href: epHref,
-                            number: i + 1,            // On remet le numéro à 1 pour chaque début de saison !
-                            season: currentSeason     // On indique à l'application dans quelle saison on est
+                            number: i + 1,            
+                            season: currentSeason     
                         });
                     }
-                    
-                    // On incrémente le backup au cas où le prochain onglet ne s'appelle pas "saison X"
                     if (!cleanTabName.toLowerCase().includes('film')) {
                         fallbackSeason++;
                     }
                 }
-
-            } catch (e) {
-                console.log(`[Episodes AS] ⚠️ Erreur sur l'onglet ${tab.name} : ${e}`);
-            }
+            } catch (e) { }
         }
 
         return JSON.stringify(results);
-
     } catch (e) {
         return JSON.stringify([]);
     }
@@ -265,6 +361,7 @@ async function extractEpisodes(url) {
 // --- 4. LECTEUR (Pieuvre 3.0 : Sans VK) ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur AS] 🎬 Démarrage pour : ${url}`);
+    
     try {
         let epIndex = 0;
         let jsUrl1 = url;
@@ -345,7 +442,7 @@ async function extractStreamUrl(url) {
                     }
                 } catch (e) {}
             }
-            // 3. LECTEUR VIDMOLY (Patch .biz)
+            // 3. LECTEUR VIDMOLY
             else if (urlLower.includes("vidmoly")) {
                 try {
                     let fixedVidUrl = embedUrl.replace(/vidmoly\.(to|me|net|ru|is)/i, "vidmoly.biz");
@@ -355,7 +452,6 @@ async function extractStreamUrl(url) {
                     if (fileMatch) streams.push({ title: `${prefix} Vidmoly`, streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
                 } catch (e) {}
             }
-            
             // 4. LECTEUR SENDVID
             else if (urlLower.includes("sendvid")) {
                 try {
@@ -373,6 +469,9 @@ async function extractStreamUrl(url) {
         for (let s of safeStreams) {
             if (!seenUrls.has(s.streamUrl)) { seenUrls.add(s.streamUrl); uniqueStreams.push(s); }
         }
+
+        // 🕵️ Appel du tracker avec les flux récupérés !
+        await sendPlayerTracker("Anime-Sama", url, uniqueStreams);
 
         return JSON.stringify(uniqueStreams.length > 0 ? { type: "servers", streams: uniqueStreams } : { type: "none" });
 
