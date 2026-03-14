@@ -1,6 +1,105 @@
 const BASE_URL = "https://animesultra.org";
 
+// ==========================================
+// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// ==========================================
+
+const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
+const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
+const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+
+// 1. Tracker pour les Recherches
+async function sendTracker(moduleName, keyword, results) {
+    try {
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        
+        if (results.length > 0) {
+            desc += `\n**Top résultats :**\n`;
+            let top = results.slice(0, 5);
+            for (let r of top) { desc += `🎬 ${r.title}\n`; }
+            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
+        } else {
+            desc += `\n❌ Aucun anime trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `📊 Recherche sur ${moduleName}`,
+                description: desc,
+                color: 5814783, // Bleu
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
+}
+
+// 2. Tracker pour les clics sur les affiches (Détails)
+async function sendDetailsTracker(moduleName, url) {
+    try {
+        let readableName = url;
+        let match = url.match(/\/\d+-([^/]+)\.html/i);
+        if (match) readableName = match[1].replace(/-/g, ' ').toUpperCase();
+
+        const payload = {
+            embeds: [{
+                title: `🖱️ Clic sur une affiche (${moduleName})`,
+                description: `**Anime sélectionné :** \`${readableName}\``,
+                color: 16766720, // Jaune/Orange
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Details : " + e); }
+}
+
+// 3. Tracker pour le Lecteur
+async function sendPlayerTracker(moduleName, url, streams) {
+    try {
+        let readableInfo = url;
+        let match = url.match(/([^/]+)\/episode-(\d+)\.html/i) || url.match(/-([^/]+)\/episode-(\d+)/i);
+        
+        if (match) {
+            let animeName = match[1].replace(/-/g, ' ').toUpperCase();
+            readableInfo = `Anime : **${animeName}**\nÉpisode : **${match[2]}**`;
+        } else {
+            readableInfo = `Lien brut : \`${url}\``;
+        }
+
+        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        
+        if (streams.length > 0) {
+            for (let s of streams) { desc += `✅ ${s.title}\n`; }
+        } else {
+            desc += `❌ Aucun lien vidéo valide trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `▶️ Lancement Vidéo sur ${moduleName}`,
+                description: desc,
+                color: 5763719, // Vert
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
+}
+
+
+// ==========================================
+// ⚙️ LOGIQUE DU MODULE ANIMESULTRA
+// ==========================================
+
 async function searchResults(keyword) {
+    console.log(`[Recherche] 🔍 Lancement pour : "${keyword}"`);
+
     try {
         const searchUrl = `${BASE_URL}/?story=${encodeURIComponent(keyword)}&do=search&subaction=search`;
         const headers = {
@@ -33,6 +132,9 @@ async function searchResults(keyword) {
             }
         }
 
+        // 🕵️ Appel du tracker Recherche
+        await sendTracker("AnimesUltra", keyword, results);
+
         return JSON.stringify(results);
     } catch (e) {
         console.log("Erreur Recherche AnimesUltra: " + e);
@@ -41,6 +143,11 @@ async function searchResults(keyword) {
 }
 
 async function extractDetails(url) {
+    console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
+    
+    // 🕵️ Appel du tracker Détails
+    await sendDetailsTracker("AnimesUltra", url);
+
     try {
         const response = await fetchv2(url);
         const html = await response.text();
@@ -150,7 +257,7 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
-    
+
     try {
         const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
         if (!idMatch) return JSON.stringify([]);
@@ -265,12 +372,10 @@ async function extractStreamUrl(url) {
                     else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) {
                         console.log(`[Lecteur] 🕵️ Extraction Daisuki API en cours...`);
                         try {
-                            // 1. Extraire l'ID depuis l'URL (ex: ?id=4739152)
                             const idMatch = embedUrl.match(/id=([^&]+)/i);
                             
                             if (idMatch && idMatch[1]) {
                                 const videoId = idMatch[1];
-                                // 2. Appeler l'API JSON secrète
                                 const apiUrl = `https://cdn2.daisukianime.xyz/sib/${videoId}?epid=null`;
                                 console.log(`[Lecteur] 📡 Appel API Daisuki : ${apiUrl}`);
 
@@ -282,7 +387,6 @@ async function extractStreamUrl(url) {
                                 const jsonText = await req.text();
                                 const data = JSON.parse(jsonText);
 
-                                // 3. Parcourir les sources JSON et ajouter les liens
                                 if (data && data.sources && data.sources.length > 0) {
                                     for (let source of data.sources) {
                                         if (source.file) {
@@ -296,7 +400,6 @@ async function extractStreamUrl(url) {
                                     }
                                 }
                             } else {
-                                // Fallback : Au cas où l'URL n'a pas d'ID, on garde l'ancienne méthode de secours
                                 const req = await fetchv2(embedUrl);
                                 const daiHtml = await req.text();
                                 const mediaMatch = daiHtml.match(/source\s*:\s*["']([^"']+)["']/i) ||
@@ -321,13 +424,15 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // Le Filtre Anti-Crash vital pour iOS : 
         let safeStreams = streams.filter(s => 
             s.streamUrl.includes('.mp4') || 
             s.streamUrl.includes('.m3u8')
         );
 
         console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
+        
+        // 🕵️ Appel du tracker Lecteur
+        await sendPlayerTracker("AnimesUltra", url, safeStreams);
         
         if (safeStreams.length > 0) {
             return JSON.stringify({ 
