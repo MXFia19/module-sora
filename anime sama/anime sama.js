@@ -120,6 +120,7 @@ async function searchResults(keyword) {
         return JSON.stringify([]);
     }
 }
+
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
     try {
@@ -261,7 +262,7 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. LECTEUR (Pieuvre 3.0 : Sans VK, avec Patch Sibnet Anti-Cyrillique) ---
+// --- 4. LECTEUR (Pieuvre 3.0 : Sans VK) ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur AS] 🎬 Démarrage pour : ${url}`);
     try {
@@ -354,53 +355,8 @@ async function extractStreamUrl(url) {
                     if (fileMatch) streams.push({ title: `${prefix} Vidmoly`, streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
                 } catch (e) {}
             }
-// LECTEUR SIBNET (🤝 Stratégie Hybride : Worker (Yeux) + iPhone (Jambes))
-            else if (urlLower.includes("sibnet")) {
-                try {
-                    let myWorkerUrl = "https://shiny-lab-d171.kurzmathis4.workers.dev";
-                    
-                    console.log(`[Lecteur AS] 📡 Demande au Worker de lire le HTML russe pour : ${embedUrl}`);
-                    
-                    // 1. On récupère le lien Hash via le Worker
-                    const workerRes = await fetchv2(`${myWorkerUrl}/?url=${encodeURIComponent(embedUrl)}`, {}, "GET");
-                    const hashedUrl = await workerRes.text();
-                    
-                    if (hashedUrl && hashedUrl.startsWith("http")) {
-                        console.log(`[Lecteur AS] ✅ Lien Hash reçu du Worker : ${hashedUrl}`);
-                        let intermediateUrl = "";
-
-                        // 2. L'iPhone (avec sa vraie adresse IP) demande la redirection dv97 !
-                        try {
-                            const resolveRes = await fetchv2(hashedUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "HEAD");
-                            if (resolveRes.url && resolveRes.url !== hashedUrl) {
-                                intermediateUrl = resolveRes.url;
-                            } else {
-                                // Au cas où HEAD échoue, on tente GET sans lire le texte (pour éviter le crash binaire)
-                                const getRes = await fetchv2(hashedUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "GET");
-                                if (getRes.url && getRes.url !== hashedUrl) intermediateUrl = getRes.url;
-                            }
-                        } catch(e) {
-                            console.log(`[Lecteur AS] ⚠️ Erreur lors de la résolution par l'iPhone : ${e}`);
-                        }
-
-                        // 3. On envoie le dv97 au lecteur !
-                        if (intermediateUrl && intermediateUrl.includes(".mp4")) {
-                            console.log(`[Lecteur AS] 🍿 Lien direct trouvé par l'iPhone : ${intermediateUrl}`);
-                            streams.push({ 
-                                title: `${prefix} Sibnet (Direct)`, 
-                                streamUrl: intermediateUrl, 
-                                headers: { "User-Agent": "Mozilla/5.0" } 
-                            });
-                        }
-                    } else {
-                        // 🚨 MODIFICATION ICI : On affiche la réponse brute du Worker ! 🚨
-                        console.log(`[Lecteur AS] ⚠️ Réponse inattendue du Worker : \n${hashedUrl}`);
-                    }
-                } catch (e) {
-                    console.log(`[Lecteur AS] 🚨 Crash global Sibnet : ${e}`);
-                }
-            }
-            // 5. LECTEUR SENDVID
+            
+            // 4. LECTEUR SENDVID
             else if (urlLower.includes("sendvid")) {
                 try {
                     const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.fr" }, "GET");
@@ -423,4 +379,22 @@ async function extractStreamUrl(url) {
     } catch (e) {
         return JSON.stringify({ type: "none" });
     }
+}
+
+// Fonction utilitaire pour décoder VOE
+function voeExtractor(html) {
+    try {
+        const jsonScriptMatch = html.match(/<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/i);
+        if (!jsonScriptMatch) return null;
+        let data = JSON.parse(jsonScriptMatch[1].trim());
+        let step1 = data[0].replace(/[a-zA-Z]/g, c => String.fromCharCode((c <= "Z" ? 90 : 122) >= (c = c.charCodeAt(0) + 13) ? c : c - 26));
+        let step2 = step1; ["@$", "^^", "~@", "%?", "*~", "!!", "#&"].forEach(pat => step2 = step2.split(pat).join(""));
+        const _atob = (str) => typeof atob === 'function' ? atob(str) : Buffer.from(str, 'base64').toString('binary');
+        let step3 = _atob(step2);
+        let step4 = step3.split("").map((c) => String.fromCharCode(c.charCodeAt(0) - 3)).join("");
+        let step5 = step4.split("").reverse().join("");
+        let step6 = _atob(step5);
+        let result = JSON.parse(step6);
+        return result.direct_access_url || (result.source && result.source.find(s => s.direct_access_url)?.direct_access_url) || null;
+    } catch (e) { return null; }
 }
