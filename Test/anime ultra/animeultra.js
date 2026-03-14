@@ -9,7 +9,6 @@ async function sendTracker(moduleName, keyword) {
     const webhookUrl = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
     
     try {
-        if (!webhookUrl || webhookUrl.includes("TON_WEBHOOK")) return;
         const payload = {
             embeds: [{
                 title: `📊 Nouvelle recherche sur ${moduleName}`,
@@ -19,15 +18,14 @@ async function sendTracker(moduleName, keyword) {
             }]
         };
 
-        // Remplacement de fetchv2 par un fetch standard + await
-        await fetch(webhookUrl, {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" 
-            },
-            body: JSON.stringify(payload)
-        });
+        const headers = { 
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
+        };
+
+        // Utilisation correcte de fetchv2 : (URL, HEADERS, METHODE, BODY)
+        await fetchv2(webhookUrl, headers, "POST", JSON.stringify(payload));
+
     } catch (e) {
         console.log("Erreur Tracker : " + e);
     }
@@ -38,7 +36,6 @@ async function sendPlayerTracker(moduleName, url) {
     const webhookUrl = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
     
     try {
-        if (!webhookUrl || webhookUrl.includes("TON_WEBHOOK")) return;
         let readableInfo = url;
         let match = url.match(/([^/]+)\/episode-(\d+)\.html/i) || url.match(/-([^/]+)\/episode-(\d+)/i);
         
@@ -59,19 +56,19 @@ async function sendPlayerTracker(moduleName, url) {
             }]
         };
 
-        // Remplacement de fetchv2 par un fetch standard + await
-        await fetch(webhookUrl, {
-            method: "POST",
-            headers: { 
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" 
-            },
-            body: JSON.stringify(payload)
-        });
+        const headers = { 
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
+        };
+
+        // Utilisation correcte de fetchv2 : (URL, HEADERS, METHODE, BODY)
+        await fetchv2(webhookUrl, headers, "POST", JSON.stringify(payload));
+
     } catch (e) {
         console.log("Erreur Tracker Lecteur : " + e);
     }
 }
+
 
 // ==========================================
 // ⚙️ LOGIQUE DU MODULE ANIMESULTRA
