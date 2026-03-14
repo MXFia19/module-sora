@@ -1,8 +1,112 @@
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
+
 // Variables globales qui vont stocker les adresses officielles
 let BASE_URL = "";
 let API_URL = "";
 let HOSTNAME = "";
+
+// ==========================================
+// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// ==========================================
+
+const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
+const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
+const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+
+// 1. Tracker pour les Recherches
+async function sendTracker(moduleName, keyword, results, apiUrl) {
+    try {
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL de l'API :** ${apiUrl}\n`;
+        
+        if (results.length > 0) {
+            desc += `\n**Top résultats :**\n`;
+            let top = results.slice(0, 5);
+            for (let r of top) { desc += `🎬 ${r.title}\n`; }
+            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
+        } else {
+            desc += `\n❌ Aucun média trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `📊 Recherche sur ${moduleName}`,
+                description: desc,
+                color: 5814783, // Bleu
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
+}
+
+// 2. Tracker pour les clics sur les affiches (Détails)
+async function sendDetailsTracker(moduleName, url) {
+    try {
+        let readableName = url;
+        // Extraction depuis l'URL Nakios (ex: https://nakios.online/movie/12345)
+        let match = url.match(/\/(movie|tv)\/(\d+)/i);
+        if (match) {
+            let type = match[1] === "movie" ? "Film" : "Série";
+            readableName = `[${type}] ID TMDB : ${match[2]}`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `🖱️ Clic sur une affiche (${moduleName})`,
+                description: `**Média sélectionné :** \`${readableName}\`\n**Lien source :** ${url}`,
+                color: 16766720, // Jaune/Orange
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Details : " + e); }
+}
+
+// 3. Tracker pour le Lecteur
+async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
+    try {
+        let readableInfo = url;
+        
+        // Format Nakios : "12345/movie" ou "6789/1/2" (ID/Saison/Episode)
+        if (url.includes('movie')) {
+            let parts = url.split('/');
+            readableInfo = `🎬 **Film** (ID TMDB: ${parts[0]})`;
+        } else {
+            let parts = url.split('/');
+            if (parts.length >= 3) {
+                readableInfo = `📺 **Série** (ID TMDB: ${parts[0]})\nSaison : **${parts[1]}**\nÉpisode : **${parts[2]}**`;
+            }
+        }
+
+        let desc = `${readableInfo}\n**URL de l'API :** ${apiUrl}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        
+        if (streams.length > 0) {
+            for (let s of streams) { desc += `✅ ${s.title}\n`; }
+        } else {
+            desc += `❌ Aucun lien vidéo valide trouvé.`;
+        }
+
+        const payload = {
+            embeds: [{
+                title: `▶️ Lancement Vidéo sur ${moduleName}`,
+                description: desc,
+                color: 5763719, // Vert
+                timestamp: new Date().toISOString()
+            }]
+        };
+
+        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
+        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
+    } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
+}
+
+// ==========================================
+// ⚙️ LOGIQUE DU MODULE NAKIOS
+// ==========================================
 
 // --- LE CERVEAU AUTO-RÉPARATEUR ---
 async function initUrls() {
@@ -62,6 +166,7 @@ async function searchResults(keyword) {
 
         if (!Array.isArray(items)) {
             console.log("[Nakios] Structure de recherche inattendue :", JSON.stringify(data).substring(0, 200));
+            await sendTracker("Nakios", keyword, [], searchUrl); // Tracker vide
             return JSON.stringify([]);
         }
 
@@ -84,9 +189,12 @@ async function searchResults(keyword) {
                     href: `${BASE_URL}/${type}/${id}`
                 };
             }
-        });
+        }).filter(Boolean);
 
-        return JSON.stringify(transformedResults.filter(Boolean));
+        // 🕵️ Tracker : Envoi des résultats sur Discord avec l'URL de l'API
+        await sendTracker("Nakios", keyword, transformedResults, searchUrl);
+
+        return JSON.stringify(transformedResults);
     } catch (error) {
         console.log('[Nakios] Erreur fatale dans searchResults : ' + error);
         return JSON.stringify([]);
@@ -95,6 +203,11 @@ async function searchResults(keyword) {
 
 // --- 2. DÉTAILS (MÉTHODE HYBRIDE TMDB + NAKIOS) ---
 async function extractDetails(url) {
+    console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
+    
+    // 🕵️ Tracker : Envoi du clic sur l'affiche
+    await sendDetailsTracker("Nakios", url);
+
     try {
         await initUrls();
         
@@ -252,6 +365,7 @@ async function extractStreamUrl(url) {
             data = await response.json();
         } catch(e) {
             console.log("[Nakios] L'API n'a pas renvoyé de JSON valide.");
+            await sendPlayerTracker("Nakios", url, [], apiUrl); // 🕵️ Tracker (Échec)
             return JSON.stringify({ streams: [], subtitles: "" });
         }
         
@@ -300,7 +414,7 @@ async function extractStreamUrl(url) {
             }
         }
         
-        // Finalisation des liens (SANS LE PROXY + AVEC EN-TÊTES INTELLIGENTS)
+        // Finalisation des liens
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
             
@@ -308,14 +422,12 @@ async function extractStreamUrl(url) {
                 finalUrl = `${API_URL}${item.url}`;
             }
 
-            // Déguisement complet pour tromper les protections anti-hotlink
             let streamHeaders = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
                 "Origin": BASE_URL,
                 "Referer": `${BASE_URL}/`
             };
 
-            // On adapte l'origine pour rassurer fsvid et vidzy
             if (finalUrl.includes('fsvid') || finalUrl.includes('vidzy')) {
                 try {
                     const urlObj = new URL(finalUrl);
@@ -330,6 +442,9 @@ async function extractStreamUrl(url) {
                 headers: streamHeaders
             });
         }
+
+        // 🕵️ Tracker : Envoi des flux trouvés sur Discord avec l'URL de l'API Nakios
+        await sendPlayerTracker("Nakios", url, streams, apiUrl);
 
         return JSON.stringify({ streams, subtitles: "" });
 
