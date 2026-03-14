@@ -1,18 +1,34 @@
 const BASE_URL = "https://animesultra.org";
 
 // ==========================================
-// 📊 TRACKERS DISCORD (Statistiques)
+// 📊 TRACKERS DISCORD (Statistiques Avancées)
 // ==========================================
 
-// Tracker pour les Recherches
-async function sendTracker(moduleName, keyword) {
+// Tracker pour les Recherches (Maintenant avec résultats)
+async function sendTracker(moduleName, keyword, results) {
     const webhookUrl = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
     
     try {
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        
+        // Ajout de la liste des animes trouvés (limité à 5 pour ne pas spammer Discord)
+        if (results.length > 0) {
+            desc += `\n**Top résultats :**\n`;
+            let top = results.slice(0, 5);
+            for (let r of top) {
+                desc += `🎬 ${r.title}\n`;
+            }
+            if (results.length > 5) {
+                desc += `*... et ${results.length - 5} autres*`;
+            }
+        } else {
+            desc += `\n❌ Aucun anime trouvé.`;
+        }
+
         const payload = {
             embeds: [{
-                title: `📊 Nouvelle recherche sur ${moduleName}`,
-                description: `**Mot-clé :** \`${keyword}\``,
+                title: `📊 Recherche sur ${moduleName}`,
+                description: desc,
                 color: 5814783,
                 timestamp: new Date().toISOString()
             }]
@@ -23,16 +39,14 @@ async function sendTracker(moduleName, keyword) {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
         };
 
-        // Utilisation correcte de fetchv2 : (URL, HEADERS, METHODE, BODY)
         await fetchv2(webhookUrl, headers, "POST", JSON.stringify(payload));
-
     } catch (e) {
         console.log("Erreur Tracker : " + e);
     }
 }
 
-// Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url) {
+// Tracker pour le Lecteur (Maintenant avec les liens trouvés)
+async function sendPlayerTracker(moduleName, url, streams) {
     const webhookUrl = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
     
     try {
@@ -47,10 +61,20 @@ async function sendPlayerTracker(moduleName, url) {
             readableInfo = `Lien brut : \`${url}\``;
         }
 
+        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        
+        if (streams.length > 0) {
+            for (let s of streams) {
+                desc += `✅ ${s.title}\n`;
+            }
+        } else {
+            desc += `❌ Aucun lien vidéo valide trouvé.`;
+        }
+
         const payload = {
             embeds: [{
                 title: `▶️ Lancement Vidéo sur ${moduleName}`,
-                description: readableInfo,
+                description: desc,
                 color: 5763719,
                 timestamp: new Date().toISOString()
             }]
@@ -61,14 +85,11 @@ async function sendPlayerTracker(moduleName, url) {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
         };
 
-        // Utilisation correcte de fetchv2 : (URL, HEADERS, METHODE, BODY)
         await fetchv2(webhookUrl, headers, "POST", JSON.stringify(payload));
-
     } catch (e) {
         console.log("Erreur Tracker Lecteur : " + e);
     }
 }
-
 
 // ==========================================
 // ⚙️ LOGIQUE DU MODULE ANIMESULTRA
@@ -76,7 +97,6 @@ async function sendPlayerTracker(moduleName, url) {
 
 async function searchResults(keyword) {
     console.log(`[Recherche] 🔍 Lancement pour : "${keyword}"`);
-    await sendTracker("AnimesUltra", keyword); // 🕵️ Ajout du AWAIT ici !
 
     try {
         const searchUrl = `${BASE_URL}/?story=${encodeURIComponent(keyword)}&do=search&subaction=search`;
@@ -109,6 +129,9 @@ async function searchResults(keyword) {
                 }
             }
         }
+
+        // 🕵️ Appel du tracker ICI, à la fin, avec les résultats !
+        await sendTracker("AnimesUltra", keyword, results);
 
         return JSON.stringify(results);
     } catch (e) {
@@ -227,7 +250,6 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
-    await sendPlayerTracker("AnimesUltra", url); // 🕵️ Ajout du AWAIT ici !
 
     try {
         const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
@@ -406,6 +428,9 @@ async function extractStreamUrl(url) {
         );
 
         console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
+        
+        // 🕵️ Appel du tracker ICI, à la fin, avec les flux récupérés !
+        await sendPlayerTracker("AnimesUltra", url, safeStreams);
         
         if (safeStreams.length > 0) {
             return JSON.stringify({ 
