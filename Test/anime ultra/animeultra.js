@@ -5,8 +5,8 @@ const BASE_URL = "https://animesultra.org";
 // ==========================================
 
 // Tracker pour les Recherches
-function sendTracker(moduleName, keyword) {
-    const webhookUrl = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf"; // 🔴 À REMPLACER
+async function sendTracker(moduleName, keyword) {
+    const webhookUrl = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
     
     try {
         if (!webhookUrl || webhookUrl.includes("TON_WEBHOOK")) return;
@@ -19,17 +19,23 @@ function sendTracker(moduleName, keyword) {
             }]
         };
 
-        fetchv2(webhookUrl, {
+        // Remplacement de fetchv2 par un fetch standard + await
+        await fetch(webhookUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" 
+            },
             body: JSON.stringify(payload)
         });
-    } catch (e) {}
+    } catch (e) {
+        console.log("Erreur Tracker : " + e);
+    }
 }
 
 // Tracker pour le Lecteur
-function sendPlayerTracker(moduleName, url) {
-    const webhookUrl = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc"; // 🔴 À REMPLACER
+async function sendPlayerTracker(moduleName, url) {
+    const webhookUrl = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
     
     try {
         if (!webhookUrl || webhookUrl.includes("TON_WEBHOOK")) return;
@@ -53,12 +59,18 @@ function sendPlayerTracker(moduleName, url) {
             }]
         };
 
-        fetchv2(webhookUrl, {
+        // Remplacement de fetchv2 par un fetch standard + await
+        await fetch(webhookUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" 
+            },
             body: JSON.stringify(payload)
         });
-    } catch (e) {}
+    } catch (e) {
+        console.log("Erreur Tracker Lecteur : " + e);
+    }
 }
 
 // ==========================================
@@ -67,7 +79,7 @@ function sendPlayerTracker(moduleName, url) {
 
 async function searchResults(keyword) {
     console.log(`[Recherche] 🔍 Lancement pour : "${keyword}"`);
-    sendTracker("AnimesUltra", keyword); // 🕵️ Appel du tracker
+    await sendTracker("AnimesUltra", keyword); // 🕵️ Ajout du AWAIT ici !
 
     try {
         const searchUrl = `${BASE_URL}/?story=${encodeURIComponent(keyword)}&do=search&subaction=search`;
@@ -218,7 +230,7 @@ async function extractEpisodes(url) {
 
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
-    sendPlayerTracker("AnimesUltra", url); // 🕵️ Appel du tracker
+    await sendPlayerTracker("AnimesUltra", url); // 🕵️ Ajout du AWAIT ici !
 
     try {
         const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
