@@ -9,9 +9,9 @@ const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pP
 const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
 
 // 1. Tracker pour les Recherches
-async function sendTracker(moduleName, keyword, results) {
+async function sendTracker(moduleName, keyword, results, apiUrl) {
     try {
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL Utilisée :** ${apiUrl}\n`;
         
         if (results.length > 0) {
             desc += `\n**Top résultats :**\n`;
@@ -37,7 +37,7 @@ async function sendTracker(moduleName, keyword, results) {
 }
 
 // 2. Tracker pour les clics sur les affiches (Détails)
-async function sendDetailsTracker(moduleName, url) {
+async function sendDetailsTracker(moduleName, url, apiUrl) {
     try {
         let readableName = url;
         // Extraction du nom de l'anime depuis l'URL Anime-Sama (ex: https://anime-sama.fr/catalogue/naruto/)
@@ -47,7 +47,7 @@ async function sendDetailsTracker(moduleName, url) {
         const payload = {
             embeds: [{
                 title: `🖱️ Clic sur une affiche (${moduleName})`,
-                description: `**Anime sélectionné :** \`${readableName}\``,
+                description: `**Anime sélectionné :** \`${readableName}\`\n**URL Utilisée :** ${apiUrl}`,
                 color: 16766720, // Jaune/Orange
                 timestamp: new Date().toISOString()
             }]
@@ -59,7 +59,7 @@ async function sendDetailsTracker(moduleName, url) {
 }
 
 // 3. Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url, streams) {
+async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
     try {
         let readableInfo = url;
         
@@ -83,7 +83,7 @@ async function sendPlayerTracker(moduleName, url, streams) {
             readableInfo = `Lien brut : \`${url}\``;
         }
 
-        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        let desc = `${readableInfo}\n**URL Fichier JS :** ${apiUrl}\n\n**Serveurs extraits :** ${streams.length}\n`;
         
         if (streams.length > 0) {
             for (let s of streams) { desc += `✅ ${s.title}\n`; }
@@ -141,8 +141,10 @@ async function trySearch(domain, keyword) {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         };
 
+        const fetchUrl = `https://${domain}/template-php/defaut/fetch.php`;
+
         const response = await fetchv2(
-            `https://${domain}/template-php/defaut/fetch.php`,
+            fetchUrl,
             headers,
             "POST",
             `query=${encodeURIComponent(keyword)}`
@@ -167,10 +169,10 @@ async function trySearch(domain, keyword) {
             }
         }
         
-        return results;
+        return { results: results, apiUrl: fetchUrl };
     } catch (e) {
         console.log(`[Recherche AS] 🚨 Erreur sur ${domain} : ${e}`);
-        return [];
+        return { results: [], apiUrl: `https://${domain}/template-php/defaut/fetch.php` };
     }
 }
 
@@ -181,6 +183,7 @@ async function searchResults(keyword) {
         console.log(`[Recherche AS] 🔍 Démarrage de la recherche sur ${domains.length} domaines.`);
         
         let finalResults = [];
+        let finalApiUrl = "Aucune (Échec total)";
 
         for (let i = 0; i < domains.length; i++) {
             let currentDomain = domains[i];
@@ -201,18 +204,19 @@ async function searchResults(keyword) {
             } catch (e) {}
 
             try {
-                let results = await trySearch(currentDomain, keyword);
+                let searchAttempt = await trySearch(currentDomain, keyword);
                 
-                if (results && results.length > 0) {
-                    console.log(`[Recherche AS] 🚀 Succès sur ${currentDomain} ! ${results.length} résultats extraits.`);
-                    finalResults = results;
+                if (searchAttempt.results && searchAttempt.results.length > 0) {
+                    console.log(`[Recherche AS] 🚀 Succès sur ${currentDomain} ! ${searchAttempt.results.length} résultats extraits.`);
+                    finalResults = searchAttempt.results;
+                    finalApiUrl = searchAttempt.apiUrl;
                     break; // On a trouvé, on sort de la boucle !
                 }
             } catch (err) {}
         }
 
         // 🕵️ Appel du tracker avec les résultats !
-        await sendTracker("Anime-Sama", keyword, finalResults);
+        await sendTracker("Anime-Sama", keyword, finalResults, finalApiUrl);
 
         return JSON.stringify(finalResults);
 
@@ -227,7 +231,7 @@ async function extractDetails(url) {
     console.log(`[Détails AS] 📖 Chargement des infos pour : ${url}`);
     
     // 🕵️ Appel du tracker Détails
-    await sendDetailsTracker("Anime-Sama", url);
+    await sendDetailsTracker("Anime-Sama", url, url); // L'API d'Anime-Sama est directement le lien de la page
 
     try {
         const response = await fetchv2(url);
@@ -471,7 +475,7 @@ async function extractStreamUrl(url) {
         }
 
         // 🕵️ Appel du tracker avec les flux récupérés !
-        await sendPlayerTracker("Anime-Sama", url, uniqueStreams);
+        await sendPlayerTracker("Anime-Sama", url, uniqueStreams, jsUrl1);
 
         return JSON.stringify(uniqueStreams.length > 0 ? { type: "servers", streams: uniqueStreams } : { type: "none" });
 
