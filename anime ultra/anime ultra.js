@@ -9,9 +9,10 @@ const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pP
 const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
 
 // 1. Tracker pour les Recherches
-async function sendTracker(moduleName, keyword, results) {
+async function sendTracker(moduleName, keyword, results, apiUrl) {
     try {
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n`;
+        // Sans backticks autour de apiUrl pour qu'il soit cliquable sur Discord
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL Utilisée :** ${apiUrl}\n`;
         
         if (results.length > 0) {
             desc += `\n**Top résultats :**\n`;
@@ -37,7 +38,7 @@ async function sendTracker(moduleName, keyword, results) {
 }
 
 // 2. Tracker pour les clics sur les affiches (Détails)
-async function sendDetailsTracker(moduleName, url) {
+async function sendDetailsTracker(moduleName, url, apiUrl) {
     try {
         let readableName = url;
         let match = url.match(/\/\d+-([^/]+)\.html/i);
@@ -46,7 +47,7 @@ async function sendDetailsTracker(moduleName, url) {
         const payload = {
             embeds: [{
                 title: `🖱️ Clic sur une affiche (${moduleName})`,
-                description: `**Anime sélectionné :** \`${readableName}\``,
+                description: `**Anime sélectionné :** \`${readableName}\`\n**URL de la page :** ${apiUrl}`,
                 color: 16766720, // Jaune/Orange
                 timestamp: new Date().toISOString()
             }]
@@ -58,7 +59,7 @@ async function sendDetailsTracker(moduleName, url) {
 }
 
 // 3. Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url, streams) {
+async function sendPlayerTracker(moduleName, url, streams, apiUrls) {
     try {
         let readableInfo = url;
         let match = url.match(/([^/]+)\/episode-(\d+)\.html/i) || url.match(/-([^/]+)\/episode-(\d+)/i);
@@ -70,7 +71,7 @@ async function sendPlayerTracker(moduleName, url, streams) {
             readableInfo = `Lien brut : \`${url}\``;
         }
 
-        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        let desc = `${readableInfo}\n\n**Requête API :**\n${apiUrls}\n\n**Serveurs extraits :** ${streams.length}\n`;
         
         if (streams.length > 0) {
             for (let s of streams) { desc += `✅ ${s.title}\n`; }
@@ -132,8 +133,8 @@ async function searchResults(keyword) {
             }
         }
 
-        // 🕵️ Appel du tracker Recherche
-        await sendTracker("AnimesUltra", keyword, results);
+        // 🕵️ Appel du tracker Recherche avec searchUrl
+        await sendTracker("AnimesUltra", keyword, results, searchUrl);
 
         return JSON.stringify(results);
     } catch (e) {
@@ -145,8 +146,8 @@ async function searchResults(keyword) {
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
     
-    // 🕵️ Appel du tracker Détails
-    await sendDetailsTracker("AnimesUltra", url);
+    // 🕵️ Appel du tracker Détails avec l'URL de la page
+    await sendDetailsTracker("AnimesUltra", url, url);
 
     try {
         const response = await fetchv2(url);
@@ -264,7 +265,9 @@ async function extractStreamUrl(url) {
 
         const newsId = idMatch[1];
 
+        // C'est ce lien qu'on veut envoyer à Discord pour le debug
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
+        
         const ajaxRes = await fetchv2(ajaxUrl);
         const ajaxText = await ajaxRes.text();
         
@@ -431,8 +434,8 @@ async function extractStreamUrl(url) {
 
         console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
         
-        // 🕵️ Appel du tracker Lecteur
-        await sendPlayerTracker("AnimesUltra", url, safeStreams);
+        // 🕵️ Appel du tracker Lecteur avec l'URL Ajax (secrète) utilisée
+        await sendPlayerTracker("AnimesUltra", url, safeStreams, ajaxUrl);
         
         if (safeStreams.length > 0) {
             return JSON.stringify({ 
