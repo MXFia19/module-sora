@@ -1,5 +1,3 @@
-// --- 1. RECHERCHE (Multi-Domaines Dynamiques & API Anime-Sama) ---
-
 // ==========================================
 // 📊 TRACKERS DISCORD (3 Webhooks séparés)
 // ==========================================
@@ -11,7 +9,7 @@ const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aH
 // 1. Tracker pour les Recherches
 async function sendTracker(moduleName, keyword, results, apiUrl) {
     try {
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL Utilisée :** ${apiUrl}\n`;
+        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**Requête API :** ${apiUrl}\n`;
         
         if (results.length > 0) {
             desc += `\n**Top résultats :**\n`;
@@ -40,14 +38,13 @@ async function sendTracker(moduleName, keyword, results, apiUrl) {
 async function sendDetailsTracker(moduleName, url, apiUrl) {
     try {
         let readableName = url;
-        // Extraction du nom de l'anime depuis l'URL Anime-Sama (ex: https://anime-sama.fr/catalogue/naruto/)
         let match = url.match(/\/catalogue\/([^/]+)\/?/i);
         if (match) readableName = match[1].replace(/-/g, ' ').toUpperCase();
 
         const payload = {
             embeds: [{
                 title: `🖱️ Clic sur une affiche (${moduleName})`,
-                description: `**Anime sélectionné :** \`${readableName}\`\n**URL Utilisée :** ${apiUrl}`,
+                description: `**Anime sélectionné :** \`${readableName}\`\n**URL de la page :** ${apiUrl}`,
                 color: 16766720, // Jaune/Orange
                 timestamp: new Date().toISOString()
             }]
@@ -59,31 +56,26 @@ async function sendDetailsTracker(moduleName, url, apiUrl) {
 }
 
 // 3. Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
+async function sendPlayerTracker(moduleName, url, streams, apiUrls) {
     try {
         let readableInfo = url;
         
-        // Extraction spécifique pour Anime-Sama (ex: .../naruto/saison1/vostfr?episode_index=2)
         let animeMatch = url.match(/\/catalogue\/([^/]+)\/(.+)/i);
         if (animeMatch) {
             let animeName = animeMatch[1].replace(/-/g, ' ').toUpperCase();
-            
-            // On essaie de trouver le numéro de l'épisode
-            let epNumber = "1"; // Par défaut 1 si on n'a pas l'index
+            let epNumber = "1"; 
             let indexMatch = url.match(/episode_index=(\d+)/i);
             if (indexMatch) {
-                epNumber = parseInt(indexMatch[1]) + 1; // L'index commence à 0 sur Anime-Sama
+                epNumber = parseInt(indexMatch[1]) + 1; 
             }
-            
-            // On essaie de trouver la saison/langue
             let detailsMatch = animeMatch[2].split('?')[0].replace(/\//g, ' ');
-
             readableInfo = `Anime : **${animeName}**\nDétails : ${detailsMatch}\nÉpisode : **${epNumber}**`;
         } else {
             readableInfo = `Lien brut : \`${url}\``;
         }
 
-        let desc = `${readableInfo}\n**URL Fichier JS :** ${apiUrl}\n\n**Serveurs extraits :** ${streams.length}\n`;
+        // On intègre la liste des Fichiers JS interrogés (VOSTFR et/ou VF)
+        let desc = `${readableInfo}\n\n**Fichiers interrogés :**\n${apiUrls}\n\n**Serveurs extraits :** ${streams.length}\n`;
         
         if (streams.length > 0) {
             for (let s of streams) { desc += `✅ ${s.title}\n`; }
@@ -106,7 +98,8 @@ async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
 }
 
 // ==========================================
-
+// ⚙️ LOGIQUE DU MODULE ANIME-SAMA
+// ==========================================
 
 // Récupération des domaines actifs du moment
 async function getDomainsList() {
@@ -169,7 +162,10 @@ async function trySearch(domain, keyword) {
             }
         }
         
-        return { results: results, apiUrl: fetchUrl };
+        // 🛠️ Création d'une URL de debug plus claire pour Discord
+        let debugUrl = `\`${fetchUrl}\`\n(POST -> query: "${keyword}")`;
+
+        return { results: results, apiUrl: debugUrl };
     } catch (e) {
         console.log(`[Recherche AS] 🚨 Erreur sur ${domain} : ${e}`);
         return { results: [], apiUrl: `https://${domain}/template-php/defaut/fetch.php` };
@@ -210,12 +206,12 @@ async function searchResults(keyword) {
                     console.log(`[Recherche AS] 🚀 Succès sur ${currentDomain} ! ${searchAttempt.results.length} résultats extraits.`);
                     finalResults = searchAttempt.results;
                     finalApiUrl = searchAttempt.apiUrl;
-                    break; // On a trouvé, on sort de la boucle !
+                    break; 
                 }
             } catch (err) {}
         }
 
-        // 🕵️ Appel du tracker avec les résultats !
+        // 🕵️ Tracker
         await sendTracker("Anime-Sama", keyword, finalResults, finalApiUrl);
 
         return JSON.stringify(finalResults);
@@ -230,8 +226,8 @@ async function searchResults(keyword) {
 async function extractDetails(url) {
     console.log(`[Détails AS] 📖 Chargement des infos pour : ${url}`);
     
-    // 🕵️ Appel du tracker Détails
-    await sendDetailsTracker("Anime-Sama", url, url); // L'API d'Anime-Sama est directement le lien de la page
+    // 🕵️ Tracker
+    await sendDetailsTracker("Anime-Sama", url, url); 
 
     try {
         const response = await fetchv2(url);
@@ -258,7 +254,7 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Liste Propre et Mappage TMDB) ---
+// --- 3. ÉPISODES ---
 async function extractEpisodes(url) {
     console.log(`[Episodes AS] 📂 Analyse multi-saisons : ${url}`);
     try {
@@ -362,7 +358,7 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. LECTEUR (Pieuvre 3.0 : Sans VK) ---
+// --- 4. LECTEUR ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur AS] 🎬 Démarrage pour : ${url}`);
     
@@ -387,6 +383,12 @@ async function extractStreamUrl(url) {
             lang1 = "VF";
             lang2 = "VOSTFR";
             jsUrl2 = jsUrl1.replace('/vf/', '/vostfr/');
+        }
+
+        // 🛠️ Formatage propre des URLs analysées pour le tracker Discord
+        let requestedUrls = `1️⃣ \`${jsUrl1}\``;
+        if (jsUrl2 !== "") {
+            requestedUrls += `\n2️⃣ \`${jsUrl2}\``;
         }
 
         const headers = {
@@ -474,8 +476,8 @@ async function extractStreamUrl(url) {
             if (!seenUrls.has(s.streamUrl)) { seenUrls.add(s.streamUrl); uniqueStreams.push(s); }
         }
 
-        // 🕵️ Appel du tracker avec les flux récupérés !
-        await sendPlayerTracker("Anime-Sama", url, uniqueStreams, jsUrl1);
+        // 🕵️ Tracker
+        await sendPlayerTracker("Anime-Sama", url, uniqueStreams, requestedUrls);
 
         return JSON.stringify(uniqueStreams.length > 0 ? { type: "servers", streams: uniqueStreams } : { type: "none" });
 
