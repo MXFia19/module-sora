@@ -74,7 +74,7 @@ async function sendPlayerTracker(moduleName, url, streams, apiUrls) {
             readableInfo = `Lien brut : \`${url}\``;
         }
 
-        // On intègre la liste des Fichiers JS interrogés (VOSTFR et/ou VF)
+        // Fichiers interrogés (liens bleus)
         let desc = `${readableInfo}\n\n**Fichiers interrogés :**\n${apiUrls}\n\n**Serveurs extraits :** ${streams.length}\n`;
         
         if (streams.length > 0) {
@@ -162,8 +162,8 @@ async function trySearch(domain, keyword) {
             }
         }
         
-        // 🛠️ Création d'une URL de debug plus claire pour Discord
-        let debugUrl = `\`${fetchUrl}\`\n(POST -> query: "${keyword}")`;
+        // 🛠️ Lien propre sans les guillemets obliques pour qu'il soit bleu
+        let debugUrl = `${fetchUrl}\n*(POST -> query: "${keyword}")*`;
 
         return { results: results, apiUrl: debugUrl };
     } catch (e) {
@@ -385,10 +385,10 @@ async function extractStreamUrl(url) {
             jsUrl2 = jsUrl1.replace('/vf/', '/vostfr/');
         }
 
-        // 🛠️ Formatage propre des URLs analysées pour le tracker Discord
-        let requestedUrls = `1️⃣ \`${jsUrl1}\``;
+        // 🛠️ Formatage propre sans les guillemets pour garder les liens bleus cliquables
+        let requestedUrls = `1️⃣ ${jsUrl1}`;
         if (jsUrl2 !== "") {
-            requestedUrls += `\n2️⃣ \`${jsUrl2}\``;
+            requestedUrls += `\n2️⃣ ${jsUrl2}`;
         }
 
         const headers = {
