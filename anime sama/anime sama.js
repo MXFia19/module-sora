@@ -416,6 +416,50 @@ async function extractStreamUrl(url) {
                     if (mp4Match) streams.push({ title: `${prefix} Sendvid`, streamUrl: mp4Match[1], headers: { "Referer": embedUrl } });
                 } catch (e) {}
             }
+
+// 6. LECTEUR SIBNET
+            else if (urlLower.includes("sibnet.ru")) {
+                console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
+                try {
+                    const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.to/" }, "GET");
+                    const html = await req.text();
+                    
+                    const srcMatch = html.match(/src:\s*["'](\/v\/[^"']+\.mp4)["']/i);
+                    
+                    if (srcMatch) {
+                        let streamUrl = "https://video.sibnet.ru" + srcMatch[1];
+                        
+                        // 🚀 ASTUCE ANTI-ÉCRAN NOIR : On résout la redirection 302 nous-mêmes !
+                        try {
+                            const redirectReq = await fetchv2(streamUrl, {
+                                "Referer": embedUrl,
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                            }, "HEAD"); // Une requête HEAD est ultra-rapide (pas de téléchargement)
+                            
+                            // Si fetchv2 a suivi la redirection, on récupère l'URL finale (le vrai serveur !)
+                            if (redirectReq && redirectReq.url && redirectReq.url !== streamUrl) {
+                                streamUrl = redirectReq.url;
+                                console.log(`[Lecteur] 🔀 Redirection Sibnet résolue : ${streamUrl}`);
+                            }
+                        } catch(e) {
+                            console.log(`[Lecteur] ⚠️ Impossible de résoudre la redirection Sibnet, on garde l'originale.`);
+                        }
+
+                        streams.push({ 
+                            title: `${prefix} Sibnet`, 
+                            streamUrl: streamUrl, 
+                            headers: { 
+                                "Referer": embedUrl, 
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                            } 
+                        });
+                        console.log(`[Lecteur] ✅ Sibnet extrait avec succès !`);
+                    }
+                } catch(e) {
+                    console.log(`[Lecteur] 🚨 Erreur Sibnet : ${e.message}`);
+                }
+            }
+
             // 5. DETECTEUR UNIVERSEL (Vidhide / Famille Packer) - DOIT ÊTRE À LA FIN !
             else {
                 try {
