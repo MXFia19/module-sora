@@ -1,0 +1,20 @@
+{
+    "sourceName": "Anime Kami",
+    "iconUrl": "https://anime-kami.com/favicon.ico",
+    "author": {
+        "name": "MXFia19",
+        "icon": "",
+        "url": ""
+    },
+    "version": "1.0",
+    "language": "French",
+    "streamType": "MP4",
+    "quality": "720p",
+    "baseUrl": "https://anime-kami.com",
+    "searchBaseUrl": "https://anime-kami.com/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/anime%20kami/Anime%20kami.js",
+    "type": "anime",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true
+}
