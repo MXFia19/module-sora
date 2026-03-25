@@ -1,3 +1,7 @@
+// ==========================================
+// ⚙️ MODULE SORA — NAKIOS (Supabase Edition)
+// ==========================================
+
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
 
 // Variables globales
@@ -6,101 +10,35 @@ let API_URL = "";
 let HOSTNAME = "";
 
 // ==========================================
-// 📊 TRACKERS DISCORD
+// 🗄️ TRACKER SUPABASE (Base de données)
 // ==========================================
 
-const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
-const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
-const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+const SUPABASE_URL = "https://qyeisgowjisqbatrmqta.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_F68CBjFVPh71U0SdD9BQJg_UJgL9-Fj";
 
-// 1. Tracker pour les Recherches
-async function sendTracker(moduleName, keyword, results, apiUrl) {
+async function sendSupabaseLog(moduleName, actionType, dataPayload) {
     try {
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL de l'API :** ${apiUrl}\n`;
-        
-        if (results.length > 0) {
-            desc += `\n**Top résultats :**\n`;
-            let top = results.slice(0, 5);
-            for (let r of top) { desc += `🎬 ${r.title}\n`; }
-            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
-        } else {
-            desc += `\n❌ Aucun média trouvé.`;
-        }
-
         const payload = {
-            embeds: [{
-                title: `📊 Recherche sur ${moduleName}`,
-                description: desc,
-                color: 5814783,
-                timestamp: new Date().toISOString()
-            }]
+            module: moduleName,
+            action: actionType,
+            data: dataPayload
         };
 
-        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
-    } catch (e) {}
-}
-
-// 2. Tracker pour les clics sur les affiches (Détails)
-async function sendDetailsTracker(moduleName, url) {
-    try {
-        let readableName = url;
-        // CORRECTION ICI : On accepte "series" en plus de "tv" et "movie"
-        let match = url.match(/\/(movie|series|tv)\/(\d+)/i);
-        if (match) {
-            let type = match[1].toLowerCase() === "movie" ? "Film" : "Série";
-            readableName = `[${type}] ID TMDB : ${match[2]}`;
-        }
-
-        const payload = {
-            embeds: [{
-                title: `🖱️ Clic sur une affiche (${moduleName})`,
-                description: `**Média sélectionné :** \`${readableName}\`\n**Lien source :** ${url}`,
-                color: 16766720,
-                timestamp: new Date().toISOString()
-            }]
+        const headers = { 
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+            "Prefer": "return=minimal" 
         };
-
-        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
-    } catch (e) {}
-}
-
-// 3. Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url, streams, apiUrl) {
-    try {
-        let readableInfo = url;
         
-        if (url.includes('movie')) {
-            let parts = url.split('/');
-            readableInfo = `🎬 **Film** (ID TMDB: ${parts[0]})`;
+        if (typeof fetchv2 !== 'undefined') {
+            await fetchv2(`${SUPABASE_URL}/rest/v1/app_logs`, headers, "POST", JSON.stringify(payload));
         } else {
-            let parts = url.split('/');
-            if (parts.length >= 3) {
-                readableInfo = `📺 **Série** (ID TMDB: ${parts[0]})\nSaison : **${parts[1]}**\nÉpisode : **${parts[2]}**`;
-            }
+            await fetch(`${SUPABASE_URL}/rest/v1/app_logs`, { method: "POST", headers: headers, body: JSON.stringify(payload) });
         }
-
-        let desc = `${readableInfo}\n**URL de l'API :** ${apiUrl}\n\n**Serveurs extraits :** ${streams.length}\n`;
-        
-        if (streams.length > 0) {
-            for (let s of streams) { desc += `✅ ${s.title}\n`; }
-        } else {
-            desc += `❌ Aucun lien vidéo valide trouvé.`;
-        }
-
-        const payload = {
-            embeds: [{
-                title: `▶️ Lancement Vidéo sur ${moduleName}`,
-                description: desc,
-                color: 5763719,
-                timestamp: new Date().toISOString()
-            }]
-        };
-
-        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
-    } catch (e) {}
+    } catch (e) { 
+        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`); 
+    }
 }
 
 // ==========================================
@@ -152,14 +90,13 @@ async function searchResults(keyword) {
         const items = data.results || data.data || data.items || data; 
 
         if (!Array.isArray(items)) {
-            await sendTracker("Nakios", keyword, [], searchUrl);
             return JSON.stringify([]);
         }
 
         const transformedResults = items.map(result => {
             let type = result.media_type || (result.name ? "tv" : "movie");
             
-            // CORRECTION ICI : Remplacement strict de "tv" par "series" pour coller au site Nakios !
+            // Remplacement strict de "tv" par "series" pour coller au site Nakios !
             if (type === "tv") type = "series"; 
 
             let title = result.title || result.name || result.original_title;
@@ -181,7 +118,13 @@ async function searchResults(keyword) {
             }
         }).filter(Boolean);
 
-        await sendTracker("Nakios", keyword, transformedResults, searchUrl);
+        // 📡 Log Supabase (Recherche)
+        sendSupabaseLog("Nakios", "SEARCH", { 
+            keyword: keyword, 
+            results_count: transformedResults.length,
+            top_results: transformedResults.slice(0, 3).map(r => r.title)
+        });
+
         return JSON.stringify(transformedResults);
     } catch (error) {
         return JSON.stringify([]);
@@ -191,13 +134,14 @@ async function searchResults(keyword) {
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
-    await sendDetailsTracker("Nakios", url);
+    
+    // 📡 Log Supabase (Détails)
+    sendSupabaseLog("Nakios", "DETAILS", { anime_url: url });
 
     try {
         await initUrls();
         
         const isMovie = url.includes('movie');
-        // CORRECTION ICI : On inclut "series" dans le regex
         const match = url.match(/(?:movie|series|tv)\/(\d+)/);
         if (!match) throw new Error("Invalid URL format");
 
@@ -252,7 +196,6 @@ async function extractEpisodes(url) {
         await initUrls();
         
         const isMovie = url.includes('movie');
-        // CORRECTION ICI : On inclut "series" dans le regex
         const match = url.match(/(?:movie|series|tv)\/(\d+)/);
         if (!match) throw new Error("Invalid URL format");
         
@@ -298,18 +241,20 @@ async function extractEpisodes(url) {
         }
     } catch (error) {
         return JSON.stringify([]);
-    }    
+    }   
 }
 
-// --- 4. EXTRACTION VIDÉO ---
+// --- 4. EXTRACTION VIDÉO (Supabase Tracker Ajouté) ---
 async function extractStreamUrl(url) {
     try {
         await initUrls();
 
         let streams = [];
+        let extractedNames = [];
+        let failedLinks = [];
         let showId = "";
         let seasonNumber = "";
-        let episodeNumber = "";
+        let episodeNumber = "1";
         let isMovie = url.includes('movie');
 
         if (isMovie) {
@@ -322,12 +267,9 @@ async function extractStreamUrl(url) {
             episodeNumber = parts[2];  
         }
 
-        let apiUrl = "";
-        if (isMovie) {
-            apiUrl = `${API_URL}/api/sources/movie/${showId}`;
-        } else {
-            apiUrl = `${API_URL}/api/sources/tv/${showId}/${seasonNumber}/${episodeNumber}`;
-        }
+        let apiUrl = isMovie 
+            ? `${API_URL}/api/sources/movie/${showId}` 
+            : `${API_URL}/api/sources/tv/${showId}/${seasonNumber}/${episodeNumber}`;
 
         const response = await soraFetch(apiUrl, {
             headers: { "Origin": BASE_URL, "Referer": `${BASE_URL}/` }
@@ -337,7 +279,9 @@ async function extractStreamUrl(url) {
         try {
             data = await response.json();
         } catch(e) {
-            await sendPlayerTracker("Nakios", url, [], apiUrl);
+            // L'API a planté ou renvoyé du texte cassé
+            failedLinks.push({ server_name: "API Nakios (Crash)", url: apiUrl });
+            sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", { anime_url: url, ep_number: episodeNumber, failed_count: 1, failed_links: failedLinks });
             return JSON.stringify({ streams: [], subtitles: "" });
         }
         
@@ -409,9 +353,32 @@ async function extractStreamUrl(url) {
                 streamUrl: finalUrl,
                 headers: streamHeaders
             });
+            extractedNames.push(item.name);
         }
 
-        await sendPlayerTracker("Nakios", url, streams, apiUrl);
+        // 🚨 Capture de l'erreur si aucun flux n'est trouvé dans le JSON
+        if (streams.length === 0) {
+            failedLinks.push({ server_name: "API Nakios (Vide)", url: apiUrl });
+        }
+
+        // 📡 Log Supabase : SUCCÈS
+        sendSupabaseLog("Nakios", "PLAYER", { 
+            anime_url: url, 
+            ep_number: episodeNumber,
+            streams_found: streams.length,
+            servers: extractedNames
+        });
+
+        // 📡 Log Supabase : ÉCHECS
+        if (failedLinks.length > 0) {
+            sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", {
+                anime_url: url,
+                ep_number: episodeNumber,
+                failed_count: failedLinks.length,
+                failed_links: failedLinks
+            });
+        }
+
         return JSON.stringify({ streams, subtitles: "" });
 
     } catch (error) {
