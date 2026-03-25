@@ -1,4 +1,44 @@
+// ==========================================
+// ⚙️ MODULE SORA — HOSTCORD (Supabase Edition)
+// ==========================================
+
 const BASE_URL = "https://hostcord.xyz";
+
+// ==========================================
+// 🗄️ TRACKER SUPABASE (Base de données)
+// ==========================================
+
+const SUPABASE_URL = "https://qyeisgowjisqbatrmqta.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_F68CBjFVPh71U0SdD9BQJg_UJgL9-Fj";
+
+async function sendSupabaseLog(moduleName, actionType, dataPayload) {
+    try {
+        const payload = {
+            module: moduleName,
+            action: actionType,
+            data: dataPayload
+        };
+
+        const headers = { 
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+            "Prefer": "return=minimal" 
+        };
+        
+        if (typeof fetchv2 !== 'undefined') {
+            await fetchv2(`${SUPABASE_URL}/rest/v1/app_logs`, headers, "POST", JSON.stringify(payload));
+        } else {
+            await fetch(`${SUPABASE_URL}/rest/v1/app_logs`, { method: "POST", headers: headers, body: JSON.stringify(payload) });
+        }
+    } catch (e) { 
+        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`); 
+    }
+}
+
+// ==========================================
+// ⚙️ LOGIQUE DU MODULE HOSTCORD
+// ==========================================
 
 // --- FONCTION MAGIQUE : EXTRACTION DU JSON CACHÉ DANS LE HTML ---
 async function getInertiaData(url) {
@@ -10,10 +50,8 @@ async function getInertiaData(url) {
     });
     const html = await response.text();
     
-    // On cherche l'attribut data-page qui contient le JSON crypté en entités HTML
     const match = html.match(/data-page=(['"])(.*?)\1/);
     if (match && match[2]) {
-        // On nettoie le texte pour qu'il redevienne du vrai JSON
         let jsonString = match[2]
             .replace(/&quot;/g, '"')
             .replace(/&amp;/g, '&')
@@ -25,8 +63,9 @@ async function getInertiaData(url) {
     throw new Error("Impossible de trouver les données Inertia dans la page HTML.");
 }
 
-// --- 1. RECHERCHE (Fonctionnait déjà parfaitement) ---
+// --- 1. RECHERCHE ---
 async function searchResults(keyword) {
+    console.log(`[Recherche Hostcord] 🔍 Lancement pour : "${keyword}"`);
     try {
         const encodedKeyword = encodeURIComponent(keyword);
         const searchUrl = `${BASE_URL}/search/suggest?q=${encodedKeyword}`;
@@ -44,6 +83,13 @@ async function searchResults(keyword) {
             };
         });
 
+        // 📡 Log Supabase (Recherche)
+        sendSupabaseLog("Hostcord", "SEARCH", { 
+            keyword: keyword, 
+            results_count: transformedResults.length,
+            top_results: transformedResults.slice(0, 3).map(r => r.title)
+        });
+
         return JSON.stringify(transformedResults);
     } catch (error) {
         console.log('[Hostcord] Erreur searchResults : ' + error);
@@ -53,8 +99,12 @@ async function searchResults(keyword) {
 
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
+    console.log(`[Détails Hostcord] 📖 Chargement des infos pour : ${url}`);
+    
+    // 📡 Log Supabase (Détails)
+    sendSupabaseLog("Hostcord", "DETAILS", { anime_url: url });
+
     try {
-        // On utilise notre nouvelle fonction pour lire la page web
         const json = await getInertiaData(url);
         
         const item = json.props.movie || json.props.serie || json.props.show;
@@ -74,12 +124,11 @@ async function extractDetails(url) {
     }
 }
 
-// --- 3. ÉPISODES (Nettoyé pour éviter les erreurs JSON) ---
+// --- 3. ÉPISODES ---
 async function extractEpisodes(url) {
     try {
         const json = await getInertiaData(url);
         
-        // Cas 1 : C'est un Film
         if (json.props.movie && json.props.movie.video_url) {
             return JSON.stringify([{
                 href: json.props.movie.video_url, 
@@ -89,7 +138,6 @@ async function extractEpisodes(url) {
             }]);
         }
         
-        // Cas 2 : C'est une Série
         if (json.props.serie || json.props.show) {
             const show = json.props.serie || json.props.show;
             let allEpisodes = [];
@@ -129,13 +177,13 @@ async function extractEpisodes(url) {
     } catch (error) {
         console.log('[Hostcord] Erreur extractEpisodes : ' + error);
         return JSON.stringify([]);
-    }    
+    }  
 }
 
-// --- 4. EXTRACTION VIDÉO (Instantanée, sans ping) ---
+// --- 4. EXTRACTION VIDÉO (Capture d'erreurs Supabase ajoutée) ---
 async function extractStreamUrl(url) {
     try {
-        console.log(`[Hostcord] Analyse de l'iframe : ${url}`);
+        console.log(`[Hostcord] 🎬 Analyse de l'iframe : ${url}`);
         
         const response = await soraFetch(url, {
             headers: {
@@ -146,6 +194,8 @@ async function extractStreamUrl(url) {
         
         const html = await response.text();
         let streams = [];
+        let extractedNames = [];
+        let failedLinks = [];
 
         // On cherche le lien vidéo (MP4 ou M3U8)
         const jwplayerMatch = html.match(/file:\s*["']([^"']+\.(?:mp4|m3u8))["']/i);
@@ -154,17 +204,24 @@ async function extractStreamUrl(url) {
             let videoPath = jwplayerMatch[1];
             let finalUrl = videoPath.startsWith('/') ? `https://ptb.rdmfile.eu${videoPath}` : videoPath;
             
-            console.log(`[Hostcord] Lien Vidéo trouvé : ${finalUrl}`);
+            console.log(`[Hostcord] ✅ Lien Vidéo trouvé : ${finalUrl}`);
             
             streams.push({
                 title: "Serveur RDM (Direct)",
                 streamUrl: finalUrl,
-                headers: { 
-                    "Referer": "https://ptb.rdmfile.eu/" 
-                }
+                headers: { "Referer": "https://ptb.rdmfile.eu/" }
             });
+            extractedNames.push("Serveur RDM");
+            
         } else {
-            console.log("[Hostcord] Lien introuvable. Basculement sur Lecteur Web.");
+            console.log("[Hostcord] ❌ Lien introuvable. Basculement sur Lecteur Web et Envoi vers Appsmith.");
+            
+            // On signale l'erreur à Supabase (lien mort ou sécurité modifiée)
+            failedLinks.push({
+                server_name: "RDM (Inconnu / Supprimé)",
+                url: url
+            });
+            
             streams.push({
                 title: "Serveur RDM (Lecteur Web)",
                 streamUrl: `webview://${url}`,
@@ -172,13 +229,32 @@ async function extractStreamUrl(url) {
             });
         }
 
+        // 📡 Log Supabase : SUCCÈS
+        sendSupabaseLog("Hostcord", "PLAYER", { 
+            anime_url: url, 
+            ep_number: 1, // Par défaut
+            streams_found: streams.length,
+            servers: extractedNames
+        });
+
+        // 📡 Log Supabase : ÉCHECS (Les liens à décrypter / morts)
+        if (failedLinks.length > 0) {
+            sendSupabaseLog("Hostcord", "UNSUPPORTED_HOSTS", {
+                anime_url: url,
+                ep_number: 1,
+                failed_count: failedLinks.length,
+                failed_links: failedLinks
+            });
+        }
+
         return JSON.stringify({ streams, subtitles: "" });
 
     } catch (error) {
-        console.log('[Hostcord] Erreur extractStreamUrl: ' + error);
+        console.log('[Hostcord] 🚨 Erreur extractStreamUrl: ' + error);
         return JSON.stringify({ streams: [], subtitles: "" });
     }
 }
+
 // --- FONCTION UTILITAIRE SORA ---
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null, encoding: 'utf-8' }) {
     try {
