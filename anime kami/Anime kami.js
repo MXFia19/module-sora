@@ -1,66 +1,35 @@
 // ==========================================
-// ⚙️ MODULE SORA — ANIME-KAMI.COM (Avec Trackers Discord)
+// ⚙️ MODULE SORA — ANIME-KAMI.COM (Supabase Edition)
 // ==========================================
 
 const BASE_URL = "https://anime-kami.com";
 
 // ==========================================
-// 📊 TRACKERS DISCORD (3 Webhooks séparés)
+// 🗄️ TRACKER SUPABASE (Base de données)
 // ==========================================
 
-const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
-const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
-const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
+const SUPABASE_URL = "https://qyeisgowjisqbatrmqta.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_F68CBjFVPh71U0SdD9BQJg_UJgL9-Fj";
 
-async function sendTracker(moduleName, keyword, results, apiUrl) {
+async function sendSupabaseLog(moduleName, actionType, dataPayload) {
     try {
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**Requête API :** ${apiUrl}\n`;
-        if (results.length > 0) {
-            desc += `\n**Top résultats :**\n`;
-            let top = results.slice(0, 5);
-            for (let r of top) { desc += `🎬 ${r.title}\n`; }
-            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
-        } else {
-            desc += `\n❌ Aucun anime trouvé.`;
-        }
-        const payload = { embeds: [{ title: `📊 Recherche sur ${moduleName}`, description: desc, color: 5814783, timestamp: new Date().toISOString() }] };
-        await fetchv2(WEBHOOK_RECHERCHE, { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" }, "POST", JSON.stringify(payload));
-    } catch (e) {}
-}
+        const payload = {
+            module: moduleName,
+            action: actionType,
+            data: dataPayload
+        };
 
-async function sendDetailsTracker(moduleName, url) {
-    try {
-        let readableName = url;
-        let match = url.match(/\/anime\/([\d]+)-([^/?#]+)/);
-        if (match) readableName = match[2].replace(/-/g, ' ').toUpperCase();
+        const headers = { 
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+            "Prefer": "return=minimal" 
+        };
         
-        const payload = { embeds: [{ title: `🖱️ Clic sur une affiche (${moduleName})`, description: `**Anime sélectionné :** \`${readableName}\`\n**URL :** ${url}`, color: 16766720, timestamp: new Date().toISOString() }] };
-        await fetchv2(WEBHOOK_DETAILS, { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" }, "POST", JSON.stringify(payload));
-    } catch (e) {}
-}
-
-async function sendPlayerTracker(moduleName, url, streamsCount, serversList) {
-    try {
-        let readableInfo = url;
-        let match = url.match(/\/anime\/([\d]+)-([^/?#]+)/);
-        if (match) {
-            let animeName = match[2].replace(/-/g, ' ').toUpperCase();
-            let epMatch = url.match(/[?&]ep=(\d+)/);
-            let langMatch = url.match(/[?&]lang=([^&]+)/);
-            let epNumber = epMatch ? epMatch[1] : "1";
-            let lang = langMatch ? langMatch[1].toUpperCase() : "VOSTFR/VF";
-            readableInfo = `Anime : **${animeName}**\nÉpisode : **${epNumber} (${lang})**`;
-        }
-        
-        let desc = `${readableInfo}\n\n**Serveurs extraits :** ${streamsCount}\n`;
-        if (streamsCount > 0) {
-            for (let s of serversList) { desc += `✅ ${s}\n`; }
-        } else {
-            desc += `❌ Aucun lien vidéo valide trouvé.`;
-        }
-        const payload = { embeds: [{ title: `▶️ Lancement Vidéo sur ${moduleName}`, description: desc, color: 5763719, timestamp: new Date().toISOString() }] };
-        await fetchv2(WEBHOOK_LECTEUR, { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" }, "POST", JSON.stringify(payload));
-    } catch (e) {}
+        await fetchv2(`${SUPABASE_URL}/rest/v1/app_logs`, headers, "POST", JSON.stringify(payload));
+    } catch (e) { 
+        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`); 
+    }
 }
 
 // ==========================================
@@ -92,7 +61,14 @@ async function searchResults(keyword) {
         }
 
         console.log(`[Anime-Kami] ✅ ${results.length} résultats trouvés.`);
-        await sendTracker("Anime-Kami", keyword, results, BASE_URL + "/api/catalog"); // 📡 Tracker
+        
+        // 📡 Log Supabase (Recherche)
+        sendSupabaseLog("Anime-Kami", "SEARCH", { 
+            keyword: keyword, 
+            results_count: results.length,
+            top_results: results.slice(0, 3).map(r => r.title)
+        });
+        
         return JSON.stringify(results);
     } catch (e) {
         console.log(`[Anime-Kami] 🚨 Erreur recherche : ${e.message}`);
@@ -103,7 +79,9 @@ async function searchResults(keyword) {
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
     console.log(`[Anime-Kami] 📖 Chargement des détails pour : ${url}`);
-    await sendDetailsTracker("Anime-Kami", url); // 📡 Tracker
+    
+    // 📡 Log Supabase (Détails)
+    sendSupabaseLog("Anime-Kami", "DETAILS", { anime_url: url });
 
     try {
         const headers = { "User-Agent": "Mozilla/5.0", "Referer": "https://anime-kami.com/" };
@@ -197,7 +175,7 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. LECTEUR (Analyse combinée VF + VOSTFR) ---
+// --- 4. LECTEUR (Analyse combinée + Capture des échecs) ---
 async function extractStreamUrl(url) {
     console.log(`[Anime-Kami] 🎬 Analyse du lecteur pour : ${url}`);
     try {
@@ -228,13 +206,17 @@ async function extractStreamUrl(url) {
         if (serversToProcess.length === 0) return JSON.stringify({ type: "none" });
 
         const streams = [];
-        let extractedNames = []; // Pour le tracker Discord
+        let extractedNames = []; 
+        let failedLinks = []; // 🚨 NOUVEAU : Tableau pour stocker les liens non reconnus ou morts
 
         for (const server of serversToProcess) {
             const serverUrl = server.server_url;
             const serverName = server.server_name || "Serveur " + server.serverKey;
             const quality = server.quality || "720";
             const prefix = `[${server.langTag}] `;
+            
+            // On retient combien de streams on a avant de tester ce serveur
+            let streamCountBefore = streams.length; 
 
             if (serverUrl.includes("sendvid")) {
                 try {
@@ -345,6 +327,17 @@ async function extractStreamUrl(url) {
                         extractedNames.push(prefix + serverName);
                     }
                 } catch (e) {}
+            } else {
+                console.log(`[Lecteur] ❌ Serveur non supporté ou ignoré : ${serverUrl}`);
+            }
+
+            // 🚨 VÉRIFICATION DE L'ÉCHEC : 
+            // Si le nombre de flux n'a pas augmenté après ce bloc, c'est que l'extraction a échoué (ou n'est pas gérée)
+            if (streams.length === streamCountBefore) {
+                failedLinks.push({
+                    server_name: prefix + serverName,
+                    url: serverUrl
+                });
             }
         }
 
@@ -358,8 +351,23 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // 📡 Tracker Discord pour le lecteur
-        await sendPlayerTracker("Anime-Kami", url, uniqueStreams.length, extractedNames);
+        // 📡 1. Log Supabase : SUCCÈS
+        sendSupabaseLog("Anime-Kami", "PLAYER", { 
+            anime_url: url, 
+            ep_number: epNumber,
+            streams_found: uniqueStreams.length,
+            servers: extractedNames
+        });
+
+        // 📡 2. Log Supabase : ÉCHECS (Les liens à décrypter plus tard)
+        if (failedLinks.length > 0) {
+            sendSupabaseLog("Anime-Kami", "UNSUPPORTED_HOSTS", {
+                anime_url: url,
+                ep_number: epNumber,
+                failed_count: failedLinks.length,
+                failed_links: failedLinks
+            });
+        }
 
         return JSON.stringify(uniqueStreams.length > 0 ? { type: "servers", streams: uniqueStreams } : { type: "none" });
 
@@ -368,7 +376,6 @@ async function extractStreamUrl(url) {
         return JSON.stringify({ type: "none" });
     }
 }
-
 // ==========================================
 // 🛠️ DÉCRYPTEURS UTILITAIRES
 // ==========================================
