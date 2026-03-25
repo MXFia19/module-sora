@@ -1,103 +1,38 @@
+// ==========================================
+// ⚙️ MODULE SORA — ANIMESULTRA (Supabase Edition + Sibnet Fix)
+// ==========================================
+
 const BASE_URL = "https://animesultra.org";
 
-// ==========================================
-// 📊 TRACKERS DISCORD (3 Webhooks séparés)
-// ==========================================
+const SUPABASE_URL = "https://qyeisgowjisqbatrmqta.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_F68CBjFVPh71U0SdD9BQJg_UJgL9-Fj";
 
-const WEBHOOK_RECHERCHE = "https://discord.com/api/webhooks/1482435597372100628/vmjrJ5zOsOfV2tVv4SEeUcC1uP-jEBg1oxEJb4sPsQ7qxnqkANs0G976sPBlSF6HiLZf";
-const WEBHOOK_LECTEUR = "https://discord.com/api/webhooks/1482436048373026816/pPA0G1N6JSulfgPtAiArewD5veeHnrPLqofm3HSidpNG5Ro5BIxhNBdzjl56IvvJhMPc";
-const WEBHOOK_DETAILS = "https://discord.com/api/webhooks/1482456590107021352/aHuhNRb0fRMa_-KT9wFIKyu2Lz3qxClLYc-7bTqdsFYlIPpw35wuN8PhOMTaW7NKtDPv";
-
-// 1. Tracker pour les Recherches
-async function sendTracker(moduleName, keyword, results, apiUrl) {
+async function sendSupabaseLog(moduleName, actionType, dataPayload) {
     try {
-        // Sans backticks autour de apiUrl pour qu'il soit cliquable sur Discord
-        let desc = `**Mot-clé :** \`${keyword}\`\n**Résultats trouvés :** ${results.length}\n**URL Utilisée :** ${apiUrl}\n`;
-        
-        if (results.length > 0) {
-            desc += `\n**Top résultats :**\n`;
-            let top = results.slice(0, 5);
-            for (let r of top) { desc += `🎬 ${r.title}\n`; }
-            if (results.length > 5) { desc += `*... et ${results.length - 5} autres*`; }
-        } else {
-            desc += `\n❌ Aucun anime trouvé.`;
-        }
-
         const payload = {
-            embeds: [{
-                title: `📊 Recherche sur ${moduleName}`,
-                description: desc,
-                color: 5814783, // Bleu
-                timestamp: new Date().toISOString()
-            }]
+            module: moduleName,
+            action: actionType,
+            data: dataPayload
         };
 
-        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(WEBHOOK_RECHERCHE, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker Recherche : " + e); }
-}
-
-// 2. Tracker pour les clics sur les affiches (Détails)
-async function sendDetailsTracker(moduleName, url, apiUrl) {
-    try {
-        let readableName = url;
-        let match = url.match(/\/\d+-([^/]+)\.html/i);
-        if (match) readableName = match[1].replace(/-/g, ' ').toUpperCase();
-
-        const payload = {
-            embeds: [{
-                title: `🖱️ Clic sur une affiche (${moduleName})`,
-                description: `**Anime sélectionné :** \`${readableName}\`\n**URL de la page :** ${apiUrl}`,
-                color: 16766720, // Jaune/Orange
-                timestamp: new Date().toISOString()
-            }]
+        const headers = { 
+            "Content-Type": "application/json",
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+            "Prefer": "return=minimal" 
         };
-
-        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(WEBHOOK_DETAILS, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker Details : " + e); }
-}
-
-// 3. Tracker pour le Lecteur
-async function sendPlayerTracker(moduleName, url, streams, apiUrls) {
-    try {
-        let readableInfo = url;
-        let match = url.match(/([^/]+)\/episode-(\d+)\.html/i) || url.match(/-([^/]+)\/episode-(\d+)/i);
         
-        if (match) {
-            let animeName = match[1].replace(/-/g, ' ').toUpperCase();
-            readableInfo = `Anime : **${animeName}**\nÉpisode : **${match[2]}**`;
-        } else {
-            readableInfo = `Lien brut : \`${url}\``;
-        }
-
-        let desc = `${readableInfo}\n\n**Requête API :**\n${apiUrls}\n\n**Serveurs extraits :** ${streams.length}\n`;
-        
-        if (streams.length > 0) {
-            for (let s of streams) { desc += `✅ ${s.title}\n`; }
-        } else {
-            desc += `❌ Aucun lien vidéo valide trouvé.`;
-        }
-
-        const payload = {
-            embeds: [{
-                title: `▶️ Lancement Vidéo sur ${moduleName}`,
-                description: desc,
-                color: 5763719, // Vert
-                timestamp: new Date().toISOString()
-            }]
-        };
-
-        const headers = { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" };
-        await fetchv2(WEBHOOK_LECTEUR, headers, "POST", JSON.stringify(payload));
-    } catch (e) { console.log("Erreur Tracker Lecteur : " + e); }
+        await fetchv2(`${SUPABASE_URL}/rest/v1/app_logs`, headers, "POST", JSON.stringify(payload));
+    } catch (e) { 
+        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`); 
+    }
 }
-
 
 // ==========================================
 // ⚙️ LOGIQUE DU MODULE ANIMESULTRA
 // ==========================================
 
+// --- 1. RECHERCHE ---
 async function searchResults(keyword) {
     console.log(`[Recherche] 🔍 Lancement pour : "${keyword}"`);
 
@@ -133,8 +68,12 @@ async function searchResults(keyword) {
             }
         }
 
-        // 🕵️ Appel du tracker Recherche avec searchUrl
-        await sendTracker("AnimesUltra", keyword, results, searchUrl);
+        // 📡 Log Supabase (Recherche)
+        sendSupabaseLog("AnimesUltra", "SEARCH", { 
+            keyword: keyword, 
+            results_count: results.length,
+            top_results: results.slice(0, 3).map(r => r.title)
+        });
 
         return JSON.stringify(results);
     } catch (e) {
@@ -143,18 +82,18 @@ async function searchResults(keyword) {
     }
 }
 
+// --- 2. DÉTAILS ---
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
     
-    // 🕵️ Appel du tracker Détails avec l'URL de la page
-    await sendDetailsTracker("AnimesUltra", url, url);
+    // 📡 Log Supabase (Détails)
+    sendSupabaseLog("AnimesUltra", "DETAILS", { anime_url: url });
 
     try {
         const response = await fetchv2(url);
         const html = await response.text();
 
         let description = "Pas de description disponible.";
-
         const descMatch = html.match(/<div class=["'][^"']*film-description[^"']*["'][^>]*>\s*<div class=["']text["']>([\s\S]*?)<\/div>/i);
 
         if (descMatch && descMatch[1]) {
@@ -175,9 +114,7 @@ async function extractDetails(url) {
         let airdate = "N/A";
         const yearMatch = html.match(/<span class=["']item-head["']>Année:<\/span>\s*<span class=["']name["']><a[^>]*>(\d{4})<\/a><\/span>/i) || 
                           html.match(/\/xfsearch\/year\/(\d{4})\//i);
-        if (yearMatch) {
-            airdate = yearMatch[1];
-        }
+        if (yearMatch) airdate = yearMatch[1];
 
         return JSON.stringify([{ description, aliases: "AnimesUltra", airdate }]);
     } catch (e) {
@@ -186,6 +123,7 @@ async function extractDetails(url) {
     }
 }
 
+// --- 3. ÉPISODES ---
 async function extractEpisodes(url) {
     try {
         const response = await fetchv2(url);
@@ -195,11 +133,8 @@ async function extractEpisodes(url) {
         const urlIdMatch = url.match(/\/(\d+)-[^/]+\.html/i);
         const htmlIdMatch = html.match(/id=["']post_id["']\s+value=["'](\d+)["']/i);
 
-        if (urlIdMatch) {
-            newsId = urlIdMatch[1];
-        } else if (htmlIdMatch) {
-            newsId = htmlIdMatch[1];
-        }
+        if (urlIdMatch) newsId = urlIdMatch[1];
+        else if (htmlIdMatch) newsId = htmlIdMatch[1];
 
         if (!newsId) return JSON.stringify([]);
 
@@ -256,18 +191,18 @@ async function extractEpisodes(url) {
     }
 }
 
+// --- 4. LECTEUR (Analyse + Capture d'erreurs) ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
-
+    
     try {
         const idMatch = url.match(/\/(\d+)-[^/]+\/episode-(\d+)\.html/i);
         if (!idMatch) return JSON.stringify([]);
 
         const newsId = idMatch[1];
+        const episodeNumber = idMatch[2];
 
-        // C'est ce lien qu'on veut envoyer à Discord pour le debug
         const ajaxUrl = `${BASE_URL}/engine/ajax/full-story.php?newsId=${newsId}&d=${Date.now()}`;
-        
         const ajaxRes = await fetchv2(ajaxUrl);
         const ajaxText = await ajaxRes.text();
         
@@ -276,6 +211,8 @@ async function extractStreamUrl(url) {
         catch (e) { html = ajaxText; }
 
         let streams = [];
+        let extractedNames = [];
+        let failedLinks = []; // 🚨 Boîte pour les liens morts ou inconnus
         
         const episodeRes = await fetchv2(url);
         const episodeHtml = await episodeRes.text();
@@ -304,38 +241,28 @@ async function extractStreamUrl(url) {
                     if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
                     if (!embedUrl.startsWith('http')) continue;
                     
-                    // --- MOTEUR SIBNET CLASSIQUE ---
+                    let streamCountBefore = streams.length; // On retient combien on a de flux avant le test
+                    
+                    // --- MOTEUR SIBNET (NOUVEAU FIX) ---
                     if (embedUrl.includes("sibnet")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
                         try {
-                            const req = await fetchv2(embedUrl, { 
-                                "Referer": BASE_URL,
-                                "encoding": "windows-1251",
-                                "Accept-Charset": "windows-1251, utf-8;q=0.7,*;q=0.3" 
-                            });
-                            
+                            const req = await fetchv2(embedUrl, { "Referer": BASE_URL }, "GET", null, true, "windows-1251");
                             const sibHtml = await req.text();
                             
-                            const mp4Match = sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i) || 
-                                             sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)[^"']*["']/i);
+                            const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)["']/i) || 
+                                             sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
                             
                             if (mp4Match) {
                                 let directUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
                                 
                                 try {
-                                    const redirectReq = await fetch(directUrl, {
-                                        method: "GET",
-                                        headers: { 
-                                            "Referer": embedUrl,
-                                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                                        },
-                                        redirect: "manual"
-                                    });
+                                    const redirectReq = await fetchv2(directUrl, {
+                                        "Referer": embedUrl,
+                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                    }, "HEAD");
                                     
-                                    const location = redirectReq.headers.get("location") || redirectReq.headers.get("Location");
-                                    if (location) {
-                                        directUrl = location.startsWith("//") ? "https:" + location : location;
-                                    } else if (redirectReq.url && redirectReq.url !== directUrl) {
+                                    if (redirectReq && redirectReq.url && redirectReq.url !== directUrl) {
                                         directUrl = redirectReq.url;
                                     }
                                 } catch(e) {}
@@ -343,11 +270,9 @@ async function extractStreamUrl(url) {
                                 streams.push({
                                     title: "Sibnet (MP4)",
                                     streamUrl: directUrl,
-                                    headers: { 
-                                        "Referer": embedUrl,
-                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                                    }
+                                    headers: { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }
                                 });
+                                extractedNames.push("Sibnet");
                             }
                         } catch (e) {
                             console.log(`[Lecteur] Erreur Sibnet : ${e}`);
@@ -368,27 +293,20 @@ async function extractStreamUrl(url) {
                                     streamUrl: mp4Match[1],
                                     headers: { "Referer": embedUrl }
                                 });
+                                extractedNames.push("Sendvid");
                             }
                         } catch (e) {}
                     }
-                    // --- NOUVEAU MOTEUR DAISUKI (API JSON) ---
+                    // --- MOTEUR DAISUKI (API JSON) ---
                     else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) {
                         console.log(`[Lecteur] 🕵️ Extraction Daisuki API en cours...`);
                         try {
-                            const idMatch = embedUrl.match(/id=([^&]+)/i);
-                            
-                            if (idMatch && idMatch[1]) {
-                                const videoId = idMatch[1];
+                            const dIdMatch = embedUrl.match(/id=([^&]+)/i);
+                            if (dIdMatch && dIdMatch[1]) {
+                                const videoId = dIdMatch[1];
                                 const apiUrl = `https://cdn2.daisukianime.xyz/sib/${videoId}?epid=null`;
-                                console.log(`[Lecteur] 📡 Appel API Daisuki : ${apiUrl}`);
-
-                                const req = await fetchv2(apiUrl, {
-                                    "Referer": embedUrl,
-                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                                });
-                                
-                                const jsonText = await req.text();
-                                const data = JSON.parse(jsonText);
+                                const req = await fetchv2(apiUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" });
+                                const data = JSON.parse(await req.text());
 
                                 if (data && data.sources && data.sources.length > 0) {
                                     for (let source of data.sources) {
@@ -399,6 +317,7 @@ async function extractStreamUrl(url) {
                                                 streamUrl: source.file,
                                                 headers: { "Referer": embedUrl }
                                             });
+                                            extractedNames.push("Daisuki");
                                         }
                                     }
                                 }
@@ -410,18 +329,30 @@ async function extractStreamUrl(url) {
                                                    daiHtml.match(/src=["']([^"']+\.(m3u8|mp4)[^"']*)["']/i);
                                 
                                 if (mediaMatch) {
-                                    const directUrl = mediaMatch[1];
-                                    const typeStr = directUrl.includes(".m3u8") ? "HLS" : "MP4";
+                                    const typeStr = mediaMatch[1].includes(".m3u8") ? "HLS" : "MP4";
                                     streams.push({
                                         title: `Daisuki HTML (${typeStr})`,
-                                        streamUrl: directUrl,
+                                        streamUrl: mediaMatch[1],
                                         headers: { "Referer": embedUrl }
                                     });
+                                    extractedNames.push("Daisuki");
                                 }
                             }
                         } catch (e) {
                             console.log(`[Lecteur] 🚨 Erreur API Daisuki : ${e}`);
                         }
+                    } else {
+                        console.log(`[Lecteur] ❌ Serveur inconnu ou non supporté : ${embedUrl}`);
+                    }
+
+                    // 🚨 VÉRIFICATION ÉCHEC : Si aucun flux n'a été ajouté après avoir testé ce lien
+                    if (streams.length === streamCountBefore) {
+                        let domainMatch = embedUrl.match(/https?:\/\/(?:www\.)?([^/]+)/i);
+                        let serverFallbackName = domainMatch ? domainMatch[1] : "Inconnu";
+                        failedLinks.push({
+                            server_name: serverFallbackName,
+                            url: embedUrl
+                        });
                     }
                 }
             }
@@ -431,20 +362,33 @@ async function extractStreamUrl(url) {
             s.streamUrl.includes('.mp4') || 
             s.streamUrl.includes('.m3u8')
         );
-
-        console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${safeStreams.length}`);
-        
-        // 🕵️ Appel du tracker Lecteur avec l'URL Ajax (secrète) utilisée
-        await sendPlayerTracker("AnimesUltra", url, safeStreams, ajaxUrl);
-        
-        if (safeStreams.length > 0) {
-            return JSON.stringify({ 
-                type: "servers", 
-                streams: safeStreams 
-            });
-        } else {
-            return JSON.stringify({ type: "none" });
+        let uniqueStreams = [];
+        let seenUrls = new Set();
+        for (let s of safeStreams) {
+            if (!seenUrls.has(s.streamUrl)) { seenUrls.add(s.streamUrl); uniqueStreams.push(s); }
         }
+
+        console.log(`[Lecteur] 🎉 Terminé. Flux envoyés à l'application : ${uniqueStreams.length}`);
+        
+        // 📡 Log Supabase : SUCCÈS
+        sendSupabaseLog("AnimesUltra", "PLAYER", { 
+            anime_url: url, 
+            ep_number: episodeNumber,
+            streams_found: uniqueStreams.length,
+            servers: extractedNames
+        });
+
+        // 📡 Log Supabase : ÉCHECS (Les liens à décrypter plus tard)
+        if (failedLinks.length > 0) {
+            sendSupabaseLog("AnimesUltra", "UNSUPPORTED_HOSTS", {
+                anime_url: url,
+                ep_number: episodeNumber,
+                failed_count: failedLinks.length,
+                failed_links: failedLinks
+            });
+        }
+        
+        return JSON.stringify(uniqueStreams.length > 0 ? { type: "servers", streams: uniqueStreams } : { type: "none" });
         
     } catch (e) {
         console.log(`[Lecteur] 🚨 Erreur : ${e}`);
