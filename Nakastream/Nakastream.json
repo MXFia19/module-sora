@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://nakastream.tv/",
     "searchBaseUrl": "https://nakastream.tv/api/v1/browse/catalog?search=",
-    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/nakastream/nakastream.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/Nakastream/nakastream.js",
     "type": "anime/shows/movies",
     "downloadSupport": true,
     "asyncJS": true,
