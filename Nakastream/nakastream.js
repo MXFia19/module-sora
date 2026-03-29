@@ -58,7 +58,7 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
 // ⚙️ LOGIQUE DU MODULE NAKASTREAM
 // ==========================================
 
-// --- 1. RECHERCHE ---
+// --- 1. RECHERCHE (MODE DEBUG 🐛) ---
 async function searchResults(keyword) {
     console.log(`\n======================================`);
     console.log(`[Recherche Nakastream] 🔍 Lancement pour : "${keyword}"`);
@@ -66,17 +66,17 @@ async function searchResults(keyword) {
     try {
         const cleanKeyword = keyword.trim();
 
-        // 🎮 LE CHEAT CODE EST ICI : ENREGISTRER LE TOKEN 🎮
+        // 🎮 LE CHEAT CODE EST ICI 🎮
         if (cleanKeyword.startsWith("!naka ") && cleanKeyword !== "!naka clear") {
             const newToken = cleanKeyword.replace("!naka ", "").trim();
             SESSION_TOKEN = newToken; 
             
-            // 💾 SAUVEGARDE DÉFINITIVE
             if (typeof localStorage !== 'undefined') {
                 localStorage.setItem('sora_naka_token', newToken);
+                console.log(`[Nakastream] 💾 localStorage est SUPPORTÉ par l'app ! Token gravé.`);
+            } else {
+                console.log(`[Nakastream] ⚠️ localStorage n'existe PAS sur cette app. Le token risque d'être oublié.`);
             }
-            
-            console.log(`[Nakastream] 🔐 Nouveau Token sauvegardé à vie : ${newToken.substring(0, 10)}...`);
             
             return JSON.stringify([{
                 title: "✅ Token Nakastream Sauvegardé !",
@@ -85,17 +85,10 @@ async function searchResults(keyword) {
             }]);
         }
 
-        // 🗑️ LE CHEAT CODE EST ICI : EFFACER LE TOKEN 🗑️
         if (cleanKeyword === "!naka clear") {
             SESSION_TOKEN = "";
-            if (typeof localStorage !== 'undefined') {
-                localStorage.removeItem('sora_naka_token');
-            }
-            return JSON.stringify([{
-                title: "🗑️ Token Nakastream Effacé !",
-                image: "https://via.placeholder.com/500x750/FF0000/FFFFFF?text=Token+Supprim%C3%A9",
-                href: `${BASE_URL}/`
-            }]);
+            if (typeof localStorage !== 'undefined') localStorage.removeItem('sora_naka_token');
+            return JSON.stringify([{ title: "🗑️ Token Effacé", image: "", href: `${BASE_URL}/` }]);
         }
 
         // --- RECHERCHE NORMALE ---
@@ -104,13 +97,25 @@ async function searchResults(keyword) {
         
         let headers = { "Accept": "application/json", "User-Agent": "Mozilla/5.0" };
         let token = getNakaToken();
-        if (token !== "") headers["Authorization"] = token; // On injecte le token s'il existe
+        
+        // 🚨 VÉRIFICATION VITALE DU TOKEN :
+        console.log(`[Nakastream] 🔑 Token prêt à être envoyé : ${token === "" ? "❌ AUCUN TOKEN" : "✅ " + token.substring(0, 15) + "..."}`);
 
+        if (token !== "") headers["Authorization"] = token;
+
+        console.log(`[Nakastream] 📡 Appel API en cours...`);
         const response = await soraFetch(searchUrl, { headers: headers });
-        const json = await response.json();
+        
+        // 🚨 VÉRIFICATION VITALE DE LA RÉPONSE :
+        const textResponse = await response.text();
+        console.log(`[Nakastream] 📥 Réponse API brute (extrait) : ${textResponse.substring(0, 150)}`);
+
+        // On re-transforme le texte en JSON
+        const json = JSON.parse(textResponse);
         const results = [];
 
         if (json.data && Array.isArray(json.data)) {
+            console.log(`[Nakastream] 🧩 Nombre d'animes reçus : ${json.data.length}`);
             for (let item of json.data) {
                 let imgUrl = "https://via.placeholder.com/500x750/222222/FFFFFF?text=Aucune+Affiche";
                 if (item.posterPath) imgUrl = `https://image.tmdb.org/t/p/w500${item.posterPath}`;
@@ -121,6 +126,8 @@ async function searchResults(keyword) {
                     href: `${BASE_URL}/${item.mediaType}/${item.id}`
                 });
             }
+        } else {
+            console.log(`[Nakastream] ⚠️ Le format de la réponse n'est pas celui attendu (pas de json.data) !`);
         }
 
         sendSupabaseLog("NakaStream", "SEARCH", { 
@@ -130,10 +137,11 @@ async function searchResults(keyword) {
         return JSON.stringify(results);
 
     } catch (error) {
-        console.log('[Nakastream] 🚨 Erreur searchResults : ' + error);
+        console.log('[Nakastream] 🚨 Erreur Critique searchResults : ' + error.message);
         return JSON.stringify([]);
     }
 }
+
 
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
