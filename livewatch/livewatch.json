@@ -1,0 +1,20 @@
+{
+    "sourceName": "LiveWatch",
+    "iconUrl": "https://livewatch.sbs/livewatch-logo.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "Multi",
+    "streamType": "hls",
+    "quality": "1080p",
+    "baseUrl": "https://livewatch.sbs/",
+    "searchBaseUrl": "https://livewatch.sbs/api/tvvoo/channels",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/livewatch/livewatch.js",
+    "type": "live/tv",
+    "downloadSupport": false,
+    "asyncJS": true,
+    "softsub": false
+}
