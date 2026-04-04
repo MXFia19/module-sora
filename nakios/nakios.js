@@ -1,5 +1,5 @@
 // ==========================================
-// ⚙️ MODULE SORA — NAKIOS (Supabase Edition)
+// ⚙️ MODULE SORA — NAKIOS (Supabase + Xalaflix Fix)
 // ==========================================
 
 const TMDB_API_KEY = "f3d757824f08ea2cff45eb8f47ca3a1e";
@@ -50,18 +50,35 @@ async function initUrls() {
 
     try {
         console.log("[Nakios] Recherche de la nouvelle adresse officielle sur nakios.online...");
-        const response = await soraFetch("https://nakios.online/");
-        const text = await response.text();
-
-        const match = text.match(/href="([^"]+)"[^>]*>.*?Visiter/i) || text.match(/(https:\/\/nakios\.[a-z]+)/i);
         
-        if (match && match[1]) {
+        const response = await soraFetch("https://nakios.online/");
+        let text = await response.text();
+        let match = null;
+
+        match = text.match(/href="([^"]+)"[^>]*>.*?Visiter/i) || text.match(/(https:\/\/nakios\.[a-z]+)/i);
+
+        if (!match) {
+            console.log("[Nakios] Site dynamique détecté, analyse du fichier JavaScript...");
+            const jsFileMatch = text.match(/src="(\/assets\/[^"]+\.js)"/i) || text.match(/src="([^"]+\.js)"/i);
+            
+            if (jsFileMatch && jsFileMatch[1]) {
+                const jsUrl = `https://nakios.online${jsFileMatch[1]}`;
+                const jsResponse = await soraFetch(jsUrl);
+                const jsText = await jsResponse.text();
+                match = jsText.match(/(https:\/\/nakios\.[a-z]+)/i);
+            }
+        }
+
+        if (match && match[1] && !match[1].includes("nakios.online")) {
             BASE_URL = match[1];
             if (BASE_URL.endsWith('/')) BASE_URL = BASE_URL.slice(0, -1);
+            console.log(`[Nakios] Nouvelle URL trouvée : ${BASE_URL}`);
         } else {
-            throw new Error("Aucun lien trouvé");
+            throw new Error("Aucun lien trouvé ni dans le HTML ni dans le JS.");
         }
+
     } catch (e) {
+        console.log(`[Nakios] Échec de la recherche : ${e.message}. Utilisation du secours.`);
         BASE_URL = "https://nakios.site";
     }
 
@@ -89,14 +106,10 @@ async function searchResults(keyword) {
         const data = await responseText.json();
         const items = data.results || data.data || data.items || data; 
 
-        if (!Array.isArray(items)) {
-            return JSON.stringify([]);
-        }
+        if (!Array.isArray(items)) return JSON.stringify([]);
 
         const transformedResults = items.map(result => {
             let type = result.media_type || (result.name ? "tv" : "movie");
-            
-            // Remplacement strict de "tv" par "series" pour coller au site Nakios !
             if (type === "tv") type = "series"; 
 
             let title = result.title || result.name || result.original_title;
@@ -113,12 +126,11 @@ async function searchResults(keyword) {
                 return {
                     title: title,
                     image: image,
-                    href: `${BASE_URL}/${type}/${id}` // Cela génèrera bien /series/ID
+                    href: `${BASE_URL}/${type}/${id}`
                 };
             }
         }).filter(Boolean);
 
-        // 📡 Log Supabase (Recherche)
         sendSupabaseLog("Nakios", "SEARCH", { 
             keyword: keyword, 
             results_count: transformedResults.length,
@@ -133,9 +145,6 @@ async function searchResults(keyword) {
 
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
-    console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
-    
-    // 📡 Log Supabase (Détails)
     sendSupabaseLog("Nakios", "DETAILS", { anime_url: url });
 
     try {
@@ -173,13 +182,11 @@ async function extractDetails(url) {
         let releaseDate = data.release_date || data.first_air_date || data.air_date || 'Inconnue';
         let overview = data.overview || data.description || 'Aucune description disponible.';
 
-        const transformedResults = [{
+        return JSON.stringify([{
             description: overview,
             aliases: `Durée : ${duration !== 'Inconnue' ? duration + ' minutes' : 'Inconnue'}`,
             airdate: `Date de sortie : ${releaseDate}`
-        }];
-
-        return JSON.stringify(transformedResults);
+        }]);
         
     } catch (error) {
         return JSON.stringify([{
@@ -244,27 +251,24 @@ async function extractEpisodes(url) {
     }   
 }
 
-// --- 4. EXTRACTION VIDÉO (Supabase Tracker Ajouté) ---
+// --- 4. EXTRACTION VIDÉO (L'Ultime Version : Proxy + Anti-CORS + Tracker Pro) ---
 async function extractStreamUrl(url) {
     try {
         await initUrls();
 
         let streams = [];
-        let extractedNames = [];
         let failedLinks = [];
         let showId = "";
-        let seasonNumber = "";
+        let seasonNumber = "1";
         let episodeNumber = "1";
         let isMovie = url.includes('movie');
 
-        if (isMovie) {
-            const parts = url.split('/');
-            showId = parts[0]; 
-        } else {
-            const parts = url.split('/');
-            showId = parts[0];         
-            seasonNumber = parts[1];   
-            episodeNumber = parts[2];  
+        const parts = url.split('/');
+        showId = parts[0]; 
+
+        if (!isMovie) {
+            seasonNumber = parts[1] || "1";   
+            episodeNumber = parts[2] || "1";  
         }
 
         let apiUrl = isMovie 
@@ -279,9 +283,8 @@ async function extractStreamUrl(url) {
         try {
             data = await response.json();
         } catch(e) {
-            // L'API a planté ou renvoyé du texte cassé
             failedLinks.push({ server_name: "API Nakios (Crash)", url: apiUrl });
-            sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", { anime_url: url, ep_number: episodeNumber, failed_count: 1, failed_links: failedLinks });
+            sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", { media_path: url, type: isMovie ? "FILM" : "SERIE", failed_reason: "Crash API" });
             return JSON.stringify({ streams: [], subtitles: "" });
         }
         
@@ -306,11 +309,14 @@ async function extractStreamUrl(url) {
                 
                 if (typeof value === 'string') {
                     let isVideoUrl = value.includes('.m3u8') || value.includes('.mp4') || value.includes('fsvid.lol') || value.includes('vidzy.org');
-                    let isApiUrl = value.startsWith('http') && ['url', 'link', 'file', 'src'].includes(key.toLowerCase());
+                    let isProxyUrl = value.includes('/api/sources/proxy');
+                    let isApiUrl = (value.startsWith('http') || value.startsWith('/')) && ['url', 'link', 'file', 'src'].includes(key.toLowerCase());
                     
-                    if (isVideoUrl || isApiUrl) {
+                    if (isVideoUrl || isProxyUrl || isApiUrl) {
                         let finalName = passName;
-                        if (obj.quality) finalName += ` - ${obj.quality}`;
+                        if (obj.quality && !finalName.includes(obj.quality)) {
+                            finalName += ` - ${obj.quality}`;
+                        }
                         rawStreams.push({ url: value, name: finalName });
                     }
                 } else if (typeof value === 'object') {
@@ -332,15 +338,40 @@ async function extractStreamUrl(url) {
         
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
-            if (item.url.startsWith('/')) finalUrl = `${API_URL}${item.url}`;
+            
+            // 🟢 NOUVEAUTÉ : Bypass du Proxy (Extraction du lien direct)
+            if (finalUrl.includes('/proxy?url=')) {
+                try {
+                    // On extrait ce qu'il y a après "?url="
+                    const matchProxy = finalUrl.match(/[?&]url=([^&]+)/);
+                    if (matchProxy && matchProxy[1]) {
+                        // On décode le lien (transforme les %3A en ":" et les %2F en "/")
+                        finalUrl = decodeURIComponent(matchProxy[1]);
+                    }
+                } catch(e) {}
+            } 
+            // Si c'est un autre lien interne, on met juste l'API devant
+            else if (finalUrl.startsWith('/')) {
+                finalUrl = `${API_URL}${finalUrl}`;
+            }
 
+           // On utilise le User-Agent exact de ton dump réseau pour tromper les sécurités
             let streamHeaders = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
                 "Origin": BASE_URL,
                 "Referer": `${BASE_URL}/`
             };
 
-            if (finalUrl.includes('fsvid') || finalUrl.includes('vidzy')) {
+            let valLower = finalUrl.toLowerCase();
+
+            // 🛡️ ANTI-CORS SPÉCIFIQUE : XALAFLIX
+            // Tes logs ont prouvé qu'ils exigent purstream.art comme point d'entrée
+            if (valLower.includes('xalaflix')) {
+                streamHeaders["Origin"] = "https://purstream.art";
+                streamHeaders["Referer"] = "https://purstream.art/";
+            }
+            // 🛡️ ANTI-CORS CLASSIQUE : Darkibox, Fastflux, Fsvid, Vidzy
+            else if (valLower.includes('fsvid') || valLower.includes('vidzy') || valLower.includes('darkibox') || valLower.includes('fastflux')) {
                 try {
                     const urlObj = new URL(finalUrl);
                     streamHeaders["Origin"] = urlObj.origin;
@@ -353,27 +384,31 @@ async function extractStreamUrl(url) {
                 streamUrl: finalUrl,
                 headers: streamHeaders
             });
-            extractedNames.push(item.name);
         }
 
-        // 🚨 Capture de l'erreur si aucun flux n'est trouvé dans le JSON
         if (streams.length === 0) {
             failedLinks.push({ server_name: "API Nakios (Vide)", url: apiUrl });
         }
 
-        // 📡 Log Supabase : SUCCÈS
+        // 📡 Log Supabase : SUCCÈS (Nouveau format Pro)
         sendSupabaseLog("Nakios", "PLAYER", { 
-            anime_url: url, 
-            ep_number: episodeNumber,
+            media_path: url, 
+            type: isMovie ? "FILM" : "SERIE",
+            saison: isMovie ? "N/A" : seasonNumber,
+            episode: episodeNumber,
             streams_found: streams.length,
-            servers: extractedNames
+            servers: streams.map(s => ({
+                nom: s.title,
+                lien: s.streamUrl
+            }))
         });
 
-        // 📡 Log Supabase : ÉCHECS
         if (failedLinks.length > 0) {
             sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", {
-                anime_url: url,
-                ep_number: episodeNumber,
+                media_path: url,
+                type: isMovie ? "FILM" : "SERIE",
+                saison: isMovie ? "N/A" : seasonNumber,
+                episode: episodeNumber,
                 failed_count: failedLinks.length,
                 failed_links: failedLinks
             });
