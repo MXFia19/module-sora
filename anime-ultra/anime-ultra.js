@@ -1,8 +1,8 @@
 // ==========================================
-// ⚙️ MODULE SORA — ANIMESULTRA (Supabase Edition + Sibnet Fix)
+// ⚙️ MODULE SORA — ANIMESULTRA (Supabase Edition + Sibnet + VOE)
 // ==========================================
 
-const BASE_URL = "https://animesultra.org";
+const BASE_URL = "https://ww.animesultra.org";
 
 const SUPABASE_URL = "https://qyeisgowjisqbatrmqta.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_F68CBjFVPh71U0SdD9BQJg_UJgL9-Fj";
@@ -191,6 +191,14 @@ async function extractEpisodes(url) {
     }
 }
 
+// --- UTILITAIRE : Fecth avec Timeout (Coupe-circuit) ---
+async function fetchWithTimeout(url, options, method = "GET", payload = null, raw = false, encoding = "utf-8", timeoutMs = 4000) {
+    return Promise.race([
+        fetchv2(url, options, method, payload, raw, encoding),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout de " + timeoutMs + "ms dépassé")), timeoutMs))
+    ]);
+}
+
 // --- 4. LECTEUR (Analyse + Capture d'erreurs) ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur] 🎬 Démarrage via full-story.php pour : ${url}`);
@@ -236,6 +244,7 @@ async function extractStreamUrl(url) {
 
                 let urls = videoUrl.replace(/,$/, "").split(",");
 
+
                 for (let embedUrl of urls) {
                     embedUrl = embedUrl.trim();
                     if (embedUrl.startsWith('//')) embedUrl = "https:" + embedUrl;
@@ -243,7 +252,7 @@ async function extractStreamUrl(url) {
                     
                     let streamCountBefore = streams.length; // On retient combien on a de flux avant le test
                     
-                    // --- MOTEUR SIBNET (NOUVEAU FIX) ---
+                    // --- MOTEUR SIBNET (FIX) ---
                     if (embedUrl.includes("sibnet")) {
                         console.log(`[Lecteur] 🕵️ Extraction Sibnet en cours...`);
                         try {
@@ -297,15 +306,91 @@ async function extractStreamUrl(url) {
                             }
                         } catch (e) {}
                     }
-                    // --- MOTEUR DAISUKI (API JSON) ---
+// --- MOTEUR VOE (AVEC GESTION DES REDIRECTIONS) ---
+                    else if (embedUrl.includes("voe")) {
+                        console.log(`[Lecteur] 🕵️ Extraction VOE en cours sur : ${embedUrl}`);
+                        try {
+                            let voeRes = await fetchv2(embedUrl, { "Referer": BASE_URL + "/" }, "GET");
+                            if (!voeRes) continue;
+                            
+                            let voeHtml = await voeRes.text();
+                            
+                            // 🔄 GESTION DU DOMAIN HOPPING (Saut de domaine)
+                            // Si la page fait moins de 1500 caractères, c'est sûrement une redirection
+                            const redirectMatch = voeHtml.match(/window\.location\.href\s*=\s*["']([^"']+)["']/i) || 
+                                                  voeHtml.match(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^;]+;\s*url=([^"']+)["']/i);
+                            
+                            if (redirectMatch && redirectMatch[1]) {
+                                let newUrl = redirectMatch[1];
+                                console.log(`[Lecteur] 🔄 VOE : Redirection détectée vers le nouveau domaine -> ${newUrl}`);
+                                
+                                // On refait la requête sur le vrai domaine caché (ex: jefferycontrolmodel)
+                                voeRes = await fetchv2(newUrl, { "Referer": BASE_URL + "/" }, "GET");
+                                voeHtml = await voeRes.text();
+                            }
+
+                          const streamUrl = voeExtractor(voeHtml);
+                            
+                            if (streamUrl) {
+                                // 🎯 On détecte intelligemment le format !
+                                const typeStr = streamUrl.includes(".m3u8") ? "HLS" : "MP4";
+                                
+                                streams.push({ 
+                                    title: `VOE (${typeStr})`, 
+                                    streamUrl: streamUrl, 
+                                    headers: { "Referer": embedUrl } 
+                                });
+                                extractedNames.push("VOE");
+                            
+                            } else {
+                                console.log(`[Lecteur] ❌ VOE : L'extracteur n'a rien trouvé sur la page finale.`);
+                            }
+                        } catch (e) {
+                            console.log(`[Lecteur] 🚨 Erreur fatale VOE : ${e}`);
+                        }
+                    }
+					
+					// --- MOTEUR VIDMOLY (NOUVEAU) ---
+                    else if (embedUrl.includes("vidmoly")) {
+                        console.log(`[Lecteur] 🕵️ Extraction Vidmoly en cours sur : ${embedUrl}`);
+                        try {
+                            // Vidmoly bloque parfois les .net/.to, il vaut mieux utiliser leur domaine de secours
+                            let fixedVidUrl = embedUrl.replace(/vidmoly\.(to|me|net|ru|is)/i, "vidmoly.biz");
+                            const vidRes = await fetchv2(fixedVidUrl, { "Referer": "https://vidmoly.biz/" }, "GET");
+                            let finalHtml = await vidRes.text();
+                            
+                            // Décompression du script si nécessaire
+                            if (typeof unpack === 'function' && finalHtml.includes('eval(function')) {
+                                finalHtml = unpack(finalHtml);
+                            }
+                            
+                            const fileMatch = finalHtml.match(/file\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || 
+                                              finalHtml.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
+                                              
+                            if (fileMatch) {
+                                const typeStr = fileMatch[1].includes(".m3u8") ? "HLS" : "MP4";
+                                streams.push({ 
+                                    title: `Vidmoly (${typeStr})`, 
+                                    streamUrl: fileMatch[1], 
+                                    headers: { "Referer": "https://vidmoly.biz/" } 
+                                });
+                                extractedNames.push("Vidmoly");
+                            }
+                        } catch (e) {
+                            console.log(`[Lecteur] 🚨 Erreur Vidmoly : ${e}`);
+                        }
+                    }
+                    // --- MOTEUR DAISUKI (API JSON AVEC COUPE-CIRCUIT) ---
                     else if (embedUrl.includes("daisukianime") || embedUrl.includes("mytv")) {
-                        console.log(`[Lecteur] 🕵️ Extraction Daisuki API en cours...`);
+                        console.log(`[Lecteur] 🕵️ Extraction Daisuki en cours sur : ${embedUrl}`);
                         try {
                             const dIdMatch = embedUrl.match(/id=([^&]+)/i);
                             if (dIdMatch && dIdMatch[1]) {
                                 const videoId = dIdMatch[1];
                                 const apiUrl = `https://cdn2.daisukianime.xyz/sib/${videoId}?epid=null`;
-                                const req = await fetchv2(apiUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" });
+                                
+                                // 🔥 Coupe-circuit : 4 secondes maximum !
+                                const req = await fetchWithTimeout(apiUrl, { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" }, "GET", null, false, "utf-8", 5000);
                                 const data = JSON.parse(await req.text());
 
                                 if (data && data.sources && data.sources.length > 0) {
@@ -322,7 +407,8 @@ async function extractStreamUrl(url) {
                                     }
                                 }
                             } else {
-                                const req = await fetchv2(embedUrl);
+                                // 🔥 Coupe-circuit : 4 secondes maximum !
+                                const req = await fetchWithTimeout(embedUrl, {}, "GET", null, false, "utf-8", 4000);
                                 const daiHtml = await req.text();
                                 const mediaMatch = daiHtml.match(/source\s*:\s*["']([^"']+)["']/i) ||
                                                    daiHtml.match(/file\s*:\s*["']([^"']+)["']/i) ||
@@ -339,7 +425,7 @@ async function extractStreamUrl(url) {
                                 }
                             }
                         } catch (e) {
-                            console.log(`[Lecteur] 🚨 Erreur API Daisuki : ${e}`);
+                            console.log(`[Lecteur] 🚨 Erreur/Timeout Daisuki : L'extracteur est passé à la suite.`);
                         }
                     } else {
                         console.log(`[Lecteur] ❌ Serveur inconnu ou non supporté : ${embedUrl}`);
@@ -360,7 +446,8 @@ async function extractStreamUrl(url) {
 
         let safeStreams = streams.filter(s => 
             s.streamUrl.includes('.mp4') || 
-            s.streamUrl.includes('.m3u8')
+            s.streamUrl.includes('.m3u8') ||
+            s.streamUrl.includes('token=') // Parfois VOE a des liens avec token
         );
         let uniqueStreams = [];
         let seenUrls = new Set();
@@ -393,5 +480,67 @@ async function extractStreamUrl(url) {
     } catch (e) {
         console.log(`[Lecteur] 🚨 Erreur : ${e}`);
         return JSON.stringify({ type: "none" });
+    }
+}
+
+// ==========================================
+// 🛠️ DÉCRYPTEURS UTILITAIRES
+// ==========================================
+
+// Décodeur officiel pour les liens de l'hébergeur VOE (Version Universelle Sans Buffer)
+function voeExtractor(html) {
+    try {
+        console.log("[VOE Extractor] 🔍 Début de l'analyse du code source...");
+        
+        // Étape 1 : Chercher la balise script cachée
+        const jsonScriptMatch = html.match(/<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/i);
+        
+        if (!jsonScriptMatch) {
+            console.log("[VOE Extractor] ❌ Échec : Balise <script type='application/json'> introuvable.");
+            return null;
+        }
+        
+        console.log("[VOE Extractor] 🔓 Script JSON trouvé ! Tentative de décodage...");
+        
+        // Étape 2 : Décryptage de la chaîne
+        let data = JSON.parse(jsonScriptMatch[1].trim());
+        let step1 = data[0].replace(/[a-zA-Z]/g, c => String.fromCharCode((c <= "Z" ? 90 : 122) >= (c = c.charCodeAt(0) + 13) ? c : c - 26));
+        let step2 = step1; 
+        ["@$", "^^", "~@", "%?", "*~", "!!", "#&"].forEach(pat => step2 = step2.split(pat).join(""));
+        
+        // 🔥 NOUVEAU DÉCODEUR BASE64 UNIVERSEL (Aucun atob ni Buffer requis)
+        const safeAtob = (b64) => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+            let str = String(b64).replace(/=+$/, '');
+            let output = '';
+            for (let bc = 0, bs, buffer, idx = 0; buffer = str.charAt(idx++); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & bs >> (-2 * bc & 6)) : 0) {
+                buffer = chars.indexOf(buffer);
+            }
+            return output;
+        };
+        
+        let step3 = safeAtob(step2);
+        let step4 = step3.split("").map((c) => String.fromCharCode(c.charCodeAt(0) - 3)).join("");
+        let step5 = step4.split("").reverse().join("");
+        let step6 = safeAtob(step5);
+        
+        // Étape 3 : Lecture du résultat
+        let result = JSON.parse(step6);
+        console.log("[VOE Extractor] ✅ JSON décodé avec succès !");
+        
+        // Étape 4 : Extraction du lien final
+        let finalUrl = result.direct_access_url || (result.source && result.source.find(s => s.direct_access_url)?.direct_access_url) || null;
+        
+        if (finalUrl) {
+            console.log("[VOE Extractor] 🎯 Succès ! Lien trouvé : " + finalUrl);
+        } else {
+            console.log("[VOE Extractor] ❌ Échec : Le JSON a été décodé, mais aucun lien final n'a été trouvé.");
+        }
+        
+        return finalUrl;
+        
+    } catch (e) { 
+        console.log("[VOE Extractor] 🚨 Erreur de calcul : " + e.message);
+        return null; 
     }
 }
