@@ -1,5 +1,5 @@
 // ==========================================
-// ⚙️ MODULE SORA — ANIME-KAMI.COM (Supabase Edition)
+// ⚙️ MODULE SORA — ANIME-KAMI.COM (Supabase + Vitesse Max + Sibnet Pro)
 // ==========================================
 
 const BASE_URL = "https://anime-kami.com";
@@ -62,7 +62,6 @@ async function searchResults(keyword) {
 
         console.log(`[Anime-Kami] ✅ ${results.length} résultats trouvés.`);
         
-        // 📡 Log Supabase (Recherche)
         sendSupabaseLog("Anime-Kami", "SEARCH", { 
             keyword: keyword, 
             results_count: results.length,
@@ -79,8 +78,6 @@ async function searchResults(keyword) {
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
     console.log(`[Anime-Kami] 📖 Chargement des détails pour : ${url}`);
-    
-    // 📡 Log Supabase (Détails)
     sendSupabaseLog("Anime-Kami", "DETAILS", { anime_url: url });
 
     try {
@@ -175,16 +172,7 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- UTILITAIRE : Fecth avec Timeout (Coupe-circuit) ---
-// Si un serveur met plus de 'timeoutMs' à répondre, il est ignoré.
-async function fetchWithTimeout(url, options, method = "GET", payload = null, raw = false, encoding = "utf-8", timeoutMs = 5000) {
-    return Promise.race([
-        fetchv2(url, options, method, payload, raw, encoding),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout dépassé")), timeoutMs))
-    ]);
-}
-
-// --- 4. LECTEUR (Version Ultra-Rapide en Parallèle) ---
+// --- 4. LECTEUR (Version Parallèle Rapide avec Promise.all) ---
 async function extractStreamUrl(url) {
     console.log(`[Anime-Kami] 🎬 Analyse du lecteur pour : ${url}`);
     try {
@@ -221,8 +209,8 @@ async function extractStreamUrl(url) {
         let failedLinks = []; 
         let serverTimings = [];
 
-        // 🚀 Lancement de toutes les requêtes EN MÊME TEMPS
-        const promises = serversToProcess.map(async (server) => {
+        // 🚀 Lancement de TOUTES les requêtes en même temps (Parallèle)
+        const serverPromises = serversToProcess.map(async (server) => {
             const serverUrl = server.server_url;
             const serverName = server.server_name || "Serveur " + server.serverKey;
             const quality = server.quality || "720";
@@ -233,11 +221,8 @@ async function extractStreamUrl(url) {
             let success = false;
 
             try {
-                // On ignore manuellement le serveur "CDN" ou "CDN3" s'ils sont définitivement morts
-                // if (serverName.includes("CDN")) throw new Error("Serveur banni");
-
                 if (serverUrl.includes("sendvid")) {
-                    const req = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8", 5000);
+                    const req = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8");
                     const html = await req.text();
                     const mp4Match = html.match(/<source[^>]+src=["']([^"']+\.mp4)["']/i) || html.match(/video_source\s*=\s*["']([^"']+)["']/i);
                     if (mp4Match) {
@@ -246,24 +231,39 @@ async function extractStreamUrl(url) {
                         success = true;
                     }
 
-                } else if (serverUrl.includes("sibnet.ru")) {
-                    const req = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, true, "windows-1251", 5000);
-                    const html = await req.text();
-                    const srcMatch = html.match(/src:\s*["'](\/v\/[^"']+\.mp4)["']/i);
-                    if (srcMatch) {
-                        let streamUrl = "https://video.sibnet.ru" + srcMatch[1];
+                } else if (serverUrl.includes("sibnet")) {
+                    // 🟢 TON EXTRACTEUR SIBNET AMÉLIORÉ
+                    const req = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, true, "windows-1251");
+                    const sibHtml = await req.text();
+                    
+                    const mp4Match = sibHtml.match(/src:\s*["'](\/v\/[^"']+\.mp4)["']/i) || 
+                                     sibHtml.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i);
+                    
+                    if (mp4Match) {
+                        let streamUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
                         try {
-                            const redirectReq = await fetchWithTimeout(streamUrl, { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" }, "HEAD", null, false, "utf-8", 3000); 
-                            if (redirectReq && redirectReq.url && redirectReq.url !== streamUrl) streamUrl = redirectReq.url;
+                            const redirectReq = await fetchv2(streamUrl, {
+                                "Referer": serverUrl,
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                            }, "HEAD", null, false, "utf-8");
+                            
+                            if (redirectReq && redirectReq.url && redirectReq.url !== streamUrl) {
+                                streamUrl = redirectReq.url;
+                            }
                         } catch(e) {}
-                        streams.push({ title: fullName + " (" + quality + "p)", streamUrl: streamUrl, headers: { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" } });
+
+                        streams.push({ 
+                            title: fullName + " (" + quality + "p)", 
+                            streamUrl: streamUrl, 
+                            headers: { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" } 
+                        });
                         extractedNames.push(fullName);
                         success = true;
                     }
 
                 } else if (serverUrl.includes("vidmoly")) {
                     let fixedVidUrl = serverUrl.replace(/vidmoly\.(to|me|net|ru|is)/i, "vidmoly.biz");
-                    const vidRes = await fetchWithTimeout(fixedVidUrl, { "Referer": "https://vidmoly.biz/" }, "GET", null, false, "utf-8", 5000);
+                    const vidRes = await fetchv2(fixedVidUrl, { "Referer": "https://vidmoly.biz/" }, "GET", null, false, "utf-8");
                     let finalHtml = await vidRes.text();
                     if (typeof unpack === 'function' && finalHtml.includes('eval(function')) finalHtml = unpack(finalHtml);
                     const fileMatch = finalHtml.match(/file\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || finalHtml.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
@@ -274,7 +274,7 @@ async function extractStreamUrl(url) {
                     }
 
                 } else if (serverUrl.includes("voe")) {
-                    const voeRes = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8", 5000);
+                    const voeRes = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8");
                     const streamUrl = voeExtractor(await voeRes.text());
                     if (streamUrl) {
                         streams.push({ title: fullName + " (" + quality + "p)", streamUrl: streamUrl, headers: { "Referer": serverUrl } });
@@ -283,7 +283,7 @@ async function extractStreamUrl(url) {
                     }
 
                 } else if (serverUrl.includes("dood") || serverUrl.includes("doply") || serverUrl.includes("myvidplay")) {
-                    let res = await fetchWithTimeout(serverUrl, { headers: { "Referer": BASE_URL + "/" } }, "GET", null, false, "utf-8", 5000);
+                    let res = await fetchv2(serverUrl, { headers: { "Referer": BASE_URL + "/" } }, "GET", null, false, "utf-8");
                     if (res) {
                         let html = await res.text();
                         const passMd5Match = html.match(/\/pass_md5\/([^"']+)/i);
@@ -291,7 +291,7 @@ async function extractStreamUrl(url) {
                         if (passMd5Match && tokenMatch) {
                             const domain = serverUrl.match(/^https?:\/\/[^\/]+/)[0]; 
                             const md5Url = domain + '/pass_md5/' + passMd5Match[1];
-                            let md5Res = await fetchWithTimeout(md5Url, { headers: { "Referer": serverUrl } }, "GET", null, false, "utf-8", 5000);
+                            let md5Res = await fetchv2(md5Url, { headers: { "Referer": serverUrl } }, "GET", null, false, "utf-8");
                             if (md5Res) {
                                 let videoBaseUrl = await md5Res.text();
                                 videoBaseUrl = videoBaseUrl.trim(); 
@@ -318,14 +318,14 @@ async function extractStreamUrl(url) {
                         else if (serverUrl.includes("embedsen.html")) apiUrl = `https://cdn2.daisukianime.xyz/azz/${vidId}?epid=null`;
 
                         if (apiUrl) {
-                            const apiRes = await fetchWithTimeout(apiUrl, { "Referer": serverUrl }, "GET", null, false, "utf-8", 5000);
+                            const apiRes = await fetchv2(apiUrl, { "Referer": serverUrl }, "GET", null, false, "utf-8");
                             const apiData = JSON.parse(await apiRes.text());
                             if (apiData.sources && apiData.sources.length > 0) directUrl = apiData.sources[0].file;
                         }
                     }
 
                     if (!directUrl) {
-                        const req = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8", 5000);
+                        const req = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8");
                         const html = await req.text();
                         const match = html.match(/sources:\s*\[\s*{\s*file:\s*['"]([^'"]+)['"]/i) 
                                    || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i) 
@@ -340,8 +340,7 @@ async function extractStreamUrl(url) {
                     }
                 }
             } catch (e) {
-                // Le serveur a fait une erreur ou a pris plus de 5 secondes (Timeout)
-                success = false;
+                console.log(`[Anime-Kami] 🚨 CRASH sur ${fullName} : ${e.message}`);
             }
 
             const serverDuration = (Date.now() - serverStartTime) / 1000;
@@ -354,8 +353,8 @@ async function extractStreamUrl(url) {
             }
         });
 
-        // ⏳ On attend que tous les serveurs aient fini (ou aient fait un timeout de 5s max)
-        await Promise.all(promises);
+        // 🟢 C'EST ICI LA MAGIE : On attend que toutes les requêtes parallèles se terminent
+        await Promise.all(serverPromises);
 
         const totalTime = (Date.now() - globalStartTime) / 1000;
         console.log(`[Anime-Kami] 🏁 Temps total d'extraction : ${totalTime.toFixed(2)}s`);
