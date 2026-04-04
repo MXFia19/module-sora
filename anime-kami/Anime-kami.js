@@ -175,10 +175,21 @@ async function extractEpisodes(url) {
     }
 }
 
-// --- 4. LECTEUR (Analyse combinée + Capture des échecs) ---
+// --- UTILITAIRE : Fecth avec Timeout (Coupe-circuit) ---
+// Si un serveur met plus de 'timeoutMs' à répondre, il est ignoré.
+async function fetchWithTimeout(url, options, method = "GET", payload = null, raw = false, encoding = "utf-8", timeoutMs = 5000) {
+    return Promise.race([
+        fetchv2(url, options, method, payload, raw, encoding),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout dépassé")), timeoutMs))
+    ]);
+}
+
+// --- 4. LECTEUR (Version Ultra-Rapide en Parallèle) ---
 async function extractStreamUrl(url) {
     console.log(`[Anime-Kami] 🎬 Analyse du lecteur pour : ${url}`);
     try {
+        const globalStartTime = Date.now();
+
         const epMatch = url.match(/[?&]ep=(\d+)/);
         const langMatch = url.match(/[?&]lang=([^&]+)/);
         const epNumber = epMatch ? parseInt(epMatch[1]) : 1;
@@ -207,70 +218,72 @@ async function extractStreamUrl(url) {
 
         const streams = [];
         let extractedNames = []; 
-        let failedLinks = []; // 🚨 NOUVEAU : Tableau pour stocker les liens non reconnus ou morts
+        let failedLinks = []; 
+        let serverTimings = [];
 
-        for (const server of serversToProcess) {
+        // 🚀 Lancement de toutes les requêtes EN MÊME TEMPS
+        const promises = serversToProcess.map(async (server) => {
             const serverUrl = server.server_url;
             const serverName = server.server_name || "Serveur " + server.serverKey;
             const quality = server.quality || "720";
             const prefix = `[${server.langTag}] `;
+            const fullName = prefix + serverName;
             
-            // On retient combien de streams on a avant de tester ce serveur
-            let streamCountBefore = streams.length; 
+            const serverStartTime = Date.now();
+            let success = false;
 
-            if (serverUrl.includes("sendvid")) {
-                try {
-                    const req = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET");
+            try {
+                // On ignore manuellement le serveur "CDN" ou "CDN3" s'ils sont définitivement morts
+                // if (serverName.includes("CDN")) throw new Error("Serveur banni");
+
+                if (serverUrl.includes("sendvid")) {
+                    const req = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8", 5000);
                     const html = await req.text();
                     const mp4Match = html.match(/<source[^>]+src=["']([^"']+\.mp4)["']/i) || html.match(/video_source\s*=\s*["']([^"']+)["']/i);
                     if (mp4Match) {
-                        streams.push({ title: prefix + serverName + " (" + quality + "p)", streamUrl: mp4Match[1], headers: { "Referer": serverUrl } });
-                        extractedNames.push(prefix + serverName);
+                        streams.push({ title: fullName + " (" + quality + "p)", streamUrl: mp4Match[1], headers: { "Referer": serverUrl } });
+                        extractedNames.push(fullName);
+                        success = true;
                     }
-                } catch (e) {}
 
-            } else if (serverUrl.includes("sibnet.ru")) {
-                try {
-                    const req = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, true, "windows-1251");
+                } else if (serverUrl.includes("sibnet.ru")) {
+                    const req = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, true, "windows-1251", 5000);
                     const html = await req.text();
                     const srcMatch = html.match(/src:\s*["'](\/v\/[^"']+\.mp4)["']/i);
                     if (srcMatch) {
                         let streamUrl = "https://video.sibnet.ru" + srcMatch[1];
                         try {
-                            const redirectReq = await fetchv2(streamUrl, { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" }, "HEAD"); 
+                            const redirectReq = await fetchWithTimeout(streamUrl, { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" }, "HEAD", null, false, "utf-8", 3000); 
                             if (redirectReq && redirectReq.url && redirectReq.url !== streamUrl) streamUrl = redirectReq.url;
                         } catch(e) {}
-                        streams.push({ title: prefix + serverName + " (" + quality + "p)", streamUrl: streamUrl, headers: { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" } });
-                        extractedNames.push(prefix + serverName);
+                        streams.push({ title: fullName + " (" + quality + "p)", streamUrl: streamUrl, headers: { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" } });
+                        extractedNames.push(fullName);
+                        success = true;
                     }
-                } catch (e) {}
 
-            } else if (serverUrl.includes("vidmoly")) {
-                try {
+                } else if (serverUrl.includes("vidmoly")) {
                     let fixedVidUrl = serverUrl.replace(/vidmoly\.(to|me|net|ru|is)/i, "vidmoly.biz");
-                    const vidRes = await fetchv2(fixedVidUrl, { "Referer": "https://vidmoly.biz/" }, "GET");
+                    const vidRes = await fetchWithTimeout(fixedVidUrl, { "Referer": "https://vidmoly.biz/" }, "GET", null, false, "utf-8", 5000);
                     let finalHtml = await vidRes.text();
                     if (typeof unpack === 'function' && finalHtml.includes('eval(function')) finalHtml = unpack(finalHtml);
                     const fileMatch = finalHtml.match(/file\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || finalHtml.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
                     if (fileMatch) {
-                        streams.push({ title: prefix + serverName + " (" + quality + "p)", streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
-                        extractedNames.push(prefix + serverName);
+                        streams.push({ title: fullName + " (" + quality + "p)", streamUrl: fileMatch[1], headers: { "Referer": "https://vidmoly.biz/" } });
+                        extractedNames.push(fullName);
+                        success = true;
                     }
-                } catch (e) {}
 
-            } else if (serverUrl.includes("voe")) {
-                try {
-                    const voeRes = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET");
+                } else if (serverUrl.includes("voe")) {
+                    const voeRes = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8", 5000);
                     const streamUrl = voeExtractor(await voeRes.text());
                     if (streamUrl) {
-                        streams.push({ title: prefix + serverName + " (" + quality + "p)", streamUrl: streamUrl, headers: { "Referer": serverUrl } });
-                        extractedNames.push(prefix + serverName);
+                        streams.push({ title: fullName + " (" + quality + "p)", streamUrl: streamUrl, headers: { "Referer": serverUrl } });
+                        extractedNames.push(fullName);
+                        success = true;
                     }
-                } catch (e) {}
 
-            } else if (serverUrl.includes("dood") || serverUrl.includes("doply") || serverUrl.includes("myvidplay")) {
-                try {
-                    let res = await fetchv2(serverUrl, { headers: { "Referer": BASE_URL + "/" }, method: "GET" });
+                } else if (serverUrl.includes("dood") || serverUrl.includes("doply") || serverUrl.includes("myvidplay")) {
+                    let res = await fetchWithTimeout(serverUrl, { headers: { "Referer": BASE_URL + "/" } }, "GET", null, false, "utf-8", 5000);
                     if (res) {
                         let html = await res.text();
                         const passMd5Match = html.match(/\/pass_md5\/([^"']+)/i);
@@ -278,7 +291,7 @@ async function extractStreamUrl(url) {
                         if (passMd5Match && tokenMatch) {
                             const domain = serverUrl.match(/^https?:\/\/[^\/]+/)[0]; 
                             const md5Url = domain + '/pass_md5/' + passMd5Match[1];
-                            let md5Res = await fetchv2(md5Url, { headers: { "Referer": serverUrl }, method: "GET" });
+                            let md5Res = await fetchWithTimeout(md5Url, { headers: { "Referer": serverUrl } }, "GET", null, false, "utf-8", 5000);
                             if (md5Res) {
                                 let videoBaseUrl = await md5Res.text();
                                 videoBaseUrl = videoBaseUrl.trim(); 
@@ -289,15 +302,13 @@ async function extractStreamUrl(url) {
                                     return result;
                                 };
                                 let finalUrl = `${videoBaseUrl}${makeId(10)}?token=${tokenMatch[1]}&expiry=${Date.now()}`;
-                                streams.push({ title: prefix + serverName + " (" + quality + "p)", streamUrl: finalUrl, headers: { "Referer": domain + "/", "User-Agent": "Mozilla/5.0" } });
-                                extractedNames.push(prefix + serverName);
+                                streams.push({ title: fullName + " (" + quality + "p)", streamUrl: finalUrl, headers: { "Referer": domain + "/", "User-Agent": "Mozilla/5.0" } });
+                                extractedNames.push(fullName);
+                                success = true;
                             }
                         }
                     }
-                } catch(e) {}
-
-            } else if (serverUrl.includes("daisukianime.xyz")) {
-                try {
+                } else if (serverUrl.includes("daisukianime.xyz")) {
                     let directUrl = null;
                     const idMatch = serverUrl.match(/[?&]id=([^&]+)/);
                     if (idMatch) {
@@ -307,14 +318,14 @@ async function extractStreamUrl(url) {
                         else if (serverUrl.includes("embedsen.html")) apiUrl = `https://cdn2.daisukianime.xyz/azz/${vidId}?epid=null`;
 
                         if (apiUrl) {
-                            const apiRes = await fetchv2(apiUrl, { "Referer": serverUrl }, "GET");
+                            const apiRes = await fetchWithTimeout(apiUrl, { "Referer": serverUrl }, "GET", null, false, "utf-8", 5000);
                             const apiData = JSON.parse(await apiRes.text());
                             if (apiData.sources && apiData.sources.length > 0) directUrl = apiData.sources[0].file;
                         }
                     }
 
                     if (!directUrl) {
-                        const req = await fetchv2(serverUrl, { "Referer": BASE_URL + "/" }, "GET");
+                        const req = await fetchWithTimeout(serverUrl, { "Referer": BASE_URL + "/" }, "GET", null, false, "utf-8", 5000);
                         const html = await req.text();
                         const match = html.match(/sources:\s*\[\s*{\s*file:\s*['"]([^'"]+)['"]/i) 
                                    || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i) 
@@ -323,23 +334,31 @@ async function extractStreamUrl(url) {
                     }
 
                     if (directUrl) {
-                        streams.push({ title: prefix + serverName + " (" + quality + "p)", streamUrl: directUrl, headers: { "Referer": serverUrl } });
-                        extractedNames.push(prefix + serverName);
+                        streams.push({ title: fullName + " (" + quality + "p)", streamUrl: directUrl, headers: { "Referer": serverUrl } });
+                        extractedNames.push(fullName);
+                        success = true;
                     }
-                } catch (e) {}
-            } else {
-                console.log(`[Lecteur] ❌ Serveur non supporté ou ignoré : ${serverUrl}`);
+                }
+            } catch (e) {
+                // Le serveur a fait une erreur ou a pris plus de 5 secondes (Timeout)
+                success = false;
             }
 
-            // 🚨 VÉRIFICATION DE L'ÉCHEC : 
-            // Si le nombre de flux n'a pas augmenté après ce bloc, c'est que l'extraction a échoué (ou n'est pas gérée)
-            if (streams.length === streamCountBefore) {
-                failedLinks.push({
-                    server_name: prefix + serverName,
-                    url: serverUrl
-                });
+            const serverDuration = (Date.now() - serverStartTime) / 1000;
+            console.log(`[Anime-Kami] ⏱️ ${fullName} => ${serverDuration.toFixed(2)}s | Succès : ${success ? "✅" : "❌"}`);
+            
+            serverTimings.push({ nom: fullName, temps_secondes: serverDuration, statut: success ? "SUCCÈS" : "ÉCHEC" });
+
+            if (!success) {
+                failedLinks.push({ server_name: fullName, url: serverUrl, timeout_seconds: serverDuration });
             }
-        }
+        });
+
+        // ⏳ On attend que tous les serveurs aient fini (ou aient fait un timeout de 5s max)
+        await Promise.all(promises);
+
+        const totalTime = (Date.now() - globalStartTime) / 1000;
+        console.log(`[Anime-Kami] 🏁 Temps total d'extraction : ${totalTime.toFixed(2)}s`);
 
         let safeStreams = streams.filter(s => s.streamUrl.includes('.mp4') || s.streamUrl.includes('.m3u8') || s.streamUrl.includes('token='));
         let uniqueStreams = [];
@@ -351,21 +370,17 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // 📡 1. Log Supabase : SUCCÈS
         sendSupabaseLog("Anime-Kami", "PLAYER", { 
             anime_url: url, 
             ep_number: epNumber,
+            temps_total_secondes: totalTime,
             streams_found: uniqueStreams.length,
-            servers: extractedNames
+            benchmarks: serverTimings
         });
 
-        // 📡 2. Log Supabase : ÉCHECS (Les liens à décrypter plus tard)
         if (failedLinks.length > 0) {
             sendSupabaseLog("Anime-Kami", "UNSUPPORTED_HOSTS", {
-                anime_url: url,
-                ep_number: epNumber,
-                failed_count: failedLinks.length,
-                failed_links: failedLinks
+                anime_url: url, ep_number: epNumber, failed_count: failedLinks.length, failed_links: failedLinks
             });
         }
 
@@ -376,6 +391,7 @@ async function extractStreamUrl(url) {
         return JSON.stringify({ type: "none" });
     }
 }
+
 // ==========================================
 // 🛠️ DÉCRYPTEURS UTILITAIRES
 // ==========================================
