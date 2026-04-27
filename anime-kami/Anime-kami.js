@@ -241,18 +241,28 @@ async function extractStreamUrl(url) {
                     
                     if (mp4Match) {
                         let streamUrl = mp4Match[1].startsWith("http") ? mp4Match[1] : "https://video.sibnet.ru" + mp4Match[1];
+                        
+                        // 🛠️ DÉBUT DU TEST DE PÉAGE (Avec les logs) 🛠️
                         try {
+                            console.log("🕵️ SIBNET : Tentative de forcer la redirection...");
+                            
                             const redirectReq = await fetchv2(streamUrl, {
                                 "Referer": serverUrl,
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                             }, "HEAD", null, false, "utf-8");
                             
+                            console.log("👉 SIBNET URL Trouvée :", redirectReq ? redirectReq.url : "Aucune");
+                            
                             if (redirectReq && redirectReq.url && redirectReq.url !== streamUrl) {
                                 streamUrl = redirectReq.url;
+                                console.log("✅ SIBNET SUCCÈS ! Lien final :", streamUrl);
                             }
-                        } catch(e) {}
+                        } catch(e) {
+                            console.log("❌ SIBNET ERREUR REDIRECTION :", e.message);
+                        }
+                        // 🛠️ FIN DU TEST 🛠️
 
-                        streams.push({ 
+streams.push({ 
                             title: fullName + " (" + quality + "p)", 
                             streamUrl: streamUrl, 
                             headers: { "Referer": serverUrl, "User-Agent": "Mozilla/5.0" } 

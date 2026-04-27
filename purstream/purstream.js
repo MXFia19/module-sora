@@ -149,6 +149,8 @@ async function searchResults(keyword) {
         
     } catch (error) {
         console.log('Fetch error in searchResults: ' + error);
+        // 🌟 Tracker d'erreur ajouté
+        sendSupabaseLog("Purstream", "ERROR", { keyword: keyword, error_message: String(error) });
         return JSON.stringify([]);
     }
 }
@@ -168,8 +170,8 @@ function slugify(title) {
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
     
-    // 📡 Log Supabase (Détails)
-    sendSupabaseLog("Purstream", "DETAILS", { anime_url: url });
+    // 📡 Log Supabase (Détails) - 🌟 media_url appliqué
+    sendSupabaseLog("Purstream", "DETAILS", { media_url: url });
 
     try {
         const domain = await getWorkingDomain();
@@ -210,6 +212,8 @@ async function extractDetails(url) {
 
     } catch (error) {
         console.log('Details error: ' + error);
+        // 🌟 Tracker d'erreur ajouté
+        sendSupabaseLog("Purstream", "ERROR", { media_url: url, error_message: String(error) });
         return JSON.stringify([{
             description: 'Error loading description',
             aliases: 'Duration: Unknown',
@@ -223,26 +227,26 @@ async function extractEpisodes(url) {
     try {
         const domain = await getWorkingDomain();
 
+        // 🌟 Nouveau Regex qui capture l'ID ET le nom complet (ex: 3914-alice-in-borderland)
+        const match = url.match(/\/(movie|serie)\/([a-z0-9-]+)/i);
+        if (!match) throw new Error("Invalid URL format");
+        
+        const type = match[1];
+        const fullId = match[2]; // "3914-alice-in-borderland"
+        const showId = fullId.split('-')[0]; // "3914" (pour interroger l'API)
+
         // 1. SI C'EST UN FILM
-        if(url.includes('movie')) {
-            const match = url.match(/\/movie\/(\d+)/);
-            if (!match) throw new Error("Invalid URL format");
-            const movieId = match[1];
-            
-            const responseText = await soraFetch(`https://api.${domain}/api/v1/media/${movieId}/sheet`, {
-                headers: {
-                    "Referer": `https://${domain}/`,
-                    "Origin": `https://${domain}`
-                }
+        if(type === 'movie') {
+            const responseText = await soraFetch(`https://api.${domain}/api/v1/media/${showId}/sheet`, {
+                headers: { "Referer": `https://${domain}/`, "Origin": `https://${domain}` }
             });
             const json = await responseText.json();
             const data = json.data.items;
 
             return JSON.stringify([
                 { 
-                    href: `${movieId}/movie`, 
-                    number: 1, 
-                    season: 1, 
+                    href: `${fullId}/movie`, // 🌟 On fait passer le nom complet au lecteur !
+                    number: 1, season: 1, 
                     title: data.title || data.name || "Film complet", 
                     image: data.posters ? (data.posters.large || data.posters.small) : "", 
                     duration: data.runtime ? data.runtime.human : ""
@@ -250,16 +254,9 @@ async function extractEpisodes(url) {
             ]);
             
         // 2. SI C'EST UNE SÉRIE / UN ANIME
-        } else if(url.includes('serie')) {
-            const match = url.match(/\/serie\/(\d+)/);
-            if (!match) throw new Error("Invalid URL format");
-            const showId = match[1];
-
+        } else if(type === 'serie') {
             const responseText = await soraFetch(`https://api.${domain}/api/v1/media/${showId}/sheet`, {
-                headers: {
-                    "Referer": `https://${domain}/`,
-                    "Origin": `https://${domain}`
-                }
+                headers: { "Referer": `https://${domain}/`, "Origin": `https://${domain}` }
             });
             const json = await responseText.json();
             const data = json.data.items;
@@ -268,10 +265,7 @@ async function extractEpisodes(url) {
             for (let i = 1; i <= data.seasons; i++) {
                 try {
                     const seasonResponseText = await soraFetch(`https://api.${domain}/api/v1/media/${showId}/season/${i}`, {
-                        headers: {
-                            "Referer": `https://${domain}/`,
-                            "Origin": `https://${domain}`
-                        }
+                        headers: { "Referer": `https://${domain}/`, "Origin": `https://${domain}` }
                     });
                     const seasonJson = await seasonResponseText.json();
                     
@@ -279,8 +273,8 @@ async function extractEpisodes(url) {
                         const seasonData = seasonJson.data.items;
                         for (const episode of seasonData.episodes) {
                             allEpisodes.push({
-                                href: `${showId}/${i}/${episode.episode}`,
-                                number: episode.episode,
+                                href: `${fullId}/${i}/${episode.episode}`, // 🌟 On fait passer le nom complet !
+                                number: parseFloat(episode.episode) || 0,
                                 season: i,
                                 title: episode.name || `Épisode ${episode.episode}`,
                                 image: episode.poster || "",
@@ -288,58 +282,72 @@ async function extractEpisodes(url) {
                             });
                         }
                     }
-                } catch (e) {
-                    console.log(`[Purstream] Erreur chargement saison ${i}:`, e);
-                }
+                } catch (e) { }
             }
+
+            allEpisodes.sort((a, b) => {
+                if (a.season !== b.season) return a.season - b.season;
+                return a.number - b.number;
+            });
+
             return JSON.stringify(allEpisodes);
-        } else {
-            throw new Error("Invalid URL format");
         }
     } catch (error) {
-        console.log('Fetch error in extractEpisodes: ' + error);
+        sendSupabaseLog("Purstream", "ERROR", { media_url: url, error_message: String(error) });
         return JSON.stringify([]);
     }   
 }
 
-// --- 4. LECTEUR (Supabase Tracker Ajouté) ---
+// --- 4. LECTEUR (Tracker Pro + Sous-titres VTT) ---
 async function extractStreamUrl(url) {
+    let finalMediaUrl = url; // Par sécurité
+
     try {
+        const startTime = Date.now();
         const domain = await getWorkingDomain();
         let streams = [];
         let extractedNames = [];
         let failedLinks = [];
-        let showId = "";
+        let subtitleUrl = "";
+
+        // url ressemble à "3914-alice-in-borderland/1/1" ou "3914-film/movie"
+        const parts = url.split('/');
+        const fullId = parts[0]; 
+        const showId = fullId.split('-')[0]; // "3914"
+
+        // 🌟 On extrait le vrai titre (Alice In Borderland)
+        let mediaTitle = showId;
+        if (fullId.includes('-')) {
+            let cleanStr = fullId.substring(fullId.indexOf('-') + 1).replace(/-/g, ' ');
+            // On met une majuscule à chaque mot
+            mediaTitle = cleanStr.replace(/\b\w/g, c => c.toUpperCase()); 
+        }
+
         let seasonNumber = "";
         let episodeNumber = "";
+        let typePath = "serie";
 
-        if (url.includes('movie')) {
-            const parts = url.split('/');
-            showId = parts[0];
-            episodeNumber = parts[1];
+        if (parts[1] === 'movie') {
+            episodeNumber = "movie";
+            typePath = "movie";
         } else {
-            const parts = url.split('/');
-            showId = parts[0];
             seasonNumber = parts[1];
             episodeNumber = parts[2];
         }
+
+        // 🌟 On fabrique l'URL finale propre pour tes logs Supabase !
+        finalMediaUrl = `https://${domain}/${typePath}/${fullId}`;
 
         let apiUrl = episodeNumber === "movie" 
             ? `https://api.${domain}/api/v1/stream/${showId}`
             : `https://api.${domain}/api/v1/stream/${showId}/episode?season=${seasonNumber}&episode=${episodeNumber}`;
 
         const response = await soraFetch(apiUrl, {
-            headers: {
-                "Referer": `https://${domain}/`,
-                "Origin": `https://${domain}`,
-            }
+            headers: { "Referer": `https://${domain}/`, "Origin": `https://${domain}` }
         });
         
         let json = {};
-        try {
-            json = await response.json();
-        } catch(e) {
-            // L'API est cassée ou injoignable
+        try { json = await response.json(); } catch(e) {
             failedLinks.push({ server_name: "API Purstream (Crash)", url: apiUrl });
         }
 
@@ -358,36 +366,75 @@ async function extractStreamUrl(url) {
                     }
                 });
                 extractedNames.push(serverName);
+
+                // 🛑 --- EXTRACTION DES SOUS-TITRES (.VTT) --- 🛑
+                if (subtitleUrl === "" && source.stream_url.includes('.m3u8')) {
+                    try {
+                        const m3u8Res = await soraFetch(source.stream_url);
+                        const m3u8Text = await m3u8Res.text();
+
+                        const baseUrl = source.stream_url.substring(0, source.stream_url.lastIndexOf('/') + 1);
+                        const lines = m3u8Text.split('\n');
+
+                        for (const line of lines) {
+                            if (line.includes('TYPE=SUBTITLES')) {
+                                const uriMatch = line.match(/URI="([^"]+)"/);
+                                const nameMatch = line.match(/NAME="([^"]+)"/);
+                                const langMatch = line.match(/LANGUAGE="([^"]+)"/i);
+
+                                if (uriMatch) {
+                                    const uri = uriMatch[1];
+                                    const langName = nameMatch ? nameMatch[1] : (langMatch ? langMatch[1] : "Inconnu");
+                                    const folderPath = uri.split('/')[0]; 
+                                    const vttUrl = `${baseUrl}${folderPath}/subtitle.vtt`;
+
+                                    const isFrench = langName.toLowerCase().includes("fra") || langName.toLowerCase().includes("fre");
+                                    const isForced = langName.toLowerCase().includes("forced");
+
+                                    if (subtitleUrl === "") {
+                                        subtitleUrl = vttUrl; 
+                                    } else if (isFrench && !isForced) {
+                                        subtitleUrl = vttUrl;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                }
             }
         }
 
-        // 🚨 Capture de l'erreur si aucun flux n'est trouvé
         if (streams.length === 0 && failedLinks.length === 0) {
             failedLinks.push({ server_name: "API Purstream (Vidéo Supprimée/Vide)", url: apiUrl });
         }
 
-        // 📡 Log Supabase : SUCCÈS
+        // 📡 Log Supabase (Parfaitement formaté)
         sendSupabaseLog("Purstream", "PLAYER", { 
-            anime_url: url, 
+            media_title: mediaTitle, // 🏷️ "Alice In Borderland"
+            media_url: finalMediaUrl, // 🌟 "https://purstream.me/serie/3914-alice-in-borderland"
+            season_number: seasonNumber,
             ep_number: episodeNumber,
             streams_found: streams.length,
-            servers: extractedNames
+            subtitles_found: subtitleUrl !== "",
+            execution_time_ms: Date.now() - startTime,
+            servers: streams.map(s => ({ nom: s.title, lien: s.streamUrl }))
         });
 
-        // 📡 Log Supabase : ÉCHECS (Les liens morts ou API Vide)
         if (failedLinks.length > 0) {
             sendSupabaseLog("Purstream", "UNSUPPORTED_HOSTS", {
-                anime_url: url,
+                media_title: mediaTitle,
+                media_url: finalMediaUrl,
+                season_number: seasonNumber,
                 ep_number: episodeNumber,
                 failed_count: failedLinks.length,
                 failed_links: failedLinks
             });
         }
 
-        return JSON.stringify({ streams, subtitles: "" });
+        return JSON.stringify({ streams, subtitles: subtitleUrl });
 
     } catch (error) {
-        console.log('Fetch error in extractStreamUrl: ' + error);
+        sendSupabaseLog("Purstream", "ERROR", { media_url: finalMediaUrl, error_message: String(error) });
         return JSON.stringify({ streams: [], subtitles: "" });
     }
 }

@@ -2,8 +2,8 @@
 // ⚙️ MODULE SORA — LIVEWATCH TV (Global Direct - FIX)
 // ==========================================
 
-const API_BASE = "https://livewatch.sbs/api";
-const SITE_URL = "https://livewatch.sbs";
+const API_BASE = "https://livewatch.top/api";
+const SITE_URL = "https://livewatch.top";
 
 // ==========================================
 // 🗄️ TRACKER SUPABASE (Fire & Forget)

@@ -1,20 +1,24 @@
 {
     "sourceName": "Nakastream",
-    "iconUrl": "https://nakastream.tv/favicon.ico",
+    "iconUrl": "https://gitlab.com/mxfia19-group/module-sora/-/raw/main/Nakastream/w5bf88w.png",
     "author": {
         "name": "MXFia19",
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.0",
+    "version": "1.0.3",
     "language": "French",
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://nakastream.tv/",
     "searchBaseUrl": "https://nakastream.tv/api/v1/browse/catalog?search=",
-    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/Nakastream/nakastream.js",
-    "type": "anime/shows/movies",
+    "scriptUrl": "https://gitlab.com/mxfia19-group/module-sora/-/raw/main/Nakastream/nakastream.js?ref_type=heads",
+    "type": "shows/movies",
     "downloadSupport": true,
     "asyncJS": true,
-    "softsub": true
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "plus besoin du token + fix subtitles",
+    "settings": true
 }

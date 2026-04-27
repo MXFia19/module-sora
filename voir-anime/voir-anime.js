@@ -247,15 +247,29 @@ async function extractStreamUrl(url) {
                 try {
                     const stRes = await fetchv2(embedUrl);
                     const stHtml = await stRes.text();
-                    const robotLinkMatch = stHtml.match(/document\.getElementById\(['"]robotlink['"]\)\.innerHTML\s*=\s*[^;]+\(['"]([^'"]+)['"]\)/i);
+                    
+                    // 1. On isole UNIQUEMENT la ligne de code JavaScript qui contient 'robotlink'
+                    const robotLineMatch = stHtml.match(/document\.getElementById\(['"]robotlink['"]\).*?;/);
 
-                    if (robotLinkMatch) {
-                        let tokenString = robotLinkMatch[1];
-                        let videoPath = tokenString.includes('/get_video') ? tokenString.substring(tokenString.indexOf('/get_video')) : (tokenString.startsWith('/') ? tokenString : '/' + tokenString);
-                        let directUrl = "https://streamtape.com" + videoPath + "&dl=1";
-                        streams.push({ title: "Streamtape (Direct)", streamUrl: directUrl, headers: { "Referer": "https://streamtape.com/", "User-Agent": "Mozilla/5.0" } });
+                    if (robotLineMatch) {
+                        // 2. On extrait brutalement les paramètres secrets (qui commencent par "id=")
+                        // Le [^'"]+ veut dire : "Prends tout jusqu'au prochain guillemet"
+                        const paramsMatch = robotLineMatch[0].match(/(id=[^'"]+)/);
+                        
+                        if (paramsMatch) {
+                            // 3. On reconstruit le lien parfait à la main, en contournant leur protection !
+                            const directUrl = "https://streamtape.com/get_video?" + paramsMatch[1] + "&stream=1";
+                            
+                            streams.push({ 
+                                title: "Streamtape", 
+                                streamUrl: directUrl, 
+                                headers: { "Referer": "https://streamtape.com/", "User-Agent": "Mozilla/5.0" } 
+                            });
+                        } else {
+                            failedLinks.push({ server_name: "Streamtape (Paramètres Introuvables)", url: embedUrl });
+                        }
                     } else {
-                        failedLinks.push({ server_name: "Streamtape (Token Introuvable)", url: embedUrl });
+                        failedLinks.push({ server_name: "Streamtape (Robotlink Introuvable)", url: embedUrl });
                     }
                 } catch (e) { failedLinks.push({ server_name: "Streamtape (Crash)", url: embedUrl }); }
             }

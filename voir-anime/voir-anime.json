@@ -1,20 +1,23 @@
 {
     "sourceName": "VoirAnime",
-    "iconUrl": "https://r2.fakecrime.bio/uploads/f967639c-f323-42e6-b578-551e8f0c2aa8.jpg",
+    "iconUrl": "https://gitlab.com/mxfia19-group/module-sora/-/raw/main/voir-anime/IMG_9709.jpg",
     "author": {
         "name": "MXFia19",
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.0",
+    "version": "1.0.2",
     "language": "French",
     "streamType": "MP4",
     "quality": "1080p",
     "baseUrl": "https://voir-anime.to",
     "searchBaseUrl": "https://voir-anime.to/?s=",
-    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/refs/heads/main/voir-anime/voir-anime.js",
+    "scriptUrl": "https://gitlab.com/mxfia19-group/module-sora/-/raw/main/voir-anime/voir-anime.js?ref_type=heads",
     "type": "anime",
     "downloadSupport": true,
     "asyncJS": true,
-    "softsub": false
+    "softsub": false,
+    "changelog": "fix streamtape",
+    "supportsSora": true,
+    "supportsLuna": true
 }

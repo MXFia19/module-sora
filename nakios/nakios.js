@@ -45,6 +45,14 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
 // ⚙️ LOGIQUE DU MODULE NAKIOS
 // ==========================================
 
+function slugify(text) {
+    return text.toString().toLowerCase()
+        .normalize("NFKD").replace(/[\u0300-\u036f]/g, "") // Enlève les accents
+        .replace(/[^a-z0-9 -]/g, "") // Garde juste les lettres et chiffres
+        .replace(/\s+/g, '-') // Remplace les espaces par des tirets
+        .replace(/-+/g, '-').trim();
+}
+
 async function initUrls() {
     if (BASE_URL !== "") return;
 
@@ -79,15 +87,15 @@ async function initUrls() {
 
     } catch (e) {
         console.log(`[Nakios] Échec de la recherche : ${e.message}. Utilisation du secours.`);
-        BASE_URL = "https://nakios.site";
+        BASE_URL = "https://nakios.fit";
     }
 
     try {
         HOSTNAME = BASE_URL.replace(/^https?:\/\//, ''); 
         API_URL = `https://api.${HOSTNAME}`;
     } catch(e) {
-        HOSTNAME = "nakios.site";
-        API_URL = "https://api.nakios.site";
+        HOSTNAME = "nakios.fit";
+        API_URL = "https://api.nakios.fit";
     }
 }
 
@@ -126,7 +134,7 @@ async function searchResults(keyword) {
                 return {
                     title: title,
                     image: image,
-                    href: `${BASE_URL}/${type}/${id}`
+                    href: `${BASE_URL}/${type}/${id}-${slugify(title)}` // 🌟 NOUVEAU : Slugify
                 };
             }
         }).filter(Boolean);
@@ -145,16 +153,18 @@ async function searchResults(keyword) {
 
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
-    sendSupabaseLog("Nakios", "DETAILS", { anime_url: url });
+    sendSupabaseLog("Nakios", "DETAILS", { media_url: url }); // 🌟 Standardisé
 
     try {
         await initUrls();
         
         const isMovie = url.includes('movie');
-        const match = url.match(/(?:movie|series|tv)\/(\d+)/);
+        // 🌟 Regex mis à jour pour accepter les IDs avec du texte
+        const match = url.match(/(?:movie|series|tv)\/([a-z0-9-]+)/i);
         if (!match) throw new Error("Invalid URL format");
 
-        const id = match[1];
+        const fullId = match[1];
+        const id = fullId.split('-')[0]; // On extrait juste l'ID numérique
         
         const tmdbUrl = isMovie 
             ? `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`
@@ -203,13 +213,16 @@ async function extractEpisodes(url) {
         await initUrls();
         
         const isMovie = url.includes('movie');
-        const match = url.match(/(?:movie|series|tv)\/(\d+)/);
+        // 🌟 Regex mis à jour pour récupérer le titre
+        const match = url.match(/(?:movie|series|tv)\/([a-z0-9-]+)/i);
         if (!match) throw new Error("Invalid URL format");
         
-        const id = match[1];
+        const fullId = match[1]; // Ex: "123-le-film"
+        const id = fullId.split('-')[0];
 
         if (isMovie) {
-            return JSON.stringify([{ href: `${id}/movie`, number: 1, title: "Film Complet" }]);
+            // 🌟 On fait passer le nom complet au lecteur
+            return JSON.stringify([{ href: `${fullId}/movie`, number: 1, title: "Film Complet" }]);
         } else {
             const seriesUrl = `${API_URL}/api/series/${id}`;
             const responseText = await soraFetch(seriesUrl, {
@@ -236,7 +249,7 @@ async function extractEpisodes(url) {
                     
                     if (episodesList && episodesList.length) {
                         const episodes = episodesList.map(episode => ({
-                            href: `${id}/${seasonNumber}/${episode.episode_number}`,
+                            href: `${fullId}/${seasonNumber}/${episode.episode_number}`, // 🌟 On fait passer le nom complet !
                             number: episode.episode_number,
                             title: episode.name || `Épisode ${episode.episode_number}`
                         }));
@@ -251,25 +264,40 @@ async function extractEpisodes(url) {
     }   
 }
 
-// --- 4. EXTRACTION VIDÉO (L'Ultime Version : Proxy + Anti-CORS + Tracker Pro) ---
+// --- 4. EXTRACTION VIDÉO (L'Ultime Version : Proxy + Anti-CORS + Subs + Tracker Pro) ---
 async function extractStreamUrl(url) {
+    let finalMediaUrl = url; 
+
     try {
+        const startTime = Date.now();
         await initUrls();
 
         let streams = [];
         let failedLinks = [];
-        let showId = "";
+        let subtitleUrl = ""; // 🌟 PRÉPARATION DE LA VARIABLE SOUS-TITRES
         let seasonNumber = "1";
         let episodeNumber = "1";
         let isMovie = url.includes('movie');
 
         const parts = url.split('/');
-        showId = parts[0]; 
+        const fullId = parts[0]; 
+        const showId = fullId.split('-')[0]; 
+
+        let mediaTitle = showId;
+        if (fullId.includes('-')) {
+            let cleanStr = fullId.substring(fullId.indexOf('-') + 1).replace(/-/g, ' ');
+            mediaTitle = cleanStr.replace(/\b\w/g, c => c.toUpperCase()); 
+        }
 
         if (!isMovie) {
             seasonNumber = parts[1] || "1";   
             episodeNumber = parts[2] || "1";  
+        } else {
+            episodeNumber = "movie";
         }
+
+        let typePath = isMovie ? "movie" : "series";
+        finalMediaUrl = `${BASE_URL}/${typePath}/${fullId}`;
 
         let apiUrl = isMovie 
             ? `${API_URL}/api/sources/movie/${showId}` 
@@ -282,10 +310,20 @@ async function extractStreamUrl(url) {
         let data = {};
         try {
             data = await response.json();
+            
+            // 🌟 1. Vérification si Nakios fournit les sous-titres directement dans le JSON
+            if (data.subtitles && Array.isArray(data.subtitles)) {
+                for (let sub of data.subtitles) {
+                    if (sub.url) {
+                        let lang = (sub.lang || sub.language || "").toLowerCase();
+                        if (subtitleUrl === "" || lang.includes("fr") || lang.includes("fre")) {
+                            subtitleUrl = sub.url.startsWith('/') ? BASE_URL + sub.url : sub.url;
+                        }
+                    }
+                }
+            }
         } catch(e) {
             failedLinks.push({ server_name: "API Nakios (Crash)", url: apiUrl });
-            sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", { media_path: url, type: isMovie ? "FILM" : "SERIE", failed_reason: "Crash API" });
-            return JSON.stringify({ streams: [], subtitles: "" });
         }
         
         let rawStreams = [];
@@ -339,23 +377,18 @@ async function extractStreamUrl(url) {
         for (let item of uniqueStreams) {
             let finalUrl = item.url;
             
-            // 🟢 NOUVEAUTÉ : Bypass du Proxy (Extraction du lien direct)
             if (finalUrl.includes('/proxy?url=')) {
                 try {
-                    // On extrait ce qu'il y a après "?url="
                     const matchProxy = finalUrl.match(/[?&]url=([^&]+)/);
                     if (matchProxy && matchProxy[1]) {
-                        // On décode le lien (transforme les %3A en ":" et les %2F en "/")
                         finalUrl = decodeURIComponent(matchProxy[1]);
                     }
                 } catch(e) {}
             } 
-            // Si c'est un autre lien interne, on met juste l'API devant
             else if (finalUrl.startsWith('/')) {
                 finalUrl = `${API_URL}${finalUrl}`;
             }
 
-           // On utilise le User-Agent exact de ton dump réseau pour tromper les sécurités
             let streamHeaders = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
                 "Origin": BASE_URL,
@@ -364,13 +397,10 @@ async function extractStreamUrl(url) {
 
             let valLower = finalUrl.toLowerCase();
 
-            // 🛡️ ANTI-CORS SPÉCIFIQUE : XALAFLIX
-            // Tes logs ont prouvé qu'ils exigent purstream.art comme point d'entrée
             if (valLower.includes('xalaflix')) {
                 streamHeaders["Origin"] = "https://purstream.art";
                 streamHeaders["Referer"] = "https://purstream.art/";
             }
-            // 🛡️ ANTI-CORS CLASSIQUE : Darkibox, Fastflux, Fsvid, Vidzy
             else if (valLower.includes('fsvid') || valLower.includes('vidzy') || valLower.includes('darkibox') || valLower.includes('fastflux')) {
                 try {
                     const urlObj = new URL(finalUrl);
@@ -384,39 +414,81 @@ async function extractStreamUrl(url) {
                 streamUrl: finalUrl,
                 headers: streamHeaders
             });
+
+            // 🛑 2. EXTRACTION DES SOUS-TITRES DEPUIS LES FICHIERS .M3U8 🛑
+            if (subtitleUrl === "" && finalUrl.includes('.m3u8')) {
+                try {
+                    const m3u8Res = await soraFetch(finalUrl, { headers: streamHeaders });
+                    const m3u8Text = await m3u8Res.text();
+
+                    const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf('/') + 1);
+                    const lines = m3u8Text.split('\n');
+
+                    for (const line of lines) {
+                        if (line.includes('TYPE=SUBTITLES')) {
+                            const uriMatch = line.match(/URI="([^"]+)"/);
+                            const nameMatch = line.match(/NAME="([^"]+)"/);
+                            const langMatch = line.match(/LANGUAGE="([^"]+)"/i);
+
+                            if (uriMatch) {
+                                let uri = uriMatch[1];
+                                let vttUrl = uri.startsWith('http') ? uri : `${baseUrl}${uri}`;
+                                
+                                // Astuce pour les dossiers de type Xalaflix/Purstream
+                                if (!uri.includes('.') && !uri.startsWith('http')) {
+                                    vttUrl = `${baseUrl}${uri.replace(/\/$/, '')}/subtitle.vtt`;
+                                }
+
+                                let langName = nameMatch ? nameMatch[1] : (langMatch ? langMatch[1] : "Inconnu");
+                                let isFrench = langName.toLowerCase().includes("fra") || langName.toLowerCase().includes("fre") || langName.toLowerCase().includes("vf");
+                                let isForced = langName.toLowerCase().includes("forced");
+
+                                if (subtitleUrl === "") {
+                                    subtitleUrl = vttUrl; 
+                                } else if (isFrench && !isForced) {
+                                    subtitleUrl = vttUrl;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { }
+            }
         }
 
-        if (streams.length === 0) {
+        if (streams.length === 0 && failedLinks.length === 0) {
             failedLinks.push({ server_name: "API Nakios (Vide)", url: apiUrl });
         }
 
-        // 📡 Log Supabase : SUCCÈS (Nouveau format Pro)
+        // 📡 Log Supabase 
         sendSupabaseLog("Nakios", "PLAYER", { 
-            media_path: url, 
+            media_title: mediaTitle, 
+            media_url: finalMediaUrl, 
             type: isMovie ? "FILM" : "SERIE",
-            saison: isMovie ? "N/A" : seasonNumber,
-            episode: episodeNumber,
+            season_number: isMovie ? "N/A" : seasonNumber,
+            ep_number: episodeNumber,
             streams_found: streams.length,
-            servers: streams.map(s => ({
-                nom: s.title,
-                lien: s.streamUrl
-            }))
+            subtitles_found: subtitleUrl !== "", // 🌟 STATISTIQUE SOUS-TITRES AJOUTÉE
+            execution_time_ms: Date.now() - startTime,
+            servers: streams.map(s => ({ nom: s.title, lien: s.streamUrl }))
         });
 
         if (failedLinks.length > 0) {
             sendSupabaseLog("Nakios", "UNSUPPORTED_HOSTS", {
-                media_path: url,
+                media_title: mediaTitle,
+                media_url: finalMediaUrl,
                 type: isMovie ? "FILM" : "SERIE",
-                saison: isMovie ? "N/A" : seasonNumber,
-                episode: episodeNumber,
+                season_number: isMovie ? "N/A" : seasonNumber,
+                ep_number: episodeNumber,
                 failed_count: failedLinks.length,
                 failed_links: failedLinks
             });
         }
 
-        return JSON.stringify({ streams, subtitles: "" });
+        // 🌟 RETOUR AVEC LES SOUS-TITRES
+        return JSON.stringify({ streams, subtitles: subtitleUrl });
 
     } catch (error) {
+        sendSupabaseLog("Nakios", "ERROR", { media_url: finalMediaUrl, error_message: String(error) });
         return JSON.stringify({ streams: [], subtitles: "" });
     }
 }
