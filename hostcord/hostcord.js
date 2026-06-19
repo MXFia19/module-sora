@@ -1,5 +1,5 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (FIX MOBILE + CRACK)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX MOBILE + PARAMÈTRES STRICTS)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
@@ -112,7 +112,7 @@ const SHA512 = function(str) {
 };
 
 // ==========================================
-// 🛠️ HELPERS (Analyse des URLs personnalisées)
+// 🛠️ HELPERS
 // ==========================================
 function parseQuery(queryString) {
     const params = {};
@@ -128,10 +128,9 @@ function parseQuery(queryString) {
 }
 
 // ==========================================
-// 🔍 1. RECHERCHE (Via TMDB)
+// 🔍 1. RECHERCHE
 // ==========================================
 async function searchResults(keyword) {
-    console.log(`[ZXC] 🔍 Recherche sur TMDB : "${keyword}"`);
     try {
         const url = `https://api.themoviedb.org/3/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(keyword)}&page=1&include_adult=false&language=fr-FR`;
         const res = await soraFetch(url);
@@ -142,94 +141,86 @@ async function searchResults(keyword) {
 
         for (let item of (data.results || [])) {
             if (item.media_type !== 'movie' && item.media_type !== 'tv') continue;
-
             const title = item.title || item.name || "Titre inconnu";
             const year = (item.release_date || item.first_air_date || '').split('-')[0];
-            const image = item.poster_path
-                ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
-                : 'https://via.placeholder.com/500x750?text=Pas+d+image';
-
+            const image = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : 'https://via.placeholder.com/500x750?text=Pas+d+image';
+            
             const href = `zxc://${item.media_type}/${item.id}?title=${encodeURIComponent(title)}&year=${year}`;
-
-            results.push({
-                title: year ? `${title} (${year})` : title,
-                image,
-                href
-            });
+            results.push({ title: year ? `${title} (${year})` : title, image, href });
         }
-
         return JSON.stringify(results);
     } catch (e) {
-        console.error(`[ZXC] ❌ Erreur Recherche: ${e.message}`);
         return JSON.stringify([]);
     }
 }
 
 // ==========================================
-// 📖 2. DÉTAILS (Via TMDB)
+// 📖 2. DÉTAILS
 // ==========================================
 async function extractDetails(url) {
     try {
         const match = url.match(/zxc:\/\/([^/]+)\/([^?]+)/);
-        if (!match) throw new Error("URL interne invalide");
-
         const [, type, id] = match;
         const res = await soraFetch(`https://api.themoviedb.org/3/${type}/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`);
-        if (!res) throw new Error("Échec réseau TMDB");
-
         const data = JSON.parse(await res.text());
-
         return JSON.stringify([{
-            description: data.overview || "Aucune description disponible.",
+            description: data.overview || "Aucune description.",
             aliases: `Note: ${data.vote_average ? data.vote_average.toFixed(1) + '/10' : 'N/A'}`,
             airdate: `Date: ${data.release_date || data.first_air_date || 'Inconnue'}`
         }]);
     } catch (e) {
-        console.error(`[ZXC] ❌ Erreur Détails: ${e.message}`);
-        return JSON.stringify([{ description: "Erreur de chargement." }]);
+        return JSON.stringify([{ description: "Erreur." }]);
     }
 }
 
 // ==========================================
-// 📂 3. ÉPISODES (Via TMDB)
+// 📂 3. ÉPISODES (Ajout ID IMDb et Date)
 // ==========================================
 async function extractEpisodes(url) {
     try {
         const match = url.match(/zxc:\/\/([^/]+)\/([^?]+)\?(.+)/);
-        if (!match) throw new Error("URL interne invalide");
-
         const type = match[1];
         const id   = match[2];
         const params = parseQuery(match[3]);
         const title = params['title'] || "";
         const year  = params['year']  || "";
 
+        // CAS A: FILM
         if (type === 'movie') {
+            // Récupération de l'IMDb ID et Date exactes pour Icarus
+            const mRes = await soraFetch(`https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}`);
+            const mData = JSON.parse(await mRes.text());
+            const ref = mData.imdb_id || "";
+            const date = mData.release_date || "";
+
             return JSON.stringify([{
-                href: `zxc-play://movie/${id}?title=${encodeURIComponent(title)}&year=${year}`,
+                href: `zxc-play://movie/${id}?title=${encodeURIComponent(title)}&year=${year}&ref=${ref}&date=${date}`,
                 title: "Film Complet",
                 number: 1,
                 season: 1
             }]);
         }
 
+        // CAS B: SÉRIE
         const res = await soraFetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`);
-        if (!res) throw new Error("Échec réseau TMDB");
         const data = JSON.parse(await res.text());
+
+        const extRes = await soraFetch(`https://api.themoviedb.org/3/tv/${id}/external_ids?api_key=${TMDB_API_KEY}`);
+        const extData = JSON.parse(await extRes.text());
+        const ref = extData.imdb_id || "";
 
         let episodes = [];
         const seasonPromises = (data.seasons || []).map(async (season) => {
             if (season.season_number === 0) return; 
 
-            const sRes = await soraFetch(
-                `https://api.themoviedb.org/3/tv/${id}/season/${season.season_number}?api_key=${TMDB_API_KEY}&language=fr-FR`
-            );
+            const sRes = await soraFetch(`https://api.themoviedb.org/3/tv/${id}/season/${season.season_number}?api_key=${TMDB_API_KEY}&language=fr-FR`);
             if (!sRes) return;
 
             const sData = JSON.parse(await sRes.text());
             for (let ep of (sData.episodes || [])) {
+                const date = ep.air_date || "";
                 episodes.push({
-                    href: `zxc-play://tv/${id}?title=${encodeURIComponent(title)}&year=${year}&s=${season.season_number}&e=${ep.episode_number}`,
+                    href: `zxc-play://tv/${id}?title=${encodeURIComponent(title)}&year=${year}&s=${season.season_number}&e=${ep.episode_number}&ref=${ref}&date=${date}`,
                     title: ep.name || `Épisode ${ep.episode_number}`,
                     number: ep.episode_number,
                     season: season.season_number
@@ -239,27 +230,21 @@ async function extractEpisodes(url) {
 
         await Promise.all(seasonPromises);
         episodes.sort((a, b) => a.season !== b.season ? a.season - b.season : a.number - b.number);
-
         return JSON.stringify(episodes);
 
     } catch (e) {
-        console.error(`[ZXC] ❌ Erreur Épisodes: ${e.message}`);
         return JSON.stringify([]);
     }
 }
 
 // ==========================================
-// 🔓 4. LECTEUR VIDÉO (LE CRAQUAGE ZXCSTREAM)
+// 🔓 4. LECTEUR VIDÉO (CRACK ICARUS COMPLET)
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now().toString(); 
     const nc = "23432423"; 
     const textToHash = `${nc}:${t}:${mid}`;
-
-    // On utilise notre Polyfill PURE JS (aucun risque de plantage)
     const fullHashHex = SHA512(textToHash);
-
-    // Découpage à 64 caractères, exactement comme leur code
     const xt = fullHashHex.slice(0, 64);
     console.log(`[ZXC] 🪄 Jeton XT généré avec succès : ${xt}`);
     return { xt, rt: t };
@@ -278,11 +263,11 @@ async function extractStreamUrl(url) {
         const year   = params['year']  || "";
         const s      = params['s'];
         const e      = params['e'];
+        const ref    = params['ref'] || "";
+        const date   = params['date'] || "";
 
-        // --- ÉTAPE 1 : GÉNÉRATION CLÉS SECRÈTES ---
         const { xt, rt } = await generateZxcToken(mid);
 
-        // --- ÉTAPE 2 : VOLER LE 'SIG' ---
         console.log(`[ZXC] 📡 Vol du jeton 'sig' à l'API /backend/token...`);
         const tokenRes = await soraFetch(`${ZXC_BASE_URL}/backend/token`, {
             method: 'POST',
@@ -301,28 +286,36 @@ async function extractStreamUrl(url) {
         if (!sig) throw new Error("Le serveur a refusé nos jetons !");
         console.log(`[ZXC] ✅ Jeton 'sig' obtenu : ${sig}`);
 
-        // --- ÉTAPE 3 : RÉCUPÉRATION LIEN VIDÉO (ICARUS) ---
         console.log(`[ZXC] 🛸 Connexion au serveur Icarus...`);
-        let icarusUrl = `${ZXC_BASE_URL}/backend/servers/icarus?mid=${mid}&b=${type}&rt=${new_rt}&sig=${sig}&xt=${xt}&q=${encodeURIComponent(title)}&p=${year}`;
+        
+        // --- NOUVELLE URL ICARUS AVEC TOUS LES PARAMÈTRES OBLIGATOIRES ---
+        let icarusUrl = `${ZXC_BASE_URL}/backend/servers/icarus?mid=${mid}&b=${type}&rt=${new_rt}&sig=${sig}&xt=${xt}&q=${encodeURIComponent(title)}&p=${encodeURIComponent(year)}`;
+        if (date) icarusUrl += `&date=${encodeURIComponent(date)}`;
+        if (ref) icarusUrl += `&ref=${encodeURIComponent(ref)}`;
         if (type === 'tv' && s && e) {
-            icarusUrl += `&s=${s}&e=${e}`;
+            // Attention : Icarus utilise 'sx' et 'ex' pour les saisons et épisodes
+            icarusUrl += `&sx=${s}&ex=${e}`;
         }
         
         const icarusRes = await soraFetch(icarusUrl, {
             headers: { "Referer": `${ZXC_BASE_URL}/` }
         });
 
-        const icarusData = JSON.parse(await icarusRes.text());
+        const rawText = await icarusRes.text();
+        console.log(`[ZXC] 📥 Réponse Icarus brute : ${rawText}`); // LOG IMPORTANT POUR DEBUG !
         
-        // --- ÉTAPE 4 : FORMATAGE SORA ---
-        if (icarusData && icarusData.data && icarusData.data.playlist) {
+        const icarusData = JSON.parse(rawText);
+        
+        // Recherche de la vidéo dans différentes clés possibles
+        const videoUrl = icarusData?.data?.playlist || icarusData?.data?.file || icarusData?.data?.url || icarusData?.url || icarusData?.file;
+
+        if (videoUrl) {
             console.log(`[ZXC] 🎉 VICTOIRE ! Lien vidéo (M3U8) trouvé !`);
-            
             return JSON.stringify({
                 type: "servers",
                 streams: [{
                     title: "Serveur Icarus (1080p)",
-                    streamUrl: icarusData.data.playlist,
+                    streamUrl: videoUrl,
                     headers: { "Referer": `${ZXC_BASE_URL}/` }
                 }],
                 subtitles: ""
