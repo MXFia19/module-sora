@@ -1,0 +1,27 @@
+{
+  "sourceName": "ZXCStream",
+  "iconUrl": "https://img.icons8.com/fluency/512/clapperboard.png",
+  "author": {
+    "name": "MXFia19",
+    "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg"
+  },
+  "version": "1.0.0",
+  "language": "English",
+  "baseUrl": "https://embed.zxcstream.xyz",
+  "searchBaseUrl": "https://api.themoviedb.org/3/search/multi?query=",
+  "scriptUrl": "https://github.com/MXFia19/module-sora/raw/refs/heads/Test/hostcord/ZXCStream.js",
+  "type": "anime",
+  "streamType": "HLS",
+  "asyncJS": true,
+  "quality": "1080p",
+  "downloadSupport": true,
+  "softsub": true,
+  "supportsSora": true,
+  "supportsLuna": true,
+  "supportsDartotsu": true,
+  "supportsAnymex": true,
+  "supportsTsumi": true,
+  "supportsHiyoku": true,
+  "supportsShirox": true,
+  "supportsMojuru": true
+}
