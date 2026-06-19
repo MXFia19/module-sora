@@ -5,7 +5,7 @@
     "name": "MXFia19",
     "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "language": "English",
   "baseUrl": "https://embed.zxcstream.xyz",
   "searchBaseUrl": "https://api.themoviedb.org/3/search/multi?query=",
