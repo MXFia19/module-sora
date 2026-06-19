@@ -1,5 +1,5 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (FIX MOBILE + PARAMÈTRES STRICTS)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX MOBILE + EXTRACTION LINKS)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
@@ -187,7 +187,6 @@ async function extractEpisodes(url) {
 
         // CAS A: FILM
         if (type === 'movie') {
-            // Récupération de l'IMDb ID et Date exactes pour Icarus
             const mRes = await soraFetch(`https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}`);
             const mData = JSON.parse(await mRes.text());
             const ref = mData.imdb_id || "";
@@ -287,13 +286,10 @@ async function extractStreamUrl(url) {
         console.log(`[ZXC] ✅ Jeton 'sig' obtenu : ${sig}`);
 
         console.log(`[ZXC] 🛸 Connexion au serveur Icarus...`);
-        
-        // --- NOUVELLE URL ICARUS AVEC TOUS LES PARAMÈTRES OBLIGATOIRES ---
         let icarusUrl = `${ZXC_BASE_URL}/backend/servers/icarus?mid=${mid}&b=${type}&rt=${new_rt}&sig=${sig}&xt=${xt}&q=${encodeURIComponent(title)}&p=${encodeURIComponent(year)}`;
         if (date) icarusUrl += `&date=${encodeURIComponent(date)}`;
         if (ref) icarusUrl += `&ref=${encodeURIComponent(ref)}`;
         if (type === 'tv' && s && e) {
-            // Attention : Icarus utilise 'sx' et 'ex' pour les saisons et épisodes
             icarusUrl += `&sx=${s}&ex=${e}`;
         }
         
@@ -302,27 +298,64 @@ async function extractStreamUrl(url) {
         });
 
         const rawText = await icarusRes.text();
-        console.log(`[ZXC] 📥 Réponse Icarus brute : ${rawText}`); // LOG IMPORTANT POUR DEBUG !
-        
         const icarusData = JSON.parse(rawText);
         
-        // Recherche de la vidéo dans différentes clés possibles
-        const videoUrl = icarusData?.data?.playlist || icarusData?.data?.file || icarusData?.data?.url || icarusData?.url || icarusData?.file;
+        // --- NOUVEAU PARSING DE LA RÉPONSE ICARUS (LINKS & SUBTITLES) ---
+        if (icarusData && icarusData.success && icarusData.links && icarusData.links.length > 0) {
+            console.log(`[ZXC] 🎉 VICTOIRE ! Lien(s) vidéo trouvé(s) !`);
+            
+            let streams = [];
+            for (const linkObj of icarusData.links) {
+                if (!linkObj.link) continue;
+                streams.push({
+                    title: `Icarus (${linkObj.resolution || 'Auto'}p)`,
+                    streamUrl: linkObj.link,
+                    headers: { "Referer": `${ZXC_BASE_URL}/` }
+                });
+            }
+            
+            // Tri des qualités (du plus grand au plus petit)
+            streams.sort((a, b) => {
+                const resA = parseInt(a.title.match(/(\d+)p/)?.[1]) || 0;
+                const resB = parseInt(b.title.match(/(\d+)p/)?.[1]) || 0;
+                return resB - resA;
+            });
 
-        if (videoUrl) {
-            console.log(`[ZXC] 🎉 VICTOIRE ! Lien vidéo (M3U8) trouvé !`);
+            // Récupération des sous-titres
+            let allSubtitles = [];
+            let defaultSubtitle = "";
+            
+            if (icarusData.subtitles && Array.isArray(icarusData.subtitles)) {
+                for (const sub of icarusData.subtitles) {
+                    if (!sub.file) continue;
+                    allSubtitles.push({
+                        url: sub.file,
+                        label: sub.display || sub.id || "SUB",
+                        language: sub.id || "",
+                        kind: "subtitles"
+                    });
+                    
+                    if (sub.id === "fr" || sub.id === "fre") {
+                        defaultSubtitle = sub.file;
+                    } else if (!defaultSubtitle && (sub.id === "en" || sub.id === "eng")) {
+                        defaultSubtitle = sub.file;
+                    }
+                }
+            }
+            
+            if (!defaultSubtitle && allSubtitles.length > 0) {
+                defaultSubtitle = allSubtitles[0].url;
+            }
+
             return JSON.stringify({
                 type: "servers",
-                streams: [{
-                    title: "Serveur Icarus (1080p)",
-                    streamUrl: videoUrl,
-                    headers: { "Referer": `${ZXC_BASE_URL}/` }
-                }],
-                subtitles: ""
+                streams: streams,
+                subtitles: defaultSubtitle,
+                allSubtitles: allSubtitles
             });
         }
 
-        console.log(`[ZXC] ❌ Échec, pas de playlist.`);
+        console.log(`[ZXC] ❌ Échec, le tableau 'links' est vide ou absent.`);
         return JSON.stringify({ type: "none" });
 
     } catch (e) {
