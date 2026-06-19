@@ -1,4 +1,3 @@
-```javascript
 // ==========================================
 // 🔓 SORA MODULE — ZXCSTREAM (CATALOGUE TMDB + CRACK)
 // ==========================================
@@ -257,5 +256,3 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
         try { return await fetch(url, options); } catch { return null; }
     }
 }
-
-```
