@@ -1,4 +1,3 @@
-```javascript
 // ==========================================
 // 🔓 SORA MODULE — ZXCSTREAM (FIX MOBILE + CRACK)
 // ==========================================
@@ -352,6 +351,3 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
         try { return await fetch(url, options); } catch { return null; }
     }
 }
-
-
-```
