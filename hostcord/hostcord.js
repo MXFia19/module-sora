@@ -1,9 +1,116 @@
+```javascript
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (CATALOGUE TMDB + CRACK)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX MOBILE + CRACK)
 // ==========================================
 
-const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c"; // Clé publique TMDB
+const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
 const ZXC_BASE_URL = "https://embed.zxcstream.xyz";
+
+// ==========================================
+// 🔐 POLYFILL : PURE JS SHA-512 (POUR SORA/MOBILE)
+// ==========================================
+const SHA512 = function(str) {
+    function int64(msint_32, lsint_32) { return {h: msint_32, l: lsint_32}; }
+    function add(x, y) {
+        let l = (x.l & 0xffff) + (y.l & 0xffff);
+        let m = (x.l >>> 16) + (y.l >>> 16) + (l >>> 16);
+        let h = (x.h & 0xffff) + (y.h & 0xffff) + (m >>> 16);
+        let k = (x.h >>> 16) + (y.h >>> 16) + (h >>> 16);
+        return {h: (k << 16) | (h & 0xffff), l: (m << 16) | (l & 0xffff)};
+    }
+    function add4(a, b, c, d) { return add(add(a, b), add(c, d)); }
+    function add5(a, b, c, d, e) { return add(add4(a, b, c, d), e); }
+    function rotr(x, n) {
+        if (n < 32) return {h: (x.h >>> n) | (x.l << (32 - n)), l: (x.l >>> n) | (x.h << (32 - n))};
+        else if (n === 32) return {h: x.l, l: x.h};
+        else return {h: (x.l >>> (n - 32)) | (x.h << (64 - n)), l: (x.h >>> (n - 32)) | (x.l << (64 - n))};
+    }
+    function shr(x, n) {
+        if (n < 32) return {h: x.h >>> n, l: (x.l >>> n) | (x.h << (32 - n))};
+        else if (n === 32) return {h: 0, l: x.h};
+        else return {h: 0, l: x.h >>> (n - 32)};
+    }
+    function xor(x, y) { return {h: x.h ^ y.h, l: x.l ^ y.l}; }
+    function ch(x, y, z) { return {h: (x.h & y.h) ^ (~x.h & z.h), l: (x.l & y.l) ^ (~x.l & z.l)}; }
+    function maj(x, y, z) { return {h: (x.h & y.h) ^ (x.h & z.h) ^ (y.h & z.h), l: (x.l & y.l) ^ (x.l & z.l) ^ (y.l & z.l)}; }
+    function sigma0(x) { return xor(xor(rotr(x, 28), rotr(x, 34)), rotr(x, 39)); }
+    function sigma1(x) { return xor(xor(rotr(x, 14), rotr(x, 18)), rotr(x, 41)); }
+    function gamma0(x) { return xor(xor(rotr(x, 1), rotr(x, 8)), shr(x, 7)); }
+    function gamma1(x) { return xor(xor(rotr(x, 19), rotr(x, 61)), shr(x, 6)); }
+
+    let K = [
+        int64(0x428a2f98, 0xd728ae22), int64(0x71374491, 0x23ef65cd), int64(0xb5c0fbcf, 0xec4d3b2f), int64(0xe9b5dba5, 0x8189dbbc),
+        int64(0x3956c25b, 0xf348b538), int64(0x59f111f1, 0xb605d019), int64(0x923f82a4, 0xaf194f9b), int64(0xab1c5ed5, 0xda6d8118),
+        int64(0xd807aa98, 0xa3030242), int64(0x12835b01, 0x45706fbe), int64(0x243185be, 0x4ee4b28c), int64(0x550c7dc3, 0xd5ffb4e2),
+        int64(0x72be5d74, 0xf27b896f), int64(0x80deb1fe, 0x3b1696b1), int64(0x9bdc06a7, 0x25c71235), int64(0xc19bf174, 0xcf692694),
+        int64(0xe49b69c1, 0x9ef14ad2), int64(0xefbe4786, 0x384f25e3), int64(0x0fc19dc6, 0x8b8cd5b5), int64(0x240ca1cc, 0x77ac9c65),
+        int64(0x2de92c6f, 0x592b0275), int64(0x4a7484aa, 0x6ea6e483), int64(0x5cb0a9dc, 0xbd41fbd4), int64(0x76f988da, 0x831153b5),
+        int64(0x983e5152, 0xee66dfab), int64(0xa831c66d, 0x2db43210), int64(0xb00327c8, 0x98fb213f), int64(0xbf597fc7, 0xbeef0ee4),
+        int64(0xc6e00bf3, 0x3da88fc2), int64(0xd5a79147, 0x930aa725), int64(0x06ca6351, 0xe003826f), int64(0x14292967, 0x0a0e6e70),
+        int64(0x27b70a85, 0x46d22ffc), int64(0x2e1b2138, 0x5c26c926), int64(0x4d2c6dfc, 0x5ac42aed), int64(0x53380d13, 0x9d95b3df),
+        int64(0x650a7354, 0x8baf63de), int64(0x766a0abb, 0x3c77b2a8), int64(0x81c2c92e, 0x47edaee6), int64(0x92722c85, 0x1482353b),
+        int64(0xa2bfe8a1, 0x4cf10364), int64(0xa81a664b, 0xbc423001), int64(0xc24b8b70, 0xd0f89791), int64(0xc76c51a3, 0x0654be30),
+        int64(0xd192e819, 0xd6ef5218), int64(0xd6990624, 0x5565a910), int64(0xf40e3585, 0x5771202a), int64(0x106aa070, 0x32bbd1b8),
+        int64(0x19a4c116, 0xb8d2d0c8), int64(0x1e376c08, 0x5141ab53), int64(0x2748774c, 0xdf8eeb99), int64(0x34b0bcb5, 0xe19b48a8),
+        int64(0x391c0cb3, 0xc5c95a63), int64(0x4ed8aa4a, 0xe3418acb), int64(0x5b9cca4f, 0x7763e373), int64(0x682e6ff3, 0xd6b2b8a3),
+        int64(0x748f82ee, 0x5defb2fc), int64(0x78a5636f, 0x43172f60), int64(0x84c87814, 0xa1f0ab72), int64(0x8cc70208, 0x1a6439ec),
+        int64(0x90befffa, 0x23631e28), int64(0xa4506ceb, 0xde82bde9), int64(0xbef9a3f7, 0xb2c67915), int64(0xc67178f2, 0xe372532b),
+        int64(0xca273ece, 0xea26619c), int64(0xd186b8c7, 0x21c0c207), int64(0xeada7dd6, 0xcde0eb1e), int64(0xf57d4f7f, 0xee6ed178),
+        int64(0x06f067aa, 0x72176fba), int64(0x0a637dc5, 0xa2c898a6), int64(0x113f9804, 0xbef90dae), int64(0x1b710b35, 0x131c471b),
+        int64(0x28db77f5, 0x23047d84), int64(0x32caab7b, 0x40c72493), int64(0x3c9ebe0a, 0x15c9bebc), int64(0x431d67c4, 0x9c100d4c),
+        int64(0x4cc5d4be, 0xcb3e42b6), int64(0x597f299c, 0xfc657e2a), int64(0x5fcb6fab, 0x3ad6faec), int64(0x6c44198c, 0x4a475817)
+    ];
+
+    let H = [
+        int64(0x6a09e667, 0xf3bcc908), int64(0xbb67ae85, 0x84caa73b), int64(0x3c6ef372, 0xfe94f82b), int64(0xa54ff53a, 0x5f1d36f1),
+        int64(0x510e527f, 0xade682d1), int64(0x9b05688c, 0x2b3e6c1f), int64(0x1f83d9ab, 0xfb41bd6b), int64(0x5be0cd19, 0x137e2179)
+    ];
+
+    str = unescape(encodeURIComponent(str));
+    let m = [];
+    for (let i = 0; i < str.length; i++) m[i] = str.charCodeAt(i);
+    m[str.length] = 0x80;
+    let len = str.length * 8;
+    let blocks = Math.ceil((m.length + 16) / 128);
+
+    for (let i = m.length; i < blocks * 128; i++) m[i] = 0;
+    m[blocks * 128 - 4] = (len >>> 24) & 0xff;
+    m[blocks * 128 - 3] = (len >>> 16) & 0xff;
+    m[blocks * 128 - 2] = (len >>> 8) & 0xff;
+    m[blocks * 128 - 1] = (len) & 0xff;
+
+    let W = new Array(80);
+    for (let i = 0; i < blocks; i++) {
+        for (let j = 0; j < 16; j++) {
+            W[j] = int64(
+                (m[i * 128 + j * 8] << 24) | (m[i * 128 + j * 8 + 1] << 16) | (m[i * 128 + j * 8 + 2] << 8) | m[i * 128 + j * 8 + 3],
+                (m[i * 128 + j * 8 + 4] << 24) | (m[i * 128 + j * 8 + 5] << 16) | (m[i * 128 + j * 8 + 6] << 8) | m[i * 128 + j * 8 + 7]
+            );
+        }
+        for (let j = 16; j < 80; j++) {
+            W[j] = add4(gamma1(W[j - 2]), W[j - 7], gamma0(W[j - 15]), W[j - 16]);
+        }
+        let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+        for (let j = 0; j < 80; j++) {
+            let T1 = add5(h, sigma1(e), ch(e, f, g), K[j], W[j]);
+            let T2 = add(sigma0(a), maj(a, b, c));
+            h = g; g = f; f = e; e = add(d, T1); d = c; c = b; b = a; a = add(T1, T2);
+        }
+        H[0] = add(H[0], a); H[1] = add(H[1], b); H[2] = add(H[2], c); H[3] = add(H[3], d);
+        H[4] = add(H[4], e); H[5] = add(H[5], f); H[6] = add(H[6], g); H[7] = add(H[7], h);
+    }
+    
+    let toHex = (n) => {
+        let hex = (n >>> 0).toString(16);
+        return "00000000".substring(hex.length) + hex;
+    };
+    
+    let hash = "";
+    for (let i = 0; i < 8; i++) {
+        hash += toHex(H[i].h) + toHex(H[i].l);
+    }
+    return hash;
+};
 
 // ==========================================
 // 🛠️ HELPERS (Analyse des URLs personnalisées)
@@ -43,7 +150,6 @@ async function searchResults(keyword) {
                 ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
                 : 'https://via.placeholder.com/500x750?text=Pas+d+image';
 
-            // On fabrique une URL interne "zxc://" pour passer les infos à la suite
             const href = `zxc://${item.media_type}/${item.id}?title=${encodeURIComponent(title)}&year=${year}`;
 
             results.push({
@@ -53,7 +159,6 @@ async function searchResults(keyword) {
             });
         }
 
-        console.log(`[ZXC] ✅ ${results.length} résultats trouvés.`);
         return JSON.stringify(results);
     } catch (e) {
         console.error(`[ZXC] ❌ Erreur Recherche: ${e.message}`);
@@ -65,7 +170,6 @@ async function searchResults(keyword) {
 // 📖 2. DÉTAILS (Via TMDB)
 // ==========================================
 async function extractDetails(url) {
-    console.log(`[ZXC] 📖 Chargement des détails...`);
     try {
         const match = url.match(/zxc:\/\/([^/]+)\/([^?]+)/);
         if (!match) throw new Error("URL interne invalide");
@@ -91,7 +195,6 @@ async function extractDetails(url) {
 // 📂 3. ÉPISODES (Via TMDB)
 // ==========================================
 async function extractEpisodes(url) {
-    console.log(`[ZXC] 📂 Chargement des épisodes...`);
     try {
         const match = url.match(/zxc:\/\/([^/]+)\/([^?]+)\?(.+)/);
         if (!match) throw new Error("URL interne invalide");
@@ -102,7 +205,6 @@ async function extractEpisodes(url) {
         const title = params['title'] || "";
         const year  = params['year']  || "";
 
-        // CAS A : C'est un Film
         if (type === 'movie') {
             return JSON.stringify([{
                 href: `zxc-play://movie/${id}?title=${encodeURIComponent(title)}&year=${year}`,
@@ -112,14 +214,13 @@ async function extractEpisodes(url) {
             }]);
         }
 
-        // CAS B : C'est une Série
         const res = await soraFetch(`https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=fr-FR`);
         if (!res) throw new Error("Échec réseau TMDB");
         const data = JSON.parse(await res.text());
 
         let episodes = [];
         const seasonPromises = (data.seasons || []).map(async (season) => {
-            if (season.season_number === 0) return; // Ignorer les épisodes spéciaux
+            if (season.season_number === 0) return; 
 
             const sRes = await soraFetch(
                 `https://api.themoviedb.org/3/tv/${id}/season/${season.season_number}?api_key=${TMDB_API_KEY}&language=fr-FR`
@@ -140,7 +241,6 @@ async function extractEpisodes(url) {
         await Promise.all(seasonPromises);
         episodes.sort((a, b) => a.season !== b.season ? a.season - b.season : a.number - b.number);
 
-        console.log(`[ZXC] ✅ ${episodes.length} épisodes chargés.`);
         return JSON.stringify(episodes);
 
     } catch (e) {
@@ -154,19 +254,15 @@ async function extractEpisodes(url) {
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now().toString(); 
-    const nc = "23432423"; // Le mot de passe volé
+    const nc = "23432423"; 
     const textToHash = `${nc}:${t}:${mid}`;
 
-    // SHA-512 natif
-    const encoder = new TextEncoder();
-    const data = encoder.encode(textToHash);
-    const hashBuffer = await crypto.subtle.digest('SHA-512', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const fullHashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    // On utilise notre Polyfill PURE JS (aucun risque de plantage)
+    const fullHashHex = SHA512(textToHash);
 
-    // Découpage à 64 caractères
+    // Découpage à 64 caractères, exactement comme leur code
     const xt = fullHashHex.slice(0, 64);
-    console.log(`[ZXC] 🪄 Jeton XT généré : ${xt}`);
+    console.log(`[ZXC] 🪄 Jeton XT généré avec succès : ${xt}`);
     return { xt, rt: t };
 }
 
@@ -176,8 +272,8 @@ async function extractStreamUrl(url) {
         const match = url.match(/zxc-play:\/\/([^/]+)\/([^?]+)\?(.+)/);
         if (!match) throw new Error("URL Play invalide");
 
-        const type   = match[1]; // movie ou tv
-        const mid    = match[2]; // TMDB ID
+        const type   = match[1]; 
+        const mid    = match[2]; 
         const params = parseQuery(match[3]);
         const title  = params['title'] || "";
         const year   = params['year']  || "";
@@ -256,3 +352,6 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
         try { return await fetch(url, options); } catch { return null; }
     }
 }
+
+
+```
