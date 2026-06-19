@@ -1,11 +1,9 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (MULTI-SERVEURS + LOGS DÉTAILLÉS)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX LIENS RELATIFS + MULTI-SERVEURS)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
 const ZXC_BASE_URL = "https://embed.zxcstream.xyz";
-
-// 🌟 LISTE DES SERVEURS ZXCSTREAM
 const ZXC_SERVERS = ["icarus", "atlas_v2", "orion", "zeus", "athena"];
 
 // ==========================================
@@ -130,6 +128,14 @@ function parseQuery(queryString) {
     return params;
 }
 
+// 🔥 NOUVEL OUTIL : Sécurise les URL incomplètes (relatives)
+function makeAbsoluteUrl(url) {
+    if (!url) return "";
+    if (url.startsWith('//')) return 'https:' + url;
+    if (url.startsWith('/')) return ZXC_BASE_URL + url;
+    return url;
+}
+
 // ==========================================
 // 🔍 1. RECHERCHE
 // ==========================================
@@ -238,7 +244,7 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🔓 4. LECTEUR VIDÉO (CRACK + MULTI-SERVEURS)
+// 🔓 4. LECTEUR VIDÉO (MULTI-SERVEURS)
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now().toString(); 
@@ -252,7 +258,6 @@ async function generateZxcToken(mid) {
 async function extractStreamUrl(url) {
     console.log(`\n======================================================`);
     console.log(`[ZXC] 🚀 DÉMARRAGE DU PIRATAGE (MULTI-SERVEURS)`);
-    console.log(`======================================================`);
     
     try {
         const match = url.match(/zxc-play:\/\/([^/]+)\/([^?]+)\?(.+)/);
@@ -268,16 +273,8 @@ async function extractStreamUrl(url) {
         const ref    = params['ref'] || "";
         const date   = params['date'] || "";
 
-        console.log(`[ZXC] 📦 Params extraits: mid=${mid}, type=${type}, title=${title}, year=${year}`);
-        if (type === 'tv') console.log(`[ZXC] 📺 Série ciblée: Saison ${s} - Épisode ${e}`);
-
-        // --- ÉTAPE 1 : GÉNÉRATION CLÉS SECRÈTES ---
-        console.log(`[ZXC] 🔐 Génération du Jeton XT localement...`);
         const { xt, rt } = await generateZxcToken(mid);
-        console.log(`[ZXC] 🪄 Jeton XT généré avec succès : ${xt}`);
 
-        // --- ÉTAPE 2 : VOLER LE 'SIG' ---
-        console.log(`[ZXC] 📡 Demande d'accès via /backend/token...`);
         const tokenRes = await soraFetch(`${ZXC_BASE_URL}/backend/token`, {
             method: 'POST',
             headers: {
@@ -293,55 +290,48 @@ async function extractStreamUrl(url) {
         const new_rt = tokenData.rt;
         
         if (!sig) throw new Error("Le serveur a refusé nos jetons !");
-        console.log(`[ZXC] ✅ Jeton 'sig' validé par l'API : ${sig}`);
-
-        // --- ÉTAPE 3 : BOUCLE SUR TOUS LES SERVEURS ---
-        console.log(`\n[ZXC] 🔄 Lancement de l'attaque sur ${ZXC_SERVERS.length} serveurs...`);
         
         let finalStreams = [];
-        let subtitlesMap = new Map(); // Pour éviter les sous-titres en double
+        let subtitlesMap = new Map();
 
         for (const serverName of ZXC_SERVERS) {
-            console.log(`   👉 [Serveur: ${serverName}] Tentative de connexion...`);
+            console.log(`[ZXC] 📡 Test du serveur : ${serverName}`);
             
             let serverUrl = `${ZXC_BASE_URL}/backend/servers/${serverName}?mid=${mid}&b=${type}&rt=${new_rt}&sig=${sig}&xt=${xt}&q=${encodeURIComponent(title)}&p=${encodeURIComponent(year)}`;
             if (date) serverUrl += `&date=${encodeURIComponent(date)}`;
             if (ref) serverUrl += `&ref=${encodeURIComponent(ref)}`;
-            if (type === 'tv' && s && e) {
-                serverUrl += `&sx=${s}&ex=${e}`;
-            }
+            if (type === 'tv' && s && e) serverUrl += `&sx=${s}&ex=${e}`;
             
             try {
-                const serverRes = await soraFetch(serverUrl, {
-                    headers: { "Referer": `${ZXC_BASE_URL}/` }
-                });
-
-                const rawText = await serverRes.text();
-                // console.log(`   📥 [Serveur: ${serverName}] Réponse brute : ${rawText.substring(0, 100)}...`);
+                const serverRes = await soraFetch(serverUrl, { headers: { "Referer": `${ZXC_BASE_URL}/` } });
+                const serverData = JSON.parse(await serverRes.text());
                 
-                const serverData = JSON.parse(rawText);
-                
-                // Si ce serveur a des liens
                 if (serverData && serverData.success && serverData.links && serverData.links.length > 0) {
-                    console.log(`   🎉 [Serveur: ${serverName}] Succès ! ${serverData.links.length} liens trouvés !`);
                     
+                    // 🔥 CORRECTION : Application de makeAbsoluteUrl()
                     for (const linkObj of serverData.links) {
                         if (!linkObj.link) continue;
+                        
+                        const safeUrl = makeAbsoluteUrl(linkObj.link);
+                        
                         finalStreams.push({
                             title: `ZXC ${serverName.toUpperCase()} (${linkObj.resolution || 'Auto'}p)`,
-                            streamUrl: linkObj.link,
+                            streamUrl: safeUrl,
                             headers: { "Referer": `${ZXC_BASE_URL}/` }
                         });
                     }
                     
-                    // Ajout des sous-titres
+                    // 🔥 CORRECTION : Application de makeAbsoluteUrl() aux sous-titres
                     if (serverData.subtitles && Array.isArray(serverData.subtitles)) {
                         for (const sub of serverData.subtitles) {
                             if (!sub.file) continue;
+                            
+                            const safeSubUrl = makeAbsoluteUrl(sub.file);
                             const subId = sub.id || "unknown";
+                            
                             if (!subtitlesMap.has(subId)) {
                                 subtitlesMap.set(subId, {
-                                    url: sub.file,
+                                    url: safeSubUrl,
                                     label: sub.display || sub.id || "SUB",
                                     language: subId,
                                     kind: "subtitles"
@@ -349,30 +339,22 @@ async function extractStreamUrl(url) {
                             }
                         }
                     }
-                } else {
-                    console.log(`   ⚠️ [Serveur: ${serverName}] Échec ou fichier introuvable.`);
                 }
-            } catch (err) {
-                console.log(`   ❌ [Serveur: ${serverName}] Erreur de requête : ${err.message}`);
-            }
+            } catch (err) {}
         }
 
-        // --- ÉTAPE 4 : CONCLUSION & FORMATAGE ---
         if (finalStreams.length > 0) {
-            console.log(`\n[ZXC] 🏁 FIN DE L'ATTAQUE : ${finalStreams.length} flux vidéos récupérés au total !`);
+            console.log(`[ZXC] 🎉 Trouvé ${finalStreams.length} flux vidéos au total !`);
             
-            // Tri des qualités (du plus grand au plus petit)
             finalStreams.sort((a, b) => {
                 const resA = parseInt(a.title.match(/(\d+)p/)?.[1]) || 0;
                 const resB = parseInt(b.title.match(/(\d+)p/)?.[1]) || 0;
                 return resB - resA;
             });
 
-            // Conversion de la Map des sous-titres en Tableau
             let allSubtitles = Array.from(subtitlesMap.values());
             let defaultSubtitle = "";
             
-            // Choisir un sous-titre par défaut (FR ou EN)
             const frSub = allSubtitles.find(s => s.language === "fr" || s.language === "fre");
             const enSub = allSubtitles.find(s => s.language === "en" || s.language === "eng");
             
@@ -388,11 +370,9 @@ async function extractStreamUrl(url) {
             });
         }
 
-        console.log(`\n[ZXC] ❌ FIN : Aucun serveur ne possédait la vidéo.`);
         return JSON.stringify({ type: "none" });
 
     } catch (e) {
-        console.error(`\n[ZXC] 🚨 Erreur Critique : ${e.message}`);
         return JSON.stringify({ type: "none" });
     }
 }
