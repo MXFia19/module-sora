@@ -1,5 +1,5 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (CRACK DÉFINITIF 100%)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX 403 / WORKER PROXY)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
@@ -19,7 +19,7 @@ const SPOOF_HEADERS = {
     "Connection": "keep-alive"
 };
 
-// 🔥 LE DICTIONNAIRE DE TRADUCTION EXACT (Source décodée)
+// 🔥 LE DICTIONNAIRE DE TRADUCTION EXACT
 const ZXC_KEYS = {
     mid: "rgrwsdsdfgwrwrwwr",
     rt:  "rdghhdghhfssft",
@@ -28,8 +28,8 @@ const ZXC_KEYS = {
     q:   "TUKTHFSSFGDGHJS",
     p:   "53653TRFG647GF",
     ref: "564745ygtuy5yi75yuy",
-    sx:  "adkljfhdahfladhfjahfjlahfhfljkadfdf", // Saison
-    ex:  "546745ygy46ytfgty"                    // Épisode
+    sx:  "adkljfhdahfladhfjahfjlahfhfljkadfdf", 
+    ex:  "546745ygy46ytfgty"                    
 };
 
 // ==========================================
@@ -154,13 +154,9 @@ function parseQuery(queryString) {
     return params;
 }
 
+// 🔥 Modifié : Garde le Worker ! Assure juste que le lien est absolu
 function getCleanUrl(rawUrl) {
     if (!rawUrl) return "";
-    try {
-        const match = rawUrl.match(/[?&]url=([^&]+)/);
-        if (match) return decodeURIComponent(match[1]);
-    } catch(e) {}
-    
     if (rawUrl.startsWith('//')) return 'https:' + rawUrl;
     if (rawUrl.startsWith('/')) return ZXC_BASE_URL + rawUrl;
     return rawUrl;
@@ -278,14 +274,12 @@ async function extractEpisodes(url) {
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now(); 
-    const nc = "23424533224232234252524523254"; // 🔥 LE NOUVEAU MOT DE PASSE SECRET !
+    const nc = "23424533224232234252524523254"; // Le bon mdp secret
     const textToHash = `${nc}:${t}:${mid}`;
     const fullHashHex = SHA512(textToHash);
     const xt = fullHashHex.slice(0, 64);
     
-    console.log(`[ÉTAPE 2] 🔐 Algorithme SHA-512 :`);
-    console.log(`   - Chaîne à hasher: ${textToHash}`);
-    console.log(`   - Résultat 'xt': ${xt}`);
+    console.log(`[ÉTAPE 2] 🔐 Algorithme SHA-512 ok : XT = ${xt}`);
     
     return { xt, rt: t };
 }
@@ -296,7 +290,6 @@ async function extractStreamUrl(url) {
     console.log(`======================================================`);
     
     try {
-        console.log(`[ÉTAPE 1] 🔗 Parsing de l'URL Sora : ${url}`);
         const match = url.match(/zxc-play:\/\/([^/]+)\/([^?]+)\?(.+)/);
         if (!match) throw new Error("URL Play invalide");
 
@@ -310,21 +303,14 @@ async function extractStreamUrl(url) {
         const ref    = params['ref'] || "";
         const date   = params['date'] || "";
 
-        console.log(`   - Type: ${type} | TMDB: ${mid} | Date: ${date} | IMDb: ${ref}`);
-
-        // Génération token
         const { xt, rt } = await generateZxcToken(mid);
 
-        // 🔥 LE PAYLOAD PARFAIT D'APRÈS TON CODE SOURCE
         let tokenPayload = {};
         tokenPayload[ZXC_KEYS.mid] = String(mid);
         tokenPayload[ZXC_KEYS.xt] = xt;
         tokenPayload[ZXC_KEYS.rt] = rt;
 
-        console.log(`\n[ÉTAPE 3] 📡 Préparation requête POST vers /backend/token`);
-        console.log(`   - Payload JSON complet envoyé :`);
-        console.log(`   ${JSON.stringify(tokenPayload)}`);
-
+        console.log(`[ÉTAPE 3] 📡 POST vers /backend/token...`);
         const tokenRes = await soraFetch(`${ZXC_BASE_URL}/backend/token`, {
             method: 'POST',
             headers: SPOOF_HEADERS,
@@ -332,13 +318,10 @@ async function extractStreamUrl(url) {
         });
 
         const rawTokenText = await tokenRes.text();
-        console.log(`\n[ÉTAPE 4] 📥 Réponse brute du serveur pour le token :`);
-        console.log(`   ${rawTokenText.substring(0, 200)}`);
-
         const tokenData = JSON.parse(rawTokenText);
         
         if (tokenData.error) {
-            console.error(`[🚨 ERREUR FATALE] Le serveur a rejeté la requête : ${tokenData.error}`);
+            console.error(`[🚨 ERREUR FATALE] L'API a bloqué la requête : ${tokenData.error}`);
             throw new Error(tokenData.error);
         }
 
@@ -351,14 +334,12 @@ async function extractStreamUrl(url) {
         let finalStreams = [];
         let subtitlesMap = new Map();
 
-        console.log(`\n[ÉTAPE 6] 🔄 Interrogation de la liste des serveurs ZXC...`);
+        console.log(`[ÉTAPE 6] 🔄 Interrogation des serveurs ZXC...`);
         for (const serverName of ZXC_SERVERS) {
             let serverUrl = `${ZXC_BASE_URL}/backend/servers/${serverName}?${ZXC_KEYS.mid}=${mid}&b=${type}&${ZXC_KEYS.rt}=${new_rt}&${ZXC_KEYS.sig}=${sig}&${ZXC_KEYS.xt}=${xt}&${ZXC_KEYS.q}=${encodeURIComponent(title)}&${ZXC_KEYS.p}=${encodeURIComponent(year)}`;
             if (date) serverUrl += `&date=${encodeURIComponent(date)}`;
             if (ref) serverUrl += `&${ZXC_KEYS.ref}=${encodeURIComponent(ref)}`;
             if (type === 'tv' && s && e) serverUrl += `&${ZXC_KEYS.sx}=${s}&${ZXC_KEYS.ex}=${e}`;
-            
-            console.log(`   👉 GET ${serverName} | URL: ${serverUrl}`);
             
             try {
                 const serverRes = await soraFetch(serverUrl, { headers: SPOOF_HEADERS });
@@ -367,11 +348,14 @@ async function extractStreamUrl(url) {
                 const serverData = JSON.parse(serverDataText);
                 
                 if (serverData && serverData.success && serverData.links && serverData.links.length > 0) {
-                    console.log(`   🎉 [SUCCÈS] Vidéo trouvée sur ${serverName} !`);
+                    console.log(`   🎉 Vidéo trouvée sur ${serverName} !`);
                     for (const linkObj of serverData.links) {
                         if (!linkObj.link) continue;
-                        const safeUrl = getCleanUrl(linkObj.link);
-                        console.log(`      🎬 Lien propre extrait: ${safeUrl}`);
+                        
+                        // 🔥 MODIFICATION : ON GARDE LE WORKER INTACT
+                        const safeUrl = getCleanUrl(linkObj.link); 
+                        console.log(`      🎬 Lien avec Proxy: ${safeUrl}`);
+                        
                         finalStreams.push({
                             title: `ZXC ${serverName.toUpperCase()} (${linkObj.resolution || 'Auto'}p)`,
                             streamUrl: safeUrl,
@@ -389,16 +373,14 @@ async function extractStreamUrl(url) {
                             }
                         }
                     }
-                } else {
-                    console.log(`   ⚠️ [ÉCHEC] Fichier absent sur ${serverName}`);
                 }
             } catch (err) {
-                console.log(`   ❌ [ERREUR] Impossible de joindre ${serverName}: ${err.message}`);
+                // Erreur serveur ignorée silencieusement
             }
         }
 
         if (finalStreams.length > 0) {
-            console.log(`\n[ÉTAPE 7] 🏁 Formatage final et envoi à Sora (${finalStreams.length} flux)`);
+            console.log(`[ÉTAPE 7] 🏁 Envoi à Sora (${finalStreams.length} flux)`);
             finalStreams.sort((a, b) => {
                 const resA = parseInt(a.title.match(/(\d+)p/)?.[1]) || 0;
                 const resB = parseInt(b.title.match(/(\d+)p/)?.[1]) || 0;
@@ -424,8 +406,6 @@ async function extractStreamUrl(url) {
         return JSON.stringify({ type: "none" });
 
     } catch (e) {
-        console.error(`\n[🚨 CATCH FINAL] Erreur lors de l'exécution globale : ${e.message}`);
-        console.error(`Stack trace : ${e.stack}`);
         return JSON.stringify({ type: "none" });
     }
 }
