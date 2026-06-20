@@ -1,10 +1,22 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (FIX ANTI-BOTS + ULTRA DEBUG)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX DOMAINE v.zxcstream & TOKEN BROUILLÉ)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
-const ZXC_BASE_URL = "https://embed.zxcstream.xyz";
+
+// 🔥 MISE À JOUR : Le domaine a changé (embed -> v)
+const ZXC_BASE_URL = "https://v.zxcstream.xyz";
 const ZXC_SERVERS = ["icarus", "atlas_v2", "orion", "zeus", "athena"];
+
+// 🔥 HEADERS FANTÔMES (Adaptés au nouveau domaine)
+const SPOOF_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Origin": ZXC_BASE_URL,
+    "Referer": `${ZXC_BASE_URL}/`,
+    "Connection": "keep-alive"
+};
 
 // 🔥 LE DICTIONNAIRE DE TRADUCTION DES PARAMÈTRES BROUILLÉS
 const ZXC_KEYS = {
@@ -261,7 +273,7 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🔓 4. LECTEUR VIDÉO (CRACK + MULTI-SERVEURS)
+// 🔓 4. LECTEUR VIDÉO
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now().toString(); 
@@ -275,14 +287,10 @@ async function generateZxcToken(mid) {
 async function extractStreamUrl(url) {
     console.log(`\n======================================================`);
     console.log(`[ZXC-DEBUG] 🚀 DÉMARRAGE DE L'EXTRACTION !`);
-    console.log(`[ZXC-DEBUG] URL appelée : ${url}`);
     
     try {
         const match = url.match(/zxc-play:\/\/([^/]+)\/([^?]+)\?(.+)/);
-        if (!match) {
-            console.error(`[ZXC-DEBUG] ❌ Match échoué sur l'URL`);
-            throw new Error("URL Play invalide");
-        }
+        if (!match) throw new Error("URL Play invalide");
 
         const type   = match[1]; 
         const mid    = match[2]; 
@@ -294,46 +302,30 @@ async function extractStreamUrl(url) {
         const ref    = params['ref'] || "";
         const date   = params['date'] || "";
 
-        console.log(`[ZXC-DEBUG] 📦 Variables : mid=${mid}, type=${type}`);
-
-        console.log(`[ZXC-DEBUG] 🔐 Génération du XT local...`);
         const { xt, rt } = await generateZxcToken(mid);
-        console.log(`[ZXC-DEBUG] ✅ XT généré : ${xt}`);
 
-        // --- TENTATIVE DE TOKEN ---
-        // On envoie à la fois les anciens noms et les nouveaux noms dans le payload
-        let tokenPayload = {
-            "mid": String(mid),
-            "xt": xt,
-            "rt": rt
-        };
+        // 🔥 MISE À JOUR : Le payload utilise maintenant les clés brouillées !
+        let tokenPayload = {};
         tokenPayload[ZXC_KEYS.mid] = String(mid);
         tokenPayload[ZXC_KEYS.xt] = xt;
         tokenPayload[ZXC_KEYS.rt] = rt;
 
-        console.log(`[ZXC-DEBUG] 📡 Envoi du POST vers /backend/token...`);
         const tokenRes = await soraFetch(`${ZXC_BASE_URL}/backend/token`, {
             method: 'POST',
-            headers: {
-                "Content-Type": "application/json",
-                "Referer": `${ZXC_BASE_URL}/`,
-                "Origin": ZXC_BASE_URL
-            },
+            headers: SPOOF_HEADERS,
             body: JSON.stringify(tokenPayload)
         });
 
         const rawTokenText = await tokenRes.text();
-        console.log(`[ZXC-DEBUG] 📥 Réponse Brute /token : ${rawTokenText.substring(0, 80)}...`);
+        console.log(`[ZXC-DEBUG] 📥 Réponse Brute /token : ${rawTokenText}`);
 
         const tokenData = JSON.parse(rawTokenText);
         
-        const sig = tokenData.sig || tokenData[ZXC_KEYS.sig];
-        const new_rt = tokenData.rt || tokenData[ZXC_KEYS.rt];
+        // 🔥 MISE À JOUR : On lit la réponse avec les clés brouillées
+        const sig = tokenData[ZXC_KEYS.sig] || tokenData.sig;
+        const new_rt = tokenData[ZXC_KEYS.rt] || tokenData.rt;
         
-        if (!sig) {
-            console.error(`[ZXC-DEBUG] ❌ Pas de SIG dans la réponse !`);
-            throw new Error("Le serveur a refusé nos jetons !");
-        }
+        if (!sig) throw new Error("Pas de SIG dans la réponse !");
         console.log(`[ZXC-DEBUG] ✅ SIG récupéré avec succès.`);
         
         let finalStreams = [];
@@ -348,10 +340,8 @@ async function extractStreamUrl(url) {
             if (type === 'tv' && s && e) serverUrl += `&${ZXC_KEYS.sx}=${s}&${ZXC_KEYS.ex}=${e}`;
             
             try {
-                const serverRes = await soraFetch(serverUrl, { headers: { "Referer": `${ZXC_BASE_URL}/` } });
+                const serverRes = await soraFetch(serverUrl, { headers: SPOOF_HEADERS });
                 const serverDataText = await serverRes.text();
-                // console.log(`[ZXC-DEBUG] 📥 Serveur ${serverName} a répondu.`);
-                
                 const serverData = JSON.parse(serverDataText);
                 
                 if (serverData && serverData.success && serverData.links && serverData.links.length > 0) {
@@ -363,24 +353,17 @@ async function extractStreamUrl(url) {
                         finalStreams.push({
                             title: `ZXC ${serverName.toUpperCase()} (${linkObj.resolution || 'Auto'}p)`,
                             streamUrl: safeUrl,
-                            headers: { "Referer": `${ZXC_BASE_URL}/` }
+                            headers: SPOOF_HEADERS
                         });
                     }
                     
                     if (serverData.subtitles && Array.isArray(serverData.subtitles)) {
                         for (const sub of serverData.subtitles) {
                             if (!sub.file) continue;
-                            
                             const safeSubUrl = getCleanUrl(sub.file);
                             const subId = sub.id || "unknown";
-                            
                             if (!subtitlesMap.has(subId)) {
-                                subtitlesMap.set(subId, {
-                                    url: safeSubUrl,
-                                    label: sub.display || sub.id || "SUB",
-                                    language: subId,
-                                    kind: "subtitles"
-                                });
+                                subtitlesMap.set(subId, { url: safeSubUrl, label: sub.display || sub.id || "SUB", language: subId, kind: "subtitles" });
                             }
                         }
                     }
@@ -418,8 +401,7 @@ async function extractStreamUrl(url) {
         return JSON.stringify({ type: "none" });
 
     } catch (e) {
-        console.error(`[ZXC-DEBUG] 🚨 CATCH EXCEPTION: ${e.message}`);
-        console.error(`[ZXC-DEBUG] STACK: ${e.stack}`);
+        console.error(`[ZXC-DEBUG] 🚨 ERREUR: ${e.message}`);
         return JSON.stringify({ type: "none" });
     }
 }
@@ -430,7 +412,8 @@ async function extractStreamUrl(url) {
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
     try {
         if (typeof fetchv2 !== 'undefined') {
-            return await fetchv2(url, options.headers ?? {}, options.method ?? 'GET', options.body ?? null);
+            const finalHeaders = { ...options.headers };
+            return await fetchv2(url, finalHeaders, options.method ?? 'GET', options.body ?? null);
         }
         return await fetch(url, options);
     } catch(e) {
