@@ -7,7 +7,6 @@ const ZXC_BASE_URL = "https://embed.zxcstream.xyz";
 const ZXC_SERVERS = ["icarus", "atlas_v2", "orion", "zeus", "athena"];
 
 // 🔥 LE DICTIONNAIRE DE TRADUCTION DES PARAMÈTRES BROUILLÉS
-// S'ils changent encore, il suffira de mettre à jour cette liste !
 const ZXC_KEYS = {
     mid: "rgrwsdsdfgwrwrwwr",
     rt:  "rdghhdghhfssft",
@@ -16,8 +15,6 @@ const ZXC_KEYS = {
     q:   "TUKTHFSSFGDGHJS",
     p:   "53653TRFG647GF",
     ref: "564745ygtuy5yi75yuy",
-    // ⚠️ Note: On n'a pas encore les noms brouillés pour "sx" (saison) et "ex" (épisode). 
-    // Je laisse les anciens par défaut. S'ils ont changé, les séries ne marcheront plus.
     sx:  "sx", 
     ex:  "ex"
 };
@@ -276,9 +273,6 @@ async function generateZxcToken(mid) {
 }
 
 async function extractStreamUrl(url) {
-    console.log(`\n======================================================`);
-    console.log(`[ZXC] 🚀 DÉMARRAGE DU PIRATAGE (MULTI-SERVEURS)`);
-    
     try {
         const match = url.match(/zxc-play:\/\/([^/]+)\/([^?]+)\?(.+)/);
         if (!match) throw new Error("URL Play invalide");
@@ -295,8 +289,6 @@ async function extractStreamUrl(url) {
 
         const { xt, rt } = await generateZxcToken(mid);
 
-        // --- ENVOI DU TOKEN AVEC LES NOUVELLES CLÉS (Obfuscated) ---
-        // S'ils ont changé les clés de l'URL, ils les ont sûrement changées ici
         let tokenPayload = {};
         tokenPayload[ZXC_KEYS.mid] = String(mid);
         tokenPayload[ZXC_KEYS.xt] = xt;
@@ -313,7 +305,6 @@ async function extractStreamUrl(url) {
         });
 
         const tokenData = JSON.parse(await tokenRes.text());
-        // L'API renvoie le 'sig' et 'rt'. On récupère sur les vrais noms ou les brouillés
         const sig = tokenData.sig || tokenData[ZXC_KEYS.sig];
         const new_rt = tokenData.rt || tokenData[ZXC_KEYS.rt];
         
@@ -323,11 +314,8 @@ async function extractStreamUrl(url) {
         let subtitlesMap = new Map();
 
         for (const serverName of ZXC_SERVERS) {
-            console.log(`[ZXC] 📡 Test du serveur : ${serverName}`);
-            
-            // --- CONSTRUCTION DE L'URL AVEC LES PARAMÈTRES BROUILLÉS ---
             let serverUrl = `${ZXC_BASE_URL}/backend/servers/${serverName}?${ZXC_KEYS.mid}=${mid}&b=${type}&${ZXC_KEYS.rt}=${new_rt}&${ZXC_KEYS.sig}=${sig}&${ZXC_KEYS.xt}=${xt}&${ZXC_KEYS.q}=${encodeURIComponent(title)}&${ZXC_KEYS.p}=${encodeURIComponent(year)}`;
-            if (date) serverUrl += `&date=${encodeURIComponent(date)}`; // 'date' est resté le même d'après ton lien
+            if (date) serverUrl += `&date=${encodeURIComponent(date)}`;
             if (ref) serverUrl += `&${ZXC_KEYS.ref}=${encodeURIComponent(ref)}`;
             if (type === 'tv' && s && e) serverUrl += `&${ZXC_KEYS.sx}=${s}&${ZXC_KEYS.ex}=${e}`;
             
@@ -336,12 +324,10 @@ async function extractStreamUrl(url) {
                 const serverData = JSON.parse(await serverRes.text());
                 
                 if (serverData && serverData.success && serverData.links && serverData.links.length > 0) {
-                    
                     for (const linkObj of serverData.links) {
                         if (!linkObj.link) continue;
                         
                         const safeUrl = getCleanUrl(linkObj.link);
-                        
                         finalStreams.push({
                             title: `ZXC ${serverName.toUpperCase()} (${linkObj.resolution || 'Auto'}p)`,
                             streamUrl: safeUrl,
@@ -371,8 +357,6 @@ async function extractStreamUrl(url) {
         }
 
         if (finalStreams.length > 0) {
-            console.log(`[ZXC] 🎉 Trouvé ${finalStreams.length} flux vidéos purs !`);
-            
             finalStreams.sort((a, b) => {
                 const resA = parseInt(a.title.match(/(\d+)p/)?.[1]) || 0;
                 const resB = parseInt(b.title.match(/(\d+)p/)?.[1]) || 0;
@@ -416,3 +400,4 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
     } catch(e) {
         try { return await fetch(url, options); } catch { return null; }
     }
+}
