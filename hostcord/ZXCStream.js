@@ -1,10 +1,10 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (SUPER DEBUG & FIX PAYLOAD)
+// 🔓 SORA MODULE — ZXCSTREAM (CRACK DÉFINITIF 100%)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
 const ZXC_BASE_URL = "https://v.zxcstream.xyz";
-const ZXC_SERVERS = ["icarus", "atlas_v2", "orion", "zeus", "athena"];
+const ZXC_SERVERS = ["icarus", "atlas_v2", "orion", "zeus", "daedalus", "athena"];
 
 // 🔥 HEADERS FANTÔMES (Copie exacte de Safari iPhone)
 const SPOOF_HEADERS = {
@@ -19,6 +19,7 @@ const SPOOF_HEADERS = {
     "Connection": "keep-alive"
 };
 
+// 🔥 LE DICTIONNAIRE DE TRADUCTION EXACT (Source décodée)
 const ZXC_KEYS = {
     mid: "rgrwsdsdfgwrwrwwr",
     rt:  "rdghhdghhfssft",
@@ -27,8 +28,8 @@ const ZXC_KEYS = {
     q:   "TUKTHFSSFGDGHJS",
     p:   "53653TRFG647GF",
     ref: "564745ygtuy5yi75yuy",
-    sx:  "sx", 
-    ex:  "ex"
+    sx:  "adkljfhdahfladhfjahfjlahfhfljkadfdf", // Saison
+    ex:  "546745ygy46ytfgty"                    // Épisode
 };
 
 // ==========================================
@@ -277,7 +278,7 @@ async function extractEpisodes(url) {
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now(); 
-    const nc = "23432423"; 
+    const nc = "23424533224232234252524523254"; // 🔥 LE NOUVEAU MOT DE PASSE SECRET !
     const textToHash = `${nc}:${t}:${mid}`;
     const fullHashHex = SHA512(textToHash);
     const xt = fullHashHex.slice(0, 64);
@@ -314,7 +315,7 @@ async function extractStreamUrl(url) {
         // Génération token
         const { xt, rt } = await generateZxcToken(mid);
 
-        // 🔥 CRÉATION DU PAYLOAD STRICTEMENT IDENTIQUE À LA CAPTURE D'ÉCRAN
+        // 🔥 LE PAYLOAD PARFAIT D'APRÈS TON CODE SOURCE
         let tokenPayload = {};
         tokenPayload[ZXC_KEYS.mid] = String(mid);
         tokenPayload[ZXC_KEYS.xt] = xt;
@@ -332,7 +333,7 @@ async function extractStreamUrl(url) {
 
         const rawTokenText = await tokenRes.text();
         console.log(`\n[ÉTAPE 4] 📥 Réponse brute du serveur pour le token :`);
-        console.log(`   ${rawTokenText}`);
+        console.log(`   ${rawTokenText.substring(0, 200)}`);
 
         const tokenData = JSON.parse(rawTokenText);
         
@@ -362,9 +363,6 @@ async function extractStreamUrl(url) {
             try {
                 const serverRes = await soraFetch(serverUrl, { headers: SPOOF_HEADERS });
                 const serverDataText = await serverRes.text();
-                
-                // Décommente cette ligne si tu veux voir l'énorme réponse JSON d'Icarus
-                // console.log(`   📥 Réponse ${serverName} : ${serverDataText.substring(0, 150)}...`);
                 
                 const serverData = JSON.parse(serverDataText);
                 
@@ -446,3 +444,4 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
         try { return await fetch(url, options); } catch { return null; }
     }
 }
+
