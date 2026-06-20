@@ -1,5 +1,5 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (FIX ANTI-BOTS / PARAMÈTRES BROUILLÉS)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX ANTI-BOTS + ULTRA DEBUG)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
@@ -273,9 +273,16 @@ async function generateZxcToken(mid) {
 }
 
 async function extractStreamUrl(url) {
+    console.log(`\n======================================================`);
+    console.log(`[ZXC-DEBUG] 🚀 DÉMARRAGE DE L'EXTRACTION !`);
+    console.log(`[ZXC-DEBUG] URL appelée : ${url}`);
+    
     try {
         const match = url.match(/zxc-play:\/\/([^/]+)\/([^?]+)\?(.+)/);
-        if (!match) throw new Error("URL Play invalide");
+        if (!match) {
+            console.error(`[ZXC-DEBUG] ❌ Match échoué sur l'URL`);
+            throw new Error("URL Play invalide");
+        }
 
         const type   = match[1]; 
         const mid    = match[2]; 
@@ -287,13 +294,24 @@ async function extractStreamUrl(url) {
         const ref    = params['ref'] || "";
         const date   = params['date'] || "";
 
-        const { xt, rt } = await generateZxcToken(mid);
+        console.log(`[ZXC-DEBUG] 📦 Variables : mid=${mid}, type=${type}`);
 
-        let tokenPayload = {};
+        console.log(`[ZXC-DEBUG] 🔐 Génération du XT local...`);
+        const { xt, rt } = await generateZxcToken(mid);
+        console.log(`[ZXC-DEBUG] ✅ XT généré : ${xt}`);
+
+        // --- TENTATIVE DE TOKEN ---
+        // On envoie à la fois les anciens noms et les nouveaux noms dans le payload
+        let tokenPayload = {
+            "mid": String(mid),
+            "xt": xt,
+            "rt": rt
+        };
         tokenPayload[ZXC_KEYS.mid] = String(mid);
         tokenPayload[ZXC_KEYS.xt] = xt;
         tokenPayload[ZXC_KEYS.rt] = rt;
 
+        console.log(`[ZXC-DEBUG] 📡 Envoi du POST vers /backend/token...`);
         const tokenRes = await soraFetch(`${ZXC_BASE_URL}/backend/token`, {
             method: 'POST',
             headers: {
@@ -304,16 +322,26 @@ async function extractStreamUrl(url) {
             body: JSON.stringify(tokenPayload)
         });
 
-        const tokenData = JSON.parse(await tokenRes.text());
+        const rawTokenText = await tokenRes.text();
+        console.log(`[ZXC-DEBUG] 📥 Réponse Brute /token : ${rawTokenText.substring(0, 80)}...`);
+
+        const tokenData = JSON.parse(rawTokenText);
+        
         const sig = tokenData.sig || tokenData[ZXC_KEYS.sig];
         const new_rt = tokenData.rt || tokenData[ZXC_KEYS.rt];
         
-        if (!sig) throw new Error("Le serveur a refusé nos jetons !");
+        if (!sig) {
+            console.error(`[ZXC-DEBUG] ❌ Pas de SIG dans la réponse !`);
+            throw new Error("Le serveur a refusé nos jetons !");
+        }
+        console.log(`[ZXC-DEBUG] ✅ SIG récupéré avec succès.`);
         
         let finalStreams = [];
         let subtitlesMap = new Map();
 
         for (const serverName of ZXC_SERVERS) {
+            console.log(`[ZXC-DEBUG] 🔄 Interrogation du serveur : ${serverName}...`);
+            
             let serverUrl = `${ZXC_BASE_URL}/backend/servers/${serverName}?${ZXC_KEYS.mid}=${mid}&b=${type}&${ZXC_KEYS.rt}=${new_rt}&${ZXC_KEYS.sig}=${sig}&${ZXC_KEYS.xt}=${xt}&${ZXC_KEYS.q}=${encodeURIComponent(title)}&${ZXC_KEYS.p}=${encodeURIComponent(year)}`;
             if (date) serverUrl += `&date=${encodeURIComponent(date)}`;
             if (ref) serverUrl += `&${ZXC_KEYS.ref}=${encodeURIComponent(ref)}`;
@@ -321,9 +349,13 @@ async function extractStreamUrl(url) {
             
             try {
                 const serverRes = await soraFetch(serverUrl, { headers: { "Referer": `${ZXC_BASE_URL}/` } });
-                const serverData = JSON.parse(await serverRes.text());
+                const serverDataText = await serverRes.text();
+                // console.log(`[ZXC-DEBUG] 📥 Serveur ${serverName} a répondu.`);
+                
+                const serverData = JSON.parse(serverDataText);
                 
                 if (serverData && serverData.success && serverData.links && serverData.links.length > 0) {
+                    console.log(`[ZXC-DEBUG] 🎉 Liens trouvés sur ${serverName} !`);
                     for (const linkObj of serverData.links) {
                         if (!linkObj.link) continue;
                         
@@ -353,10 +385,13 @@ async function extractStreamUrl(url) {
                         }
                     }
                 }
-            } catch (err) {}
+            } catch (err) {
+                console.error(`[ZXC-DEBUG] ⚠️ Erreur sur le serveur ${serverName} : ${err.message}`);
+            }
         }
 
         if (finalStreams.length > 0) {
+            console.log(`[ZXC-DEBUG] 🏁 Succès Total. Envoi des vidéos à Sora.`);
             finalStreams.sort((a, b) => {
                 const resA = parseInt(a.title.match(/(\d+)p/)?.[1]) || 0;
                 const resB = parseInt(b.title.match(/(\d+)p/)?.[1]) || 0;
@@ -365,10 +400,8 @@ async function extractStreamUrl(url) {
 
             let allSubtitles = Array.from(subtitlesMap.values());
             let defaultSubtitle = "";
-            
             const frSub = allSubtitles.find(s => s.language === "fr" || s.language === "fre");
             const enSub = allSubtitles.find(s => s.language === "en" || s.language === "eng");
-            
             if (frSub) defaultSubtitle = frSub.url;
             else if (enSub) defaultSubtitle = enSub.url;
             else if (allSubtitles.length > 0) defaultSubtitle = allSubtitles[0].url;
@@ -381,9 +414,12 @@ async function extractStreamUrl(url) {
             });
         }
 
+        console.error(`[ZXC-DEBUG] ❌ Aucun lien vidéo n'a été récupéré des serveurs.`);
         return JSON.stringify({ type: "none" });
 
     } catch (e) {
+        console.error(`[ZXC-DEBUG] 🚨 CATCH EXCEPTION: ${e.message}`);
+        console.error(`[ZXC-DEBUG] STACK: ${e.stack}`);
         return JSON.stringify({ type: "none" });
     }
 }
