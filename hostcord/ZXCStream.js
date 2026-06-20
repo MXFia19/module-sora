@@ -1,10 +1,26 @@
 // ==========================================
-// 🔓 SORA MODULE — ZXCSTREAM (FIX LIENS RELATIFS + MULTI-SERVEURS)
+// 🔓 SORA MODULE — ZXCSTREAM (FIX ANTI-BOTS / PARAMÈTRES BROUILLÉS)
 // ==========================================
 
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
 const ZXC_BASE_URL = "https://embed.zxcstream.xyz";
 const ZXC_SERVERS = ["icarus", "atlas_v2", "orion", "zeus", "athena"];
+
+// 🔥 LE DICTIONNAIRE DE TRADUCTION DES PARAMÈTRES BROUILLÉS
+// S'ils changent encore, il suffira de mettre à jour cette liste !
+const ZXC_KEYS = {
+    mid: "rgrwsdsdfgwrwrwwr",
+    rt:  "rdghhdghhfssft",
+    sig: "ZDDVHJFGHYRHG",
+    xt:  "xfgdfgdsffgrwgrwyjhkjt",
+    q:   "TUKTHFSSFGDGHJS",
+    p:   "53653TRFG647GF",
+    ref: "564745ygtuy5yi75yuy",
+    // ⚠️ Note: On n'a pas encore les noms brouillés pour "sx" (saison) et "ex" (épisode). 
+    // Je laisse les anciens par défaut. S'ils ont changé, les séries ne marcheront plus.
+    sx:  "sx", 
+    ex:  "ex"
+};
 
 // ==========================================
 // 🔐 POLYFILL : PURE JS SHA-512
@@ -128,12 +144,16 @@ function parseQuery(queryString) {
     return params;
 }
 
-// 🔥 NOUVEL OUTIL : Sécurise les URL incomplètes (relatives)
-function makeAbsoluteUrl(url) {
-    if (!url) return "";
-    if (url.startsWith('//')) return 'https:' + url;
-    if (url.startsWith('/')) return ZXC_BASE_URL + url;
-    return url;
+function getCleanUrl(rawUrl) {
+    if (!rawUrl) return "";
+    try {
+        const match = rawUrl.match(/[?&]url=([^&]+)/);
+        if (match) return decodeURIComponent(match[1]);
+    } catch(e) {}
+    
+    if (rawUrl.startsWith('//')) return 'https:' + rawUrl;
+    if (rawUrl.startsWith('/')) return ZXC_BASE_URL + rawUrl;
+    return rawUrl;
 }
 
 // ==========================================
@@ -244,7 +264,7 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🔓 4. LECTEUR VIDÉO (MULTI-SERVEURS)
+// 🔓 4. LECTEUR VIDÉO (CRACK + MULTI-SERVEURS)
 // ==========================================
 async function generateZxcToken(mid) {
     const t = Date.now().toString(); 
@@ -275,6 +295,13 @@ async function extractStreamUrl(url) {
 
         const { xt, rt } = await generateZxcToken(mid);
 
+        // --- ENVOI DU TOKEN AVEC LES NOUVELLES CLÉS (Obfuscated) ---
+        // S'ils ont changé les clés de l'URL, ils les ont sûrement changées ici
+        let tokenPayload = {};
+        tokenPayload[ZXC_KEYS.mid] = String(mid);
+        tokenPayload[ZXC_KEYS.xt] = xt;
+        tokenPayload[ZXC_KEYS.rt] = rt;
+
         const tokenRes = await soraFetch(`${ZXC_BASE_URL}/backend/token`, {
             method: 'POST',
             headers: {
@@ -282,12 +309,13 @@ async function extractStreamUrl(url) {
                 "Referer": `${ZXC_BASE_URL}/`,
                 "Origin": ZXC_BASE_URL
             },
-            body: JSON.stringify({ mid: String(mid), xt: xt, rt: rt })
+            body: JSON.stringify(tokenPayload)
         });
 
         const tokenData = JSON.parse(await tokenRes.text());
-        const sig = tokenData.sig;
-        const new_rt = tokenData.rt;
+        // L'API renvoie le 'sig' et 'rt'. On récupère sur les vrais noms ou les brouillés
+        const sig = tokenData.sig || tokenData[ZXC_KEYS.sig];
+        const new_rt = tokenData.rt || tokenData[ZXC_KEYS.rt];
         
         if (!sig) throw new Error("Le serveur a refusé nos jetons !");
         
@@ -297,10 +325,11 @@ async function extractStreamUrl(url) {
         for (const serverName of ZXC_SERVERS) {
             console.log(`[ZXC] 📡 Test du serveur : ${serverName}`);
             
-            let serverUrl = `${ZXC_BASE_URL}/backend/servers/${serverName}?mid=${mid}&b=${type}&rt=${new_rt}&sig=${sig}&xt=${xt}&q=${encodeURIComponent(title)}&p=${encodeURIComponent(year)}`;
-            if (date) serverUrl += `&date=${encodeURIComponent(date)}`;
-            if (ref) serverUrl += `&ref=${encodeURIComponent(ref)}`;
-            if (type === 'tv' && s && e) serverUrl += `&sx=${s}&ex=${e}`;
+            // --- CONSTRUCTION DE L'URL AVEC LES PARAMÈTRES BROUILLÉS ---
+            let serverUrl = `${ZXC_BASE_URL}/backend/servers/${serverName}?${ZXC_KEYS.mid}=${mid}&b=${type}&${ZXC_KEYS.rt}=${new_rt}&${ZXC_KEYS.sig}=${sig}&${ZXC_KEYS.xt}=${xt}&${ZXC_KEYS.q}=${encodeURIComponent(title)}&${ZXC_KEYS.p}=${encodeURIComponent(year)}`;
+            if (date) serverUrl += `&date=${encodeURIComponent(date)}`; // 'date' est resté le même d'après ton lien
+            if (ref) serverUrl += `&${ZXC_KEYS.ref}=${encodeURIComponent(ref)}`;
+            if (type === 'tv' && s && e) serverUrl += `&${ZXC_KEYS.sx}=${s}&${ZXC_KEYS.ex}=${e}`;
             
             try {
                 const serverRes = await soraFetch(serverUrl, { headers: { "Referer": `${ZXC_BASE_URL}/` } });
@@ -308,11 +337,10 @@ async function extractStreamUrl(url) {
                 
                 if (serverData && serverData.success && serverData.links && serverData.links.length > 0) {
                     
-                    // 🔥 CORRECTION : Application de makeAbsoluteUrl()
                     for (const linkObj of serverData.links) {
                         if (!linkObj.link) continue;
                         
-                        const safeUrl = makeAbsoluteUrl(linkObj.link);
+                        const safeUrl = getCleanUrl(linkObj.link);
                         
                         finalStreams.push({
                             title: `ZXC ${serverName.toUpperCase()} (${linkObj.resolution || 'Auto'}p)`,
@@ -321,12 +349,11 @@ async function extractStreamUrl(url) {
                         });
                     }
                     
-                    // 🔥 CORRECTION : Application de makeAbsoluteUrl() aux sous-titres
                     if (serverData.subtitles && Array.isArray(serverData.subtitles)) {
                         for (const sub of serverData.subtitles) {
                             if (!sub.file) continue;
                             
-                            const safeSubUrl = makeAbsoluteUrl(sub.file);
+                            const safeSubUrl = getCleanUrl(sub.file);
                             const subId = sub.id || "unknown";
                             
                             if (!subtitlesMap.has(subId)) {
@@ -344,7 +371,7 @@ async function extractStreamUrl(url) {
         }
 
         if (finalStreams.length > 0) {
-            console.log(`[ZXC] 🎉 Trouvé ${finalStreams.length} flux vidéos au total !`);
+            console.log(`[ZXC] 🎉 Trouvé ${finalStreams.length} flux vidéos purs !`);
             
             finalStreams.sort((a, b) => {
                 const resA = parseInt(a.title.match(/(\d+)p/)?.[1]) || 0;
@@ -389,4 +416,3 @@ async function soraFetch(url, options = { headers: {}, method: 'GET', body: null
     } catch(e) {
         try { return await fetch(url, options); } catch { return null; }
     }
-}
