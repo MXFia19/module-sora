@@ -83,6 +83,35 @@ Les cartes en défaut s'ouvrent d'office — c'est ce qu'on vient regarder.
 laisse déclencher des scrapes à volonté, ce qui n'a rien à faire sur une
 instance ouverte au public.
 
+### La console en direct
+
+`http://votre-hôte:7000/debug/live` — à laisser ouverte sur un écran pendant
+qu'on se sert de Stremio **depuis un autre appareil**.
+
+`/debug` répond à « cette source marche-t-elle ? » en la testant. La console
+répond à une autre question : « que s'est-il passé quand mon téléphone a
+ouvert cet épisode ? ». On ne peut pas rejouer la requête d'un client distant,
+il faut l'observer au vol.
+
+Chaque requête apparaît comme une carte :
+
+```
+19:04:12  Interstellar  tt0816692        8/8 flux   5207ms   192.168.1.34
+          Purstream      1 flux   2592ms
+          Movix         10 flux   4346ms
+```
+
+Avec l'adresse du client — pratique pour distinguer le téléphone du PC —, le
+pseudo de la configuration utilisée, et si la réponse venait du cache. Les
+requêtes qui rendent **zéro flux** se déplient d'office.
+
+En dessous, le journal brut défile en temps réel, filtrable par niveau, avec
+une pause pour lire tranquillement.
+
+Techniquement c'est du Server-Sent Events : unidirectionnel, ça traverse les
+proxies sans négociation, et le navigateur se reconnecte seul. `/health`
+indique le nombre de consoles connectées.
+
 ### En ligne de commande
 
 ```bash
@@ -106,6 +135,8 @@ src/
   direct.ts       teste quels flux se passent du proxy
   debug.ts        moteur de diagnostic : une source à la fois, flux vérifiés
   debugpage.ts    page /debug
+  livelog.ts      tampon d'événements + abonnés (console en direct)
+  livepage.ts     page /debug/live
   trace.ts        capture des logs par exécution (AsyncLocalStorage)
   ratelimit.ts    limite par IP + plafond de flux simultanés
   tmdb.ts         id IMDb → id TMDB, titres, alias, épisode absolu

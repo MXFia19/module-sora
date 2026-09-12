@@ -1,5 +1,6 @@
 import { config } from './config';
 import { record } from './trace';
+import { pushLog } from './livelog';
 
 function inspect(v: unknown): string {
   if (v instanceof Error) return v.message;
@@ -23,7 +24,9 @@ export function logger(scope: string) {
   const emit = (level: Level, args: unknown[]) => {
     // La capture ignore le niveau configuré : la page de diagnostic doit
     // pouvoir montrer le détail même quand la console est en mode silencieux.
-    record(level, scope, args.map(a => typeof a === 'string' ? a : inspect(a)).join(' '));
+    const message = args.map(a => typeof a === 'string' ? a : inspect(a)).join(' ');
+    record(level, scope, message);
+    pushLog(level, scope, message);
 
     if (!enabled(level)) return;
     const line = `${ts()} [${scope}]`;

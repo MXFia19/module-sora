@@ -12,7 +12,9 @@ import { decodeConfig, applyConfig, DEFAULT_CONFIG } from './userconfig';
 import type { UserConfig } from './userconfig';
 import { configurePage } from './configure';
 import { debugPage } from './debugpage';
+import { livePage } from './livepage';
 import { runDiagnostic } from './debug';
+import { pushRequest, snapshot, subscribe, subscriberCount } from './livelog';
 import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
 import type { MediaType, RawStream } from './types';
 
@@ -74,7 +76,7 @@ app.get('/', (_req, res) => {
 <h1>Sora</h1>
 <p>Addon actif. Sources : ${enabledScrapers().map(s => s.name).join(', ') || '<em>aucune</em>'}.</p>
 <p><a href="/configure">Configurer et générer mon lien d'installation →</a></p>
-${config.debugUi ? '<p><a href="/debug">Diagnostic des sources →</a></p>' : ''}
+${config.debugUi ? '<p><a href="/debug">Diagnostic des sources →</a> · <a href="/debug/live">Console en direct →</a></p>' : ''}
 <p>Ou, avec les réglages par défaut : <code>${publicBase()}/manifest.json</code></p>`);
 });
 
@@ -105,19 +107,39 @@ async function handleStream(req: Request, res: Response, userConfig: UserConfig)
     // clé invalide ne doit pas empoisonner le résultat des autres.
     const keyPart = userConfig.tmdbKey ? `:k${userConfig.tmdbKey.slice(-6)}` : '';
     const cacheKey = `streams:${type}:${rawId}${keyPart}`;
+    const summary: SourceSummary = { sources: [] };
     const streams = await cached(
       cacheKey,
-      () => resolveStreams(type, id, season, episode, userConfig, cacheKey),
+      () => resolveStreams(type, id, season, episode, userConfig, cacheKey, summary),
     );
 
     const shown = applyConfig(streams, userConfig);
     const who = userConfig.nickname ? ` [${userConfig.nickname}]` : '';
-    log.info(`${type} ${rawId}${who} -> ${shown.length}/${streams.length} flux en ${Date.now() - started}ms`);
+    const ms = Date.now() - started;
+    log.info(`${type} ${rawId}${who} -> ${shown.length}/${streams.length} flux en ${ms}ms`);
+
+    // Un résumé vide signifie que le cache a répondu sans rien scraper.
+    pushRequest({
+      client: req.ip ?? '?',
+      type, id: rawId,
+      title: summary.title,
+      nickname: userConfig.nickname,
+      ms, total: streams.length, shown: shown.length,
+      cached: summary.sources.length === 0,
+      sources: summary.sources,
+    });
+
     res.json({ streams: shown.map(toStremio) });
   } catch (e) {
     log.error(`échec sur ${type} ${rawId}:`, e);
     res.json({ streams: [] });
   }
+}
+
+/** Rempli au fil de la résolution, pour la console en direct. */
+interface SourceSummary {
+  title?: string;
+  sources: Array<{ name: string; count: number; ms: number }>;
 }
 
 interface ParsedId {
@@ -148,6 +170,7 @@ async function resolveStreams(
   episode?: number,
   userConfig: UserConfig = DEFAULT_CONFIG,
   cacheKey?: string,
+  summary?: SourceSummary,
 ): Promise<RawStream[]> {
   const req = await buildRequest(id, type, season, episode, userConfig.tmdbKey);
   if (!req) {
@@ -170,15 +193,19 @@ async function resolveStreams(
 
   // Chaque scraper est isolé : un plantage ou un dépassement de budget ne
   // retire que sa propre contribution. Ces promesses ne rejettent jamais.
+  if (summary) summary.title = req.title;
+
   const tasks = scrapers.map(async s => {
     const t0 = Date.now();
     try {
       const out = await withTimeout(s.resolve(req), config.scraperTimeoutMs);
       log.info(`  ${s.name}: ${out.length} flux (${Date.now() - t0}ms)`);
+      summary?.sources.push({ name: s.name, count: out.length, ms: Date.now() - t0 });
       return out.map(x => ({ ...x, source: x.source ?? s.name }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       log.warn(`  ${s.name}: échec — ${msg} (${Date.now() - t0}ms)`);
+      summary?.sources.push({ name: s.name, count: -1, ms: Date.now() - t0 });
       return [] as RawStream[];
     }
   });
@@ -251,6 +278,39 @@ app.get('/proxy/s*', concurrencyGuard, handleProxy);
 // Page de diagnostic, volontairement optionnelle (DEBUG_UI=true).
 if (config.debugUi) {
   app.get('/debug', (_req, res) => res.type('html').send(debugPage()));
+  app.get('/debug/live', (_req, res) => res.type('html').send(livePage()));
+
+  /** Flux d'événements en temps réel (Server-Sent Events).
+   *
+   *  SSE plutôt que WebSocket : le besoin est unidirectionnel, ça passe les
+   *  proxies sans négociation particulière, et le navigateur se reconnecte
+   *  tout seul. */
+  app.get('/debug/events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      // Sans ça, un reverse-proxy peut tamponner le flux et tout arrive
+      // d'un bloc à la fermeture — c'est-à-dire jamais.
+      'X-Accel-Buffering': 'no',
+    });
+
+    // L'historique d'abord, pour que la page montre déjà quelque chose.
+    res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+
+    const unsubscribe = subscribe(e => {
+      res.write(`data: ${JSON.stringify(e)}\n\n`);
+    });
+
+    // Un commentaire périodique garde la connexion ouverte à travers les
+    // intermédiaires qui coupent les flux inactifs.
+    const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+
+    req.on('close', () => {
+      clearInterval(ping);
+      unsubscribe();
+    });
+  });
 
   app.get('/debug/run', async (req, res) => {
     const type = req.query.type === 'series' ? 'series' : 'movie';
@@ -286,6 +346,7 @@ app.get('/health', (_req, res) => {
     cache: cacheStats(),
     scrapers: enabledScrapers().map(s => s.id),
     activeStreams: activeStreams(),
+    liveViewers: subscriberCount(),
   });
 });
 
@@ -303,7 +364,10 @@ if (require.main === module) {
     if (!config.publicUrl) {
       log.warn('PUBLIC_URL non définie — les liens proxifiés pointeront sur 127.0.0.1 (usage local uniquement).');
     }
-    if (config.debugUi) log.info(`diagnostic disponible sur ${publicBase()}/debug`);
+    if (config.debugUi) {
+      log.info(`diagnostic : ${publicBase()}/debug`);
+      log.info(`console en direct : ${publicBase()}/debug/live`);
+    }
     if (config.rateLimitStreamPerMin > 0 || config.proxyMaxConcurrent > 0) {
       log.info(`garde-fous: ${config.rateLimitStreamPerMin || '∞'} req/min par IP, ${config.proxyMaxConcurrent || '∞'} flux simultanés`);
     }
