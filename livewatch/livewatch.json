@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://livewatch.top/",
     "searchBaseUrl": "https://livewatch.top/api/tvvoo/channels",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/livewatch/livewatch.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/livewatch/livewatch.js",
     "type": "live/tv",
     "downloadSupport": false,
     "asyncJS": true,

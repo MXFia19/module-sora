@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://aether.bar/",
     "searchBaseUrl": "https://api.themoviedb.org/3/search/multi",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/aether/aether.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/aether/aether.js",
     "type": "shows/movies/anime",
     "downloadSupport": true,
     "asyncJS": true,

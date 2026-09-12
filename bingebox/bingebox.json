@@ -1,6 +1,6 @@
 {
     "sourceName": "Bingebox",
-    "iconUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/bingebox/favicon.png",
+    "iconUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/bingebox/favicon.png",
     "author": {
         "name": "MXFia19",
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://bingebox.ac/",
     "searchBaseUrl": "https://bingebox.ac/",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/bingebox/bingebox.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/bingebox/bingebox.js",
     "type": "movies/shows/anime",
     "downloadSupport": true,
     "asyncJS": true,

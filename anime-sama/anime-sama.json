@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://anime-sama.to/",
     "searchBaseUrl": "https://anime-sama.to/",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/anime-sama/anime-sama.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/anime-sama/anime-sama.js",
     "type": "anime",
     "downloadSupport": true,
     "asyncJS": true,

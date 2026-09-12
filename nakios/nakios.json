@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://nakios.online/",
     "searchBaseUrl": "https://api.nakios.site/api/search",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/nakios/nakios.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/nakios/nakios.js",
     "type": "anime/shows/movies",
     "downloadSupport": true,
     "asyncJS": true,

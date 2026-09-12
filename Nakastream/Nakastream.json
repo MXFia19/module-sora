@@ -1,6 +1,6 @@
 {
     "sourceName": "Nakastream",
-    "iconUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/Nakastream/w5bf88w.png",
+    "iconUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/Nakastream/w5bf88w.png",
     "author": {
         "name": "MXFia19",
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://nakastream.tv/",
     "searchBaseUrl": "https://nakastream.tv/api/v1/browse/catalog?search=",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/Nakastream/nakastream.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/Nakastream/nakastream.js",
     "type": "shows/movies",
     "downloadSupport": true,
     "asyncJS": true,

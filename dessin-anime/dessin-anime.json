@@ -1,6 +1,6 @@
 {
     "sourceName": "dessin-anime",
-    "iconUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/dessin-anime/icon.png",
+    "iconUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/dessin-anime/icon.png",
     "author": {
         "name": "MXFia19",
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://dessinanime.cc/",
     "searchBaseUrl": "https://dessinanime.cc/api/search?q",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/dessin-anime/dessin-anime.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/dessin-anime/dessin-anime.js",
     "type": "anime",
     "downloadSupport": true,
     "asyncJS": true,

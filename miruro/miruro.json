@@ -12,7 +12,7 @@
     "quality": "1080p",
     "baseUrl": "https://www.miruro.to/",
     "searchBaseUrl": "https://www.miruro.to/",
-    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/miruro/miruro.js",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/miruro/miruro.js",
     "type": "anime",
     "downloadSupport": true,
     "asyncJS": true,
