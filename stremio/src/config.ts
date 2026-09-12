@@ -80,6 +80,11 @@ export const config = {
    *  client lui-même. */
   get trustProxy(): number { return num('TRUST_PROXY', 0); },
 
+  /** Page de diagnostic sur /debug. Fermée par défaut : elle expose le détail
+   *  du fonctionnement interne et laisse déclencher des scrapes à volonté, ce
+   *  qui n'a rien à faire sur une instance ouverte au public. */
+  get debugUi(): boolean { return bool('DEBUG_UI', false); },
+
   /** Verbosité. 'debug' trace chaque requête HTTP sortante. */
   get logLevel(): 'debug' | 'info' | 'warn' | 'error' {
     return str('LOG_LEVEL', 'info') as 'debug' | 'info' | 'warn' | 'error';

@@ -1,4 +1,10 @@
 import { config } from './config';
+import { record } from './trace';
+
+function inspect(v: unknown): string {
+  if (v instanceof Error) return v.message;
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 type Level = keyof typeof LEVELS;
@@ -15,6 +21,10 @@ function ts(): string {
  *  on garde la convention, elle rend les logs grep-ables par source. */
 export function logger(scope: string) {
   const emit = (level: Level, args: unknown[]) => {
+    // La capture ignore le niveau configuré : la page de diagnostic doit
+    // pouvoir montrer le détail même quand la console est en mode silencieux.
+    record(level, scope, args.map(a => typeof a === 'string' ? a : inspect(a)).join(' '));
+
     if (!enabled(level)) return;
     const line = `${ts()} [${scope}]`;
     if (level === 'error') console.error(line, ...args);

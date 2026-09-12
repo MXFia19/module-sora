@@ -11,6 +11,8 @@ import { relaxHeaders } from './direct';
 import { decodeConfig, applyConfig, DEFAULT_CONFIG } from './userconfig';
 import type { UserConfig } from './userconfig';
 import { configurePage } from './configure';
+import { debugPage } from './debugpage';
+import { runDiagnostic } from './debug';
 import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
 import type { MediaType, RawStream } from './types';
 
@@ -72,6 +74,7 @@ app.get('/', (_req, res) => {
 <h1>Sora</h1>
 <p>Addon actif. Sources : ${enabledScrapers().map(s => s.name).join(', ') || '<em>aucune</em>'}.</p>
 <p><a href="/configure">Configurer et générer mon lien d'installation →</a></p>
+${config.debugUi ? '<p><a href="/debug">Diagnostic des sources →</a></p>' : ''}
 <p>Ou, avec les réglages par défaut : <code>${publicBase()}/manifest.json</code></p>`);
 });
 
@@ -245,6 +248,38 @@ function withTimeout<T>(p: Promise<T[]>, ms: number): Promise<T[]> {
 // qu'à renseigner les players qui devinent le type depuis l'extension.
 app.get('/proxy/s*', concurrencyGuard, handleProxy);
 
+// Page de diagnostic, volontairement optionnelle (DEBUG_UI=true).
+if (config.debugUi) {
+  app.get('/debug', (_req, res) => res.type('html').send(debugPage()));
+
+  app.get('/debug/run', async (req, res) => {
+    const type = req.query.type === 'series' ? 'series' : 'movie';
+    const id = String(req.query.id ?? '').trim();
+    const num = (v: unknown) => {
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    };
+
+    if (!id) {
+      res.json({ resolveLogs: [], scrapers: [], totalMs: 0, error: 'identifiant vide' });
+      return;
+    }
+
+    try {
+      res.json(await runDiagnostic(
+        type, id, num(req.query.season), num(req.query.episode),
+        req.query.check !== '0',
+      ));
+    } catch (e) {
+      log.error('diagnostic en échec:', e);
+      res.json({
+        resolveLogs: [], scrapers: [], totalMs: 0,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  });
+}
+
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
@@ -268,6 +303,7 @@ if (require.main === module) {
     if (!config.publicUrl) {
       log.warn('PUBLIC_URL non définie — les liens proxifiés pointeront sur 127.0.0.1 (usage local uniquement).');
     }
+    if (config.debugUi) log.info(`diagnostic disponible sur ${publicBase()}/debug`);
     if (config.rateLimitStreamPerMin > 0 || config.proxyMaxConcurrent > 0) {
       log.info(`garde-fous: ${config.rateLimitStreamPerMin || '∞'} req/min par IP, ${config.proxyMaxConcurrent || '∞'} flux simultanés`);
     }

@@ -57,6 +57,34 @@ quelle cible.
 
 ## Diagnostiquer une source muette
 
+### La page /debug
+
+```bash
+DEBUG_UI=true docker compose up -d --build   # ou DEBUG_UI=true dans .env
+```
+
+Puis `http://votre-hôte:7000/debug`. Un champ, un bouton, et le verdict de
+chaque source :
+
+- **une carte par source**, verte si elle rend des flux, orange si elle n'en
+  rend aucun, rouge si elle échoue ou dépasse son budget ;
+- **ses logs à elle**, capturés séparément — les sources tournent en
+  parallèle, leurs lignes s'entrelacent dans la console, ici elles sont
+  démêlées ;
+- **l'état réel de chaque flux** : chaque lien est réellement sollicité, et la
+  page affiche le code HTTP obtenu. Une source qui rend dix liens dont aucun
+  ne répond a l'air de marcher dans les logs ; ici ça se voit ;
+- **ce que TMDB a résolu** : titre, année, identifiant, épisode absolu, et la
+  liste des titres essayés pour le rapprochement.
+
+Les cartes en défaut s'ouvrent d'office — c'est ce qu'on vient regarder.
+
+`DEBUG_UI` est fermé par défaut : la page expose le fonctionnement interne et
+laisse déclencher des scrapes à volonté, ce qui n'a rien à faire sur une
+instance ouverte au public.
+
+### En ligne de commande
+
 ```bash
 npm run build
 npm run probe -- movie tt0816692
@@ -76,6 +104,9 @@ src/
   userconfig.ts   config par utilisateur, encodée dans l'URL
   configure.ts    page de génération du lien d'installation
   direct.ts       teste quels flux se passent du proxy
+  debug.ts        moteur de diagnostic : une source à la fois, flux vérifiés
+  debugpage.ts    page /debug
+  trace.ts        capture des logs par exécution (AsyncLocalStorage)
   ratelimit.ts    limite par IP + plafond de flux simultanés
   tmdb.ts         id IMDb → id TMDB, titres, alias, épisode absolu
   match.ts        rapprochement titre ↔ résultat, avec seuil
