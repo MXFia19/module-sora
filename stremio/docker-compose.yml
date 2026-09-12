@@ -1,0 +1,19 @@
+services:
+  sora-stremio:
+    build: .
+    image: sora-stremio:latest
+    container_name: sora-stremio
+    restart: unless-stopped
+    ports:
+      - "${PORT:-7000}:7000"
+    env_file:
+      - .env
+    environment:
+      # Le port interne ne bouge pas ; c'est le mapping ci-dessus qui change.
+      PORT: 7000
+    # L'addon ne garde rien sur disque : le cache est en mémoire, et le perdre
+    # au redémarrage ne coûte qu'une poignée de requêtes.
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
