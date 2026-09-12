@@ -309,6 +309,9 @@ depuis `web.stremio.com`, qui refuse le HTTP simple.
 Conseillez-leur d'apporter leur clé TMDB et de laisser le mode « direct » :
 votre quota et votre bande passante ne bougent alors pas.
 
+`PROBE_DIRECT=true` mérite d'être relu avant d'être gardé — voir « Ce que la
+sonde ne prouve pas » ci-dessous.
+
 ### Le chiffre qui décide de tout : la bande passante
 
 Un flux proxifié fait transiter **chaque octet de la vidéo par votre serveur**.
@@ -328,9 +331,29 @@ qu'il ne servait qu'à récupérer la page d'embed. Le CDN final, lui, ne le
 réclame presque jamais — vérifié sur une dizaine d'hébergeurs. Les flux
 directs ne coûtent alors rien d'autre qu'une réponse JSON.
 
-Le verdict est mémorisé par hôte : ~3 s au premier appel pour un CDN inconnu,
-puis rien. À langue et qualité égales, un flux direct est proposé avant un
-flux proxifié.
+Le verdict est mémorisé par hôte pendant 6 h : ~3 s au premier appel pour un
+CDN inconnu, puis rien. À langue et qualité égales, un flux direct est proposé
+avant un flux proxifié.
+
+#### Ce que la sonde ne prouve pas
+
+Elle interroge le CDN **depuis le serveur**. Elle établit donc que *le serveur*
+lit le flux sans headers — pas que *le lecteur* le pourra. Or ces URLs sont
+signées, et portent régulièrement de quoi les lier à celui qui les a
+demandées : `sign` et `reg` chez Mail.ru, `ip` chez Streamtape, `asn` chez la
+famille Vidmoly. Un jeton frappé pour l'IP du serveur peut être refusé au
+téléphone.
+
+`PROBE_DIRECT` est donc sûr quand les clients sortent par la même IP que le
+serveur (usage domestique, VPN commun), et c'est un pari sur un serveur
+distant. Le symptôme du pari perdu : des erreurs de lecture sur des flux que
+`/debug` annonce joignables — puisque `/debug` les sollicite, lui aussi,
+depuis le serveur. Dans ce cas, `PROBE_DIRECT=false` : se tromper de ce côté
+ne coûte que de la bande passante, l'inverse casse la lecture.
+
+`/debug` marque « direct (sondé) » exactement les flux concernés — ceux dont
+le scraper réclamait des headers et que la sonde a décidé de servir nus. Ce
+sont les seuls à soupçonner.
 
 Avec ça, un VPS d'entrée de gamme (~5 €/mois, 20 To de trafic) tient
 confortablement. Sans, les 20 To partent en ~5 500 films.

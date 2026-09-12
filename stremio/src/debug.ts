@@ -2,6 +2,7 @@ import { config } from './config';
 import { buildRequest } from './tmdb';
 import { enabledScrapers } from './scrapers';
 import { hasMeaningfulHeaders } from './display';
+import { relaxHeaders } from './direct';
 import { traced } from './trace';
 import type { TraceLine } from './trace';
 import type { MediaRequest, MediaType, RawStream } from './types';
@@ -21,7 +22,13 @@ export interface StreamCheck {
   quality: string;
   server: string;
   host: string;
+  /** Comment le flux sera RÉELLEMENT servi au lecteur. */
   proxied: boolean;
+  /** Le scraper réclamait des headers, mais PROBE_DIRECT a jugé l'hôte
+   *  capable de s'en passer. Distinguer les deux évite la contradiction qui
+   *  faisait dire à cette page « à proxifier » pendant que l'addon servait le
+   *  même flux en direct. */
+  relaxed?: boolean;
   url: string;
   /** Résultat de la sollicitation réelle : code HTTP, ou 0 si injoignable. */
   httpStatus?: number;
@@ -141,12 +148,22 @@ async function runScraper(
   // Les vérifications sont plafonnées : au-delà on saurait déjà à quoi s'en
   // tenir, et chacune coûte une requête sortante.
   const toCheck = value.streams.slice(0, 12);
-  const streams = check
-    ? await Promise.all(toCheck.map(checkStream))
-    : toCheck.map(s => ({
+
+  // Le même traitement que sur le chemin réel : sans lui, cette page décrit
+  // un état que l'addon ne sert jamais.
+  const asked = toCheck.map(s => hasMeaningfulHeaders(s.headers));
+  const served = await relaxHeaders(toCheck);
+
+  const streams: StreamCheck[] = check
+    ? await Promise.all(served.map(checkStream))
+    : served.map(s => ({
         language: s.language, quality: s.quality, server: s.server,
         host: hostOf(s.url), proxied: hasMeaningfulHeaders(s.headers), url: s.url,
       }));
+
+  streams.forEach((s, i) => {
+    if (asked[i] && !s.proxied) s.relaxed = true;
+  });
 
   return {
     ...skeleton,

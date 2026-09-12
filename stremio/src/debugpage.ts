@@ -56,6 +56,7 @@ td.u{color:var(--dim);font-family:ui-monospace,monospace;font-size:.75rem;word-b
 .pill{font-size:.72rem;padding:.1rem .4rem;border-radius:4px;white-space:nowrap}
 .pill.y{background:#12261a;color:var(--ok)} .pill.n{background:#2a1315;color:var(--err)}
 .pill.p{background:#1c2333;color:#79c0ff}
+.pill.d{background:#20221c;color:#d29922}
 pre{background:#0d1117;border:1px solid var(--line);border-radius:7px;padding:.6rem;margin:.7rem 0 0;
  overflow:auto;max-height:20rem;font-size:.76rem;line-height:1.45}
 pre .debug{color:var(--dim)} pre .warn{color:var(--warn)} pre .error{color:var(--err)}
@@ -144,7 +145,10 @@ function streamsHtml(streams, count) {
       if (s.checkMs) verdict += ' <span class="badge">' + s.checkMs + 'ms</span>';
     }
     return '<tr><td>' + esc(s.language) + '</td><td>' + esc(s.quality) + '</td>' +
-      '<td>' + esc(s.server) + (s.proxied ? ' <span class="pill p">proxy</span>' : '') + '</td>' +
+      '<td>' + esc(s.server) +
+        (s.proxied ? ' <span class="pill p">proxy</span>'
+          : s.relaxed ? ' <span class="pill d" title="le scraper demandait des headers ; PROBE_DIRECT a jugé l\'hôte capable de s\'en passer">direct (sondé)</span>'
+          : '') + '</td>' +
       '<td>' + esc(s.host) + '</td><td>' + verdict + '</td>' +
       '<td class="u">' + esc(s.url.slice(0, 110)) + '</td></tr>';
   }).join('');
