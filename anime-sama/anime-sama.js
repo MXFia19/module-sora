@@ -368,24 +368,57 @@ async function extractStreamUrl(url) {
                     }
                 } catch (e) {}
             }
-            // 6. LECTEUR SIBNET
+            // 6. LECTEUR SIBNET (AVEC DIAGNOSTIC iOS)
             else if (urlLower.includes("sibnet.ru")) {
+                console.log(`[Sibnet] 🔍 1/4 - Démarrage extraction sur : ${embedUrl}`);
                 try {
-                    const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.to/" }, "GET", null, true, "windows-1251");
+                    // 🌟 CORRECTION 1 : On force un User-Agent Desktop pour éviter la version mobile de Sibnet sur iOS
+                    const sibnetHeaders = { 
+                        "Referer": "https://anime-sama.to/",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    };
+                    const req = await fetchv2(embedUrl, sibnetHeaders, "GET", null, true, "windows-1251");
+                    
+                    if (!req) {
+                        console.log(`[Sibnet] 🚨 1/4 - ERREUR FATALE : La requête (fetchv2) a renvoyé NULL. (Problème de fetch réseau sur iOS ?)`);
+                        continue;
+                    }
+                    
                     const html = await req.text();
-                    const srcMatch = html.match(/src:\s*["'](\/v\/[^"']+\.mp4)["']/i);
+                    
+                    if (!html || html.length < 100) {
+                         console.log(`[Sibnet] 🚨 2/4 - ERREUR : HTML reçu vide ou trop court (Taille: ${html ? html.length : 0}).`);
+                         continue;
+                    } else {
+                         console.log(`[Sibnet] ✅ 2/4 - HTML téléchargé avec succès. (Taille: ${html.length} chars)`);
+                    }
+
+                    // 🌟 CORRECTION 2 : Regex plus robuste (Supporte les .m3u8 et les URLs absolues)
+                    const srcMatch = html.match(/player\.src\s*\(\s*\[\s*\{\s*src\s*:\s*["']([^"']+)["']/i) || 
+                                     html.match(/src:\s*["']((?:https?:\/\/video\.sibnet\.ru)?\/v\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i) || 
+                                     html.match(/["']((?:https?:\/\/video\.sibnet\.ru)?\/v\/[^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
                     
                     if (srcMatch) {
-                        let streamUrl = "https://video.sibnet.ru" + srcMatch[1];
+                        let streamUrl = srcMatch[1].startsWith("http") ? srcMatch[1] : "https://video.sibnet.ru" + srcMatch[1];
+                        console.log(`[Sibnet] ✅ 3/4 - SRC trouvée par le Regex : ${streamUrl}`);
+                        
                         try {
+                            console.log(`[Sibnet] 📡 4/4 - Tentative de résolution de la redirection (HEAD)...`);
                             const redirectReq = await fetchv2(streamUrl, {
                                 "Referer": embedUrl,
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                                // Certains iOS WKWebview bloquent si le User-Agent n'est pas "Mobile"
+                                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
                             }, "HEAD");
+                            
                             if (redirectReq && redirectReq.url && redirectReq.url !== streamUrl) {
+                                console.log(`[Sibnet] 🔄 Redirection confirmée vers : ${redirectReq.url}`);
                                 streamUrl = redirectReq.url;
+                            } else {
+                                console.log(`[Sibnet] ⚠️ Pas de redirection détectée (URL identique ou échec HEAD). On garde le lien d'origine.`);
                             }
-                        } catch(e) {}
+                        } catch(redErr) {
+                            console.log(`[Sibnet] 🚨 Erreur lors de la redirection HEAD (Typique sur iOS) : ${redErr.message}. On force le lien d'origine.`);
+                        }
 
                         streams.push({ 
                             title: `${prefix} Sibnet`, 
@@ -393,8 +426,25 @@ async function extractStreamUrl(url) {
                             headers: { "Referer": embedUrl, "User-Agent": "Mozilla/5.0" } 
                         });
                         extractedNames.push(`${prefix} Sibnet`);
+                        console.log(`[Sibnet] 🎉 SUCCÈS TOTAL : Sibnet ajouté aux flux.`);
+
+                    } else {
+                        console.log(`[Sibnet] 🚨 3/4 - ERREUR : Le Regex n'a rien trouvé. Extrait du HTML : ${html.substring(0, 500)}...`);
                     }
-                } catch(e) {}
+                } catch(globalSibErr) {
+                    console.log(`[Sibnet] 💥 CRASH GÉNERAL DANS LE TRY/CATCH SIBNET : ${globalSibErr.message}`);
+                }
+            }
+            // 6.5 LECTEUR EMBED4ME / LPLAYER (famille embedseek, API /api/v1/video chiffrée AES-128-CBC)
+            else if (urlLower.includes("lplayer") || urlLower.includes("embed4me") || urlLower.includes("embedseek") || urlLower.includes("neocine") || urlLower.includes("seekplayer") || urlLower.includes("flemmix") || urlLower.includes("p2pstream")) {
+                console.log(`[Lecteur] 🕵️ Extraction Embed4me/lplayer : ${embedUrl}`);
+                try {
+                    const r = await embed4meExtractor(embedUrl);
+                    if (r && r.streamUrl) {
+                        streams.push({ title: `${prefix} Lplayer (HLS)`, streamUrl: r.streamUrl, headers: r.headers });
+                        extractedNames.push(`${prefix} Lplayer`);
+                    }
+                } catch (e) {}
             }
             // 7. DETECTEUR UNIVERSEL (Vidhide / Famille Packer)
             else {
@@ -433,12 +483,12 @@ async function extractStreamUrl(url) {
         }
 
         sendSupabaseLog("Anime-Sama", "PLAYER", { 
-            anime_url: url, ep_number: epIndex + 1, streams_found: uniqueStreams.length, servers: extractedNames
+            media_url: url, ep_number: epIndex + 1, streams_found: uniqueStreams.length, servers: extractedNames
         });
 
         if (failedLinks.length > 0) {
             sendSupabaseLog("Anime-Sama", "UNSUPPORTED_HOSTS", {
-                anime_url: url, ep_number: epIndex + 1, failed_count: failedLinks.length, failed_links: failedLinks
+                media_url: url, ep_number: epIndex + 1, failed_count: failedLinks.length, failed_links: failedLinks
             });
         }
 
@@ -452,6 +502,165 @@ async function extractStreamUrl(url) {
 // ==========================================
 // 🛠️ FONCTIONS UTILITAIRES & DÉCRYPTEURS
 // ==========================================
+
+// ==========================================
+// 🔓 EMBED4ME / LPLAYER (embedseek) — AES-128-CBC pur JS (porté de movix)
+// L'API /api/v1/video?id=... renvoie un blob hex chiffré. Clé/IV statiques.
+// ==========================================
+const _EMBED4ME_KEY = "kiemtienmua911ca";
+const _EMBED4ME_IV  = "1234567890oiuytr";
+
+// --- AES-128 pur JS (déchiffrement CBC) ---
+const _AES = (function () {
+    const sbox = [], invSbox = [], rcon = [0x01];
+    (function init() {
+        const p = new Uint8Array(256), q = new Uint8Array(256);
+        let x = 1, xi = 1;
+        for (let i = 0; i < 256; i++) {
+            p[i] = x;
+            x ^= (x << 1) ^ ((x & 0x80) ? 0x11b : 0);
+            xi ^= xi << 1; xi ^= xi << 2; xi ^= xi << 4;
+            if (xi & 0x80) xi ^= 0x09;
+            q[x & 0xff === 0 ? 0 : x] = 0; // placeholder, real inverse below
+        }
+        // table de log/antilog correcte
+        const log = new Uint8Array(256), alog = new Uint8Array(256);
+        let a = 1;
+        for (let i = 0; i < 255; i++) {
+            alog[i] = a; log[a] = i;
+            a ^= (a << 1) ^ ((a & 0x80) ? 0x11b : 0); a &= 0xff;
+        }
+        const inv = (g) => g === 0 ? 0 : alog[(255 - log[g]) % 255];
+        for (let i = 0; i < 256; i++) {
+            let s = inv(i), xf = s;
+            for (let k = 0; k < 4; k++) { xf = ((xf << 1) | (xf >> 7)) & 0xff; s ^= xf; }
+            s ^= 0x63;
+            sbox[i] = s; invSbox[s] = i;
+        }
+        for (let i = 1; i < 10; i++) {
+            rcon[i] = (rcon[i - 1] << 1) ^ ((rcon[i - 1] & 0x80) ? 0x11b : 0);
+            rcon[i] &= 0xff;
+        }
+    })();
+
+    function expandKey(key) { // key: 16 bytes
+        const w = new Array(44);
+        for (let i = 0; i < 4; i++)
+            w[i] = [key[4*i], key[4*i+1], key[4*i+2], key[4*i+3]];
+        for (let i = 4; i < 44; i++) {
+            let t = w[i - 1].slice();
+            if (i % 4 === 0) {
+                t = [t[1], t[2], t[3], t[0]].map(b => sbox[b]);
+                t[0] ^= rcon[i / 4 - 1];
+            }
+            w[i] = w[i - 4].map((b, j) => b ^ t[j]);
+        }
+        return w;
+    }
+
+    function xtime(a) { return ((a << 1) ^ ((a & 0x80) ? 0x11b : 0)) & 0xff; }
+    function mul(a, b) {
+        let r = 0;
+        for (let i = 0; i < 8; i++) {
+            if (b & 1) r ^= a;
+            const hi = a & 0x80; a = (a << 1) & 0xff; if (hi) a ^= 0x1b;
+            b >>= 1;
+        }
+        return r & 0xff;
+    }
+
+    function decryptBlock(inp, w) {
+        let s = [[], [], [], []];
+        for (let i = 0; i < 16; i++) s[i % 4][(i / 4) | 0] = inp[i];
+
+        const addRound = (rnd) => {
+            for (let c = 0; c < 4; c++)
+                for (let r = 0; r < 4; r++)
+                    s[r][c] ^= w[rnd * 4 + c][r];
+        };
+        const invSub = () => {
+            for (let r = 0; r < 4; r++)
+                for (let c = 0; c < 4; c++) s[r][c] = invSbox[s[r][c]];
+        };
+        const invShift = () => {
+            for (let r = 1; r < 4; r++) {
+                const row = s[r].slice();
+                for (let c = 0; c < 4; c++) s[r][c] = row[(c - r + 4) % 4];
+            }
+        };
+        const invMix = () => {
+            for (let c = 0; c < 4; c++) {
+                const a0 = s[0][c], a1 = s[1][c], a2 = s[2][c], a3 = s[3][c];
+                s[0][c] = mul(a0,14)^mul(a1,11)^mul(a2,13)^mul(a3,9);
+                s[1][c] = mul(a0,9)^mul(a1,14)^mul(a2,11)^mul(a3,13);
+                s[2][c] = mul(a0,13)^mul(a1,9)^mul(a2,14)^mul(a3,11);
+                s[3][c] = mul(a0,11)^mul(a1,13)^mul(a2,9)^mul(a3,14);
+            }
+        };
+
+        addRound(10);
+        for (let rnd = 9; rnd >= 1; rnd--) {
+            invShift(); invSub(); addRound(rnd); invMix();
+        }
+        invShift(); invSub(); addRound(0);
+
+        const out = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) out[i] = s[i % 4][(i / 4) | 0];
+        return out;
+    }
+
+    function cbcDecrypt(cipher, key, iv) {
+        const w = expandKey(key);
+        const out = new Uint8Array(cipher.length);
+        let prev = iv;
+        for (let off = 0; off < cipher.length; off += 16) {
+            const block = cipher.subarray(off, off + 16);
+            const dec = decryptBlock(block, w);
+            for (let i = 0; i < 16; i++) out[off + i] = dec[i] ^ prev[i];
+            prev = block;
+        }
+        // retire le padding PKCS#7
+        const pad = out[out.length - 1];
+        return (pad > 0 && pad <= 16) ? out.subarray(0, out.length - pad) : out;
+    }
+
+    return { cbcDecrypt };
+})();
+
+function _hexToBytes(hex) {
+    hex = hex.trim();
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i++)
+        out[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return out;
+}
+function _strToBytes(s) {
+    const out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
+    return out;
+}
+
+async function embed4meExtractor(embedUrl) {
+    try {
+        const host = (embedUrl.match(/https?:\/\/([^/]+)/i) || [])[1];
+        const id = (embedUrl.match(/#([a-zA-Z0-9]+)/) || [])[1] || (embedUrl.match(/[?&]id=([a-zA-Z0-9]+)/) || [])[1];
+        if (!host || !id) return null;
+        const apiUrl = `https://${host}/api/v1/video?id=${id}&w=1680&h=1050&r=`;
+        // ⚠️ N'envoyer QUE le User-Agent (Origin/Referer -> 400 sur cette famille).
+        const res = await fetchv2(apiUrl, { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Accept": "*/*" }, "GET");
+        if (!res || typeof res.text !== "function") return null;
+        const hex = (await res.text()).trim();
+        if (!/^[0-9a-fA-F]+$/.test(hex)) return null;
+        const cipher = _hexToBytes(hex);
+        const plain = _AES.cbcDecrypt(cipher, _strToBytes(_EMBED4ME_KEY), _strToBytes(_EMBED4ME_IV));
+        let txt = ""; for (let i = 0; i < plain.length; i++) txt += String.fromCharCode(plain[i]);
+        try { txt = decodeURIComponent(escape(txt)); } catch (e) {}
+        const data = JSON.parse(txt);
+        let streamUrl = data.source || (data.hlsVideoTiktok ? `https://${host}${data.hlsVideoTiktok}` : null);
+        if (!streamUrl) return null;
+        return { streamUrl: streamUrl, headers: { "Referer": `https://${host}/`, "Origin": `https://${host}` } };
+    } catch (e) { return null; }
+}
 
 // Décodeur VOE (Mise à jour avec safeAtob pour corriger l'erreur Buffer)
 function voeExtractor(html) {

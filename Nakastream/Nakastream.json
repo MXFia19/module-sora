@@ -1,24 +1,24 @@
 {
     "sourceName": "Nakastream",
-    "iconUrl": "https://gitlab.com/mxfia19-group/module-sora/-/raw/main/Nakastream/w5bf88w.png",
+    "iconUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/Nakastream/w5bf88w.png",
     "author": {
         "name": "MXFia19",
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.3",
+    "version": "1.0.4",
     "language": "French",
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://nakastream.tv/",
     "searchBaseUrl": "https://nakastream.tv/api/v1/browse/catalog?search=",
-    "scriptUrl": "https://gitlab.com/mxfia19-group/module-sora/-/raw/main/Nakastream/nakastream.js?ref_type=heads",
+    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/Nakastream/nakastream.js",
     "type": "shows/movies",
     "downloadSupport": true,
     "asyncJS": true,
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "plus besoin du token + fix subtitles",
+    "changelog": "mise en place des bons headers pour eviter erreur 403",
     "settings": true
 }

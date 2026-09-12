@@ -49,7 +49,13 @@ async function searchResults(keyword) {
         const encodedKeyword = encodeURIComponent(cleanKeyword);
         const searchUrl = `${API_URL}/browse/catalog?page=1&limit=20&sort=recent&search=${encodedKeyword}`;
         
-        let headers = { "Accept": "application/json", "User-Agent": "Mozilla/5.0" };
+        // 🌟 CORRECTION : Ajout des en-têtes vitaux
+        let headers = { 
+            "Accept": "application/json", 
+            "User-Agent": "Mozilla/5.0",
+            "Origin": BASE_URL,
+            "Referer": `${BASE_URL}/`
+        };
 
         const response = await soraFetch(searchUrl, { headers: headers });
         const textResponse = await response.text();
@@ -59,7 +65,6 @@ async function searchResults(keyword) {
         if (json.data && Array.isArray(json.data)) {
             for (let item of json.data) {
                 let imgUrl = item.posterPath ? `https://image.tmdb.org/t/p/w500${item.posterPath}` : "https://via.placeholder.com/500x750/222222/FFFFFF?text=Aucune+Affiche";
-                // --- ON ATTACHE LE NOM À L'ID ---
                 results.push({
                     title: item.title,
                     image: imgUrl,
@@ -88,14 +93,18 @@ async function extractDetails(url) {
     sendSupabaseLog("NakaStream", "DETAILS", { media_url: url });
 
     try {
-        // 🌟 Regex mis à jour pour accepter les tirets et les lettres
         const match = url.match(/\/(tv|movie)\/([a-z0-9-]+)/i);
         if (!match) throw new Error("Format d'URL invalide");
         
-        const id = match[2].split('-')[0]; // On extrait juste le "1000"
+        const id = match[2].split('-')[0];
         const detailsUrl = `${API_URL}/browse/catalog?page=1&limit=1&search=&id=${id}`;
 
-        let headers = { "Accept": "application/json" };
+        // 🌟 CORRECTION : On simule qu'on est sur la page du film
+        let headers = { 
+            "Accept": "application/json",
+            "Origin": BASE_URL,
+            "Referer": url
+        };
 
         const response = await soraFetch(detailsUrl, { headers: headers });
         const json = await response.json();
@@ -124,8 +133,8 @@ async function extractEpisodes(url) {
         if (!match) throw new Error("Format d'URL invalide");
         
         const type = match[1];
-        const fullId = match[2]; // Ex: "1000-euphoria"
-        const showId = fullId.split('-')[0]; // On garde juste "1000" pour appeler l'API
+        const fullId = match[2]; 
+        const showId = fullId.split('-')[0]; 
         let episodesList = [];
 
         if (type === "movie") {
@@ -133,7 +142,12 @@ async function extractEpisodes(url) {
             return JSON.stringify(episodesList);
         }
 
-        let headers = { "Accept": "application/json" };
+        // 🌟 CORRECTION : En-têtes furtifs
+        let headers = { 
+            "Accept": "application/json",
+            "Origin": BASE_URL,
+            "Referer": url
+        };
 
         const detailsUrl = `${API_URL}/browse/catalog?page=1&limit=1&id=${showId}`;
         const detailsRes = await soraFetch(detailsUrl, { headers: headers });
@@ -173,30 +187,36 @@ async function extractEpisodes(url) {
 async function extractStreamUrl(url) {
     if (url === `${BASE_URL}/`) return JSON.stringify({ type: "none" });
 
-    let finalMediaUrl = url; // 🌟 On prépare la variable (par défaut l'URL brute)
+    let finalMediaUrl = url; 
 
     try {
         const startTime = Date.now();
         const parts = url.split('/');
         
-        const fullId = parts[0]; // "1000-euphoria"
-        const showId = fullId.split('-')[0]; // "1000" (pour interroger l'API vidéo)
+        const fullId = parts[0]; // "543-interstellar"
+        const showId = fullId.split('-')[0]; // "543"
         
-        // 🌟 Le vrai titre pour Supabase
         let mediaTitle = showId;
         if (fullId.includes('-')) {
             let cleanStr = fullId.substring(fullId.indexOf('-') + 1).replace(/-/g, ' ');
-            mediaTitle = cleanStr.charAt(0).toUpperCase() + cleanStr.slice(1); // "Euphoria"
+            mediaTitle = cleanStr.charAt(0).toUpperCase() + cleanStr.slice(1);
         }
 
-        const type = parts[1];
+        const type = parts[1]; // "movie" ou "tv"
         const seasonNum = parts[2];
         const episodeNum = parts[3];
 
         let apiUrl = `${API_URL}/streaming/sources/${showId}?type=${type}`;
         if (type === "tv") apiUrl += `&season=${seasonNum}&episode=${episodeNum}`;
 
-        let headers = { "Accept": "application/json" };
+        // 🌟 CORRECTION MAJEURE : On fabrique le Referer PARFAIT
+        const perfectReferer = `${BASE_URL}/${type}/${fullId}`;
+        
+        let headers = { 
+            "Accept": "application/json",
+            "Origin": BASE_URL,
+            "Referer": perfectReferer
+        };
 
         const response = await soraFetch(apiUrl, { headers: headers });
         let json = {};
@@ -205,7 +225,6 @@ async function extractStreamUrl(url) {
         try { 
             json = await response.json(); 
             
-            // 🌟 NOUVEAU : On fabrique l'URL parfaite si l'API nous donne le tmdbId
             if (json.tmdbId) {
                 finalMediaUrl = `${BASE_URL}/content/${type}/${json.tmdbId}`;
             }
@@ -251,10 +270,9 @@ async function extractStreamUrl(url) {
 
         if (streams.length === 0 && failedLinks.length === 0) failedLinks.push({ server_name: "API Nakastream (Vide/Indisponible)", url: apiUrl });
 
-        // 📡 On envoie le log avec l'URL propre !
         sendSupabaseLog("NakaStream", "PLAYER", { 
             media_title: mediaTitle,
-            media_url: finalMediaUrl, // 🌟 https://nakastream.tv/content/tv/85552
+            media_url: finalMediaUrl,
             season_number: seasonNum, 
             ep_number: episodeNum, 
             streams_found: streams.length, 
@@ -266,7 +284,7 @@ async function extractStreamUrl(url) {
         if (failedLinks.length > 0) {
             sendSupabaseLog("NakaStream", "UNSUPPORTED_HOSTS", { 
                 media_title: mediaTitle,
-                media_url: finalMediaUrl, // 🌟 Ici aussi
+                media_url: finalMediaUrl,
                 season_number: seasonNum, 
                 ep_number: episodeNum, 
                 failed_count: failedLinks.length, 
@@ -274,7 +292,6 @@ async function extractStreamUrl(url) {
             });
         }
 
-        // 🌟 RETOUR FINAL
         return JSON.stringify({ streams: streams, subtitles: subtitleUrl });
 
     } catch (error) { 

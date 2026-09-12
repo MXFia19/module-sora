@@ -1,0 +1,24 @@
+{
+    "sourceName": "Cinepulse",
+    "iconUrl": "https://cinepulse.vc/pwa-192x192.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.1",
+    "language": "French",
+    "streamType": "HLS/MP4",
+    "quality": "1080p",
+    "baseUrl": "https://cinepulse.vc/",
+    "searchBaseUrl": "https://apiapi.cinepulse.vc/",
+    "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/cinepulse/cinepulse.js",
+    "type": "movies/shows/anime",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "settings": true,
+    "supportsSora": false,
+    "supportsLuna": true,
+    "changelog": "update du domaine"
+}

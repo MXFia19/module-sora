@@ -43,23 +43,47 @@ let WORKING_DOMAIN = null;
 async function getWorkingDomain() {
     if (WORKING_DOMAIN) return WORKING_DOMAIN; 
 
+    // 🌟 1. PLAN A : Utilisation de l'API Serveur de Purstream (Super Rapide)
     try {
-        console.log("[Purstream] Recherche de l'URL officielle sur purstream.wiki...");
-        const response = await soraFetch("https://purstream.wiki/");
-        const html = await response.text();
-        const match = html.match(/https:\/\/(purstream\.[a-z]+)/);
+        console.log("[Purstream] Vérification de l'API de statut (purstream.wiki/api/server-status)...");
+        const response = await soraFetch("https://purstream.wiki/api/server-status");
+        const json = await response.json();
         
-        if (match && match[1]) {
-            WORKING_DOMAIN = match[1]; // Ex: purstream.me
-            console.log(`[Purstream] Domaine officiel trouvé : ${WORKING_DOMAIN}`);
-            return WORKING_DOMAIN;
-        } else {
-            throw new Error("Impossible de trouver le domaine sur le wiki.");
+        if (json && json.servers && Array.isArray(json.servers)) {
+            // On cherche le serveur principal
+            const mainServer = json.servers.find(s => s.id === "main");
+            
+            if (mainServer && mainServer.url) {
+                // Nettoyage de "https://purstream.ac/" pour ne garder que "purstream.ac"
+                let cleanDomain = mainServer.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                WORKING_DOMAIN = cleanDomain;
+                console.log(`[Purstream] Domaine officiel trouvé via API : ${WORKING_DOMAIN}`);
+                return WORKING_DOMAIN;
+            }
         }
+        throw new Error("Serveur principal introuvable dans le JSON.");
+        
     } catch (err) {
-        console.log(`[Purstream] Échec du wiki. Utilisation du domaine de secours. Erreur: ${err}`);
-        WORKING_DOMAIN = "purstream.me"; 
-        return WORKING_DOMAIN;
+        console.log(`[Purstream] Échec de l'API de statut, tentative de secours via HTML... (${err.message})`);
+        
+        // 🚨 2. PLAN B : Lecture HTML (En cas de panne de l'API JSON)
+        try {
+            const response = await soraFetch("https://purstream.wiki/");
+            const html = await response.text();
+            const match = html.match(/https:\/\/(purstream\.[a-z]+)/);
+            
+            if (match && match[1]) {
+                WORKING_DOMAIN = match[1]; 
+                console.log(`[Purstream] Domaine officiel trouvé via HTML : ${WORKING_DOMAIN}`);
+                return WORKING_DOMAIN;
+            } else {
+                throw new Error("Impossible de trouver le domaine sur le wiki (HTML).");
+            }
+        } catch (err2) {
+            console.log(`[Purstream] Échec total. Utilisation du domaine de secours. Erreur: ${err2.message}`);
+            WORKING_DOMAIN = "purstream.ac"; // On met le dernier nom de domaine connu par défaut
+            return WORKING_DOMAIN;
+        }
     }
 }
 
@@ -170,7 +194,7 @@ function slugify(title) {
 async function extractDetails(url) {
     console.log(`[Détails] 📖 Chargement des infos pour : ${url}`);
     
-    // 📡 Log Supabase (Détails) - 🌟 media_url appliqué
+    // 📡 Log Supabase (Détails)
     sendSupabaseLog("Purstream", "DETAILS", { media_url: url });
 
     try {
@@ -319,7 +343,6 @@ async function extractStreamUrl(url) {
         let mediaTitle = showId;
         if (fullId.includes('-')) {
             let cleanStr = fullId.substring(fullId.indexOf('-') + 1).replace(/-/g, ' ');
-            // On met une majuscule à chaque mot
             mediaTitle = cleanStr.replace(/\b\w/g, c => c.toUpperCase()); 
         }
 
@@ -335,7 +358,6 @@ async function extractStreamUrl(url) {
             episodeNumber = parts[2];
         }
 
-        // 🌟 On fabrique l'URL finale propre pour tes logs Supabase !
         finalMediaUrl = `https://${domain}/${typePath}/${fullId}`;
 
         let apiUrl = episodeNumber === "movie" 
@@ -348,7 +370,7 @@ async function extractStreamUrl(url) {
         
         let json = {};
         try { json = await response.json(); } catch(e) {
-            failedLinks.push({ server_name: "API Purstream (Crash)", url: apiUrl });
+            failedLinks.push({ server_name: "API Purstream (Crash)", url: apiUrl, reason: "Response JSON Parse failed" });
         }
 
         const sources = json?.data?.items?.sources || [];
@@ -362,7 +384,7 @@ async function extractStreamUrl(url) {
                     headers: {
                         "Origin": `https://${domain}`,
                         "Referer": `https://${domain}/`,
-                        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                     }
                 });
                 extractedNames.push(serverName);
@@ -405,13 +427,13 @@ async function extractStreamUrl(url) {
         }
 
         if (streams.length === 0 && failedLinks.length === 0) {
-            failedLinks.push({ server_name: "API Purstream (Vidéo Supprimée/Vide)", url: apiUrl });
+            failedLinks.push({ server_name: "API Purstream", url: apiUrl, reason: "Aucune vidéo trouvée pour ce média" });
         }
 
-        // 📡 Log Supabase (Parfaitement formaté)
+        // 📡 Log Supabase (Player)
         sendSupabaseLog("Purstream", "PLAYER", { 
-            media_title: mediaTitle, // 🏷️ "Alice In Borderland"
-            media_url: finalMediaUrl, // 🌟 "https://purstream.me/serie/3914-alice-in-borderland"
+            media_title: mediaTitle, 
+            media_url: finalMediaUrl, 
             season_number: seasonNumber,
             ep_number: episodeNumber,
             streams_found: streams.length,

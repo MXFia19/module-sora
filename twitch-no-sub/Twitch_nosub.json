@@ -1,0 +1,25 @@
+{
+  "sourceName": "Twitch NoSub",
+  "iconUrl": "https://pngimg.com/uploads/twitch/twitch_PNG13.png",
+  "author": {
+    "name": "MXFia19",
+    "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+    "url": "https://github.com/MXFia19"
+  },
+  "version": "1.0.3",
+  "language": "Multi",
+  "streamType": "HLS",
+  "quality": "Source",
+  "baseUrl": "https://twitch.tv/",
+  "searchBaseUrl": "https://gql.twitch.tv/gql",
+  "scriptUrl": "https://git.luna-app.eu/MXFia19/sources/raw/branch/main/twitch-no-sub/script_twitch_nosub.js",
+  "type": "vod/livestream",
+  "downloadSupport": false,
+  "asyncJS": true,
+  "softsub": false,
+  "note": "Search for the streamer name and his vod will appear (live support)",
+  "supportsSora": true,
+  "supportsLuna": false,
+  "changelog": "ajout de luminous pour eviter les pubs"
+
+}

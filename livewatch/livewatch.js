@@ -1,5 +1,5 @@
 // ==========================================
-// ⚙️ MODULE SORA — LIVEWATCH TV (Global Direct - FIX)
+// ⚙️ MODULE SORA — LIVEWATCH TV (V2 - Nouvelle API)
 // ==========================================
 
 const API_BASE = "https://livewatch.top/api";
@@ -35,49 +35,44 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
 
 // --- 1. RECHERCHE ---
 async function searchResults(keyword) {
-    console.log(`[LiveWatch] 🔍 Recherche globale de chaînes pour : "${keyword}"`);
+    console.log(`\n==============================================`);
+    console.log(`[LiveWatch] 🔍 DÉMARRAGE RECHERCHE : "${keyword}"`);
+    
     try {
-        // 1. Récupérer la liste de tous les pays
-        const countriesRes = await soraFetch(`${API_BASE}/countries/enabled`);
-        const countriesJson = await countriesRes.json();
-        const allCountries = countriesJson.countries || ["France"];
-
-        // 2. On lance une requête par pays en MÊME TEMPS (Parallèle)
-        const fetchPromises = allCountries.map(country => 
-            soraFetch(`${API_BASE}/tvvoo/channels?countries=${encodeURIComponent(country)}`)
-                .then(res => res.json())
-                .catch(() => []) // Si un pays plante, on renvoie un tableau vide pour lui
-        );
-
-        const allResultsArray = await Promise.all(fetchPromises);
+        const cleanKeyword = keyword ? keyword.trim() : "";
+        let searchUrl = `${API_BASE}/channels?limit=100`; // Par défaut on prend 100 chaînes max
         
-        // 3. On rassemble tous les tableaux en un seul immense tableau
-        let allChannels = [];
-        allResultsArray.forEach(countryChannels => {
-            if (Array.isArray(countryChannels)) {
-                allChannels = allChannels.concat(countryChannels);
-            }
-        });
-
-        let filteredChannels = allChannels;
-
-        // 4. Filtrage dynamique
-        if (keyword && keyword.trim() !== "") {
-            const cleanKeyword = keyword.trim().toLowerCase();
-            filteredChannels = allChannels.filter(c => c.name && c.name.toLowerCase().includes(cleanKeyword));
+        if (cleanKeyword !== "") {
+            searchUrl += `&search=${encodeURIComponent(cleanKeyword)}`;
+            console.log(`[LiveWatch] 📡 Recherche ciblée : ${searchUrl}`);
         } else {
-            // Si l'utilisateur ne tape rien, on limite à 100 chaînes pour éviter de faire crasher la mémoire du téléphone
-            filteredChannels = allChannels.slice(0, 100);
+            console.log(`[LiveWatch] 📡 Recherche globale (Top 100) : ${searchUrl}`);
         }
 
+        const response = await soraFetch(searchUrl);
+        if (!response) {
+            console.log(`[LiveWatch] ❌ Échec réseau sur l'API channels.`);
+            throw new Error("API LiveWatch injoignable.");
+        }
+
+        const textResponse = await response.text();
+        const json = JSON.parse(textResponse);
+        
+        const channels = json.channels || [];
+        console.log(`[LiveWatch] 📊 ${channels.length} chaînes trouvées (Total dispo: ${json.total || 0}).`);
+
         const results = [];
-        filteredChannels.forEach(c => {
-            const fakeUrl = `livewatch://${c.country}/${c.id}`;
-            const image = c.logo || c.poster || c.background || "https://via.placeholder.com/500x750/222222/FFFFFF?text=TV";
+        
+        channels.forEach(c => {
+            // On sauvegarde le nom de la chaîne dans l'URL pour pouvoir chercher l'EPG plus tard
+            const safeName = encodeURIComponent(c.name || "Inconnu");
+            const fakeUrl = `livewatch://${encodeURIComponent(c.country || "Unknown")}/${c.id}?name=${safeName}`;
+            
+            let image = c.logo || "https://via.placeholder.com/500x750/222222/FFFFFF?text=TV";
             
             // On met en évidence le pays dans le titre
             let titleInfo = `${c.name} [${c.country}]`;
-            if (c.quality) titleInfo += ` (${c.quality})`;
+            if (c.source) titleInfo += ` (${c.source})`;
 
             results.push({
                 title: titleInfo,
@@ -86,6 +81,8 @@ async function searchResults(keyword) {
             });
         });
 
+        console.log(`[LiveWatch] 🎉 Fin recherche. Renvoi de ${results.length} chaînes.`);
+
         sendSupabaseLog("LiveWatch", "SEARCH", { 
             keyword: keyword, results_count: results.length, top_results: results.slice(0, 3).map(r => r.title)
         });
@@ -93,22 +90,63 @@ async function searchResults(keyword) {
         return JSON.stringify(results);
 
     } catch (error) {
-        console.log(`[LiveWatch] 🚨 Erreur Search : ${error}`);
+        console.log(`[LiveWatch] 🚨 ERREUR RECHERCHE : ${error.message}`);
         return JSON.stringify([]);
     }
 }
 
 // --- 2. DÉTAILS ---
 async function extractDetails(url) {
+    console.log(`\n[LiveWatch] 📖 DÉTAILS POUR : ${url}`);
     sendSupabaseLog("LiveWatch", "DETAILS", { anime_url: url });
+    
     try {
-        const country = url.replace('livewatch://', '').split('/')[0];
+        const match = url.match(/livewatch:\/\/([^/]+)\/([^?]+)/);
+        const nameMatch = url.match(/[?&]name=([^&]+)/);
+        
+        const country = match ? decodeURIComponent(match[1]) : "Inconnu";
+        const channelName = nameMatch ? decodeURIComponent(nameMatch[1]) : "";
+        
+        let description = `Chaîne de télévision en direct (${country}). Sources fournies par LiveWatch.`;
+        let aliases = "En Direct";
+
+        // 🌟 NOUVEAU : Récupération du Programme TV (EPG)
+        if (channelName) {
+            console.log(`[LiveWatch] 📅 Recherche de l'EPG (Programme TV) pour : ${channelName}`);
+            try {
+                const epgRes = await soraFetch(`${API_BASE}/epg/now?name=${encodeURIComponent(channelName)}`);
+                if (epgRes) {
+                    const epgText = await epgRes.text();
+                    const epgJson = JSON.parse(epgText);
+                    
+                    if (epgJson.current && epgJson.current.title) {
+                        console.log(`[LiveWatch] ✅ EPG trouvé ! Actuellement : ${epgJson.current.title}`);
+                        
+                        description = `📺 EN CE MOMENT :\n${epgJson.current.title}`;
+                        if (epgJson.current.sub_title) description += ` - ${epgJson.current.sub_title}`;
+                        if (epgJson.current.desc) description += `\n\n📝 ${epgJson.current.desc}\n`;
+                        
+                        if (epgJson.next && epgJson.next.title) {
+                            description += `\n\n🔜 À SUIVRE :\n${epgJson.next.title}`;
+                            if (epgJson.next.sub_title) description += ` - ${epgJson.next.sub_title}`;
+                        }
+                    } else {
+                        console.log(`[LiveWatch] ⚠️ Aucun programme en cours renvoyé par l'API.`);
+                    }
+                }
+            } catch(epgErr) {
+                console.log(`[LiveWatch] ⚠️ Échec de récupération de l'EPG : ${epgErr.message}`);
+            }
+        }
+
         return JSON.stringify([{ 
-            description: `Chaîne de télévision en direct (${decodeURIComponent(country)}). Sources fournies par LiveWatch.`, 
-            aliases: "En Direct", 
+            description: description, 
+            aliases: aliases, 
             airdate: "Live" 
         }]);
+
     } catch (error) {
+        console.log(`[LiveWatch] 🚨 ERREUR DÉTAILS : ${error.message}`);
         return JSON.stringify([{ description: 'Erreur', aliases: '', airdate: '' }]);
     }
 }
@@ -122,50 +160,75 @@ async function extractEpisodes(url) {
 
 // --- 4. STREAM ---
 async function extractStreamUrl(url) {
-    console.log(`[Lecteur LiveWatch] 🎬 Demande de flux pour : ${url}`);
+    console.log(`\n==============================================`);
+    console.log(`[Lecteur LiveWatch] 🎬 DÉMARRAGE DU STREAM POUR : ${url}`);
+    
     try {
         let streams = [];
         let extractedNames = [];
         let failedLinks = [];
 
-        const parts = url.replace('livewatch://', '').split('/');
-        const country = parts[0];
-        const channelId = parts.slice(1).join('/'); 
+        const match = url.match(/livewatch:\/\/([^/]+)\/([^?]+)/);
+        if (!match) throw new Error("Format d'URL invalide");
+        
+        const channelId = match[2]; 
+        console.log(`[Lecteur LiveWatch] 🧩 ID de la chaîne extrait : "${channelId}"`);
 
-        const safeChannelId = encodeURIComponent(channelId);
-        const safeCountry = encodeURIComponent(country);
-
-        const streamApiUrl = `${API_BASE}/tvvoo/stream?channel=${safeChannelId}&countries=${safeCountry}`;
+        const streamApiUrl = `${API_BASE}/stream/${channelId}`;
+        console.log(`[Lecteur LiveWatch] 📡 Appel API : ${streamApiUrl}`);
         
         const response = await soraFetch(streamApiUrl);
-        const json = await response.json();
+        
+        if (!response) {
+            console.log(`[Lecteur LiveWatch] ❌ Échec réseau. Le serveur n'a pas répondu.`);
+            throw new Error("L'API n'a pas répondu.");
+        }
 
-        if (json.sources && Array.isArray(json.sources) && json.sources.length > 0) {
-            json.sources.forEach((source, index) => {
-                if (source.streamUrl) {
-                    let serverName = source.name || `Serveur ${index + 1}`;
-                    let finalUrl = source.streamUrl.startsWith('/') ? `${SITE_URL}${source.streamUrl}` : source.streamUrl;
-                    
-                    streams.push({
-                        title: serverName,
-                        streamUrl: finalUrl,
-                        headers: { "User-Agent": "Mozilla/5.0" }
-                    });
-                    extractedNames.push(serverName);
-                }
-            });
-        } 
-        else if (json.streamUrl) {
-            let finalUrl = json.streamUrl.startsWith('/') ? `${SITE_URL}${json.streamUrl}` : json.streamUrl;
+        console.log(`[Lecteur LiveWatch] 📥 Réponse reçue. Statut HTTP : ${response.status}`);
+        
+        const textResponse = await response.text();
+        console.log(`[Lecteur LiveWatch] 📄 Texte brut reçu du serveur : ${textResponse}`);
+
+        let json;
+        try {
+            json = JSON.parse(textResponse);
+        } catch(e) {
+            throw new Error("JSON Invalide");
+        }
+
+        // 🌟 NOUVEAU : Lecture du paramètre "proxy_url"
+        if (json.proxy_url) {
+            console.log(`[Lecteur LiveWatch] ✅ URL Proxy trouvée.`);
+            
+            // Lien via le proxy officiel (Recommandé pour contourner le CORS)
+            let proxyStreamUrl = json.proxy_url.startsWith('http') ? json.proxy_url : `${SITE_URL}${json.proxy_url}`;
+            
             streams.push({
-                title: "LiveWatch (Principal)",
-                streamUrl: finalUrl,
-                headers: { "User-Agent": "Mozilla/5.0" }
+                title: "LiveWatch (Proxy Officiel)",
+                streamUrl: proxyStreamUrl,
+                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": SITE_URL + "/" }
             });
-            extractedNames.push("LiveWatch Principal");
+            extractedNames.push("Proxy Officiel");
+            console.log(`   -> 🟢 Ajout du flux Proxy : ${proxyStreamUrl}`);
+
+            // 💡 ASTUCE : On extrait aussi le lien original (caché dans le paramètre u=)
+            let rawUrlMatch = json.proxy_url.match(/u=([^&]+)/);
+            if (rawUrlMatch && rawUrlMatch[1]) {
+                let decodedRawUrl = decodeURIComponent(rawUrlMatch[1]);
+                streams.push({
+                    title: "LiveWatch (Lien Direct)",
+                    streamUrl: decodedRawUrl,
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+                });
+                extractedNames.push("Lien Direct");
+                console.log(`   -> 🟢 Ajout du flux Direct : ${decodedRawUrl}`);
+            }
         } else {
+            console.log(`[Lecteur LiveWatch] ⚠️ Attention: Aucune "proxy_url" trouvée dans le JSON !`);
             failedLinks.push({ server_name: "API LiveWatch (Vide)", url: streamApiUrl });
         }
+
+        console.log(`[Lecteur LiveWatch] 📊 Fin de l'extraction. Total des flux validés : ${streams.length}`);
 
         sendSupabaseLog("LiveWatch", "PLAYER", { 
             anime_url: url, season_number: "1", ep_number: "1", 
@@ -182,7 +245,10 @@ async function extractStreamUrl(url) {
 
         return JSON.stringify(streams.length > 0 ? { type: "servers", streams: streams } : { type: "none" });
 
-    } catch (error) { return JSON.stringify({ type: "none" }); }
+    } catch (error) {
+        console.log(`[Lecteur LiveWatch] 🚨 ERREUR DANS LE LECTEUR : ${error.message}`);
+        return JSON.stringify({ type: "none" }); 
+    }
 }
 
 // --- UTILS SORA ---
