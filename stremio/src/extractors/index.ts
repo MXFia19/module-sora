@@ -175,13 +175,38 @@ async function extractOnce(embedUrl: string, referer: string): Promise<Extracted
 }
 
 /** Résout plusieurs embeds en parallèle, en ignorant les échecs. */
+/** Budget d'un lecteur. Un extracteur enchaîne parfois deux ou trois requêtes
+ *  (VOE redirige, YourUpload résout sa redirection) : sans plafond, un seul
+ *  hôte qui traîne consomme le budget entier du scraper, et la source rend
+ *  zéro flux alors qu'elle en avait déjà résolu huit. */
+const EMBED_BUDGET_MS = 15_000;
+
 export async function extractAll(
   embeds: Array<{ url: string; lang: string }>,
   referer: string,
 ): Promise<Array<ExtractedStream & { lang: string }>> {
   const out = await Promise.all(embeds.map(async e => {
-    const streams = await extractEmbed(e.url, referer);
+    const streams = await withBudget(extractEmbed(e.url, referer), EMBED_BUDGET_MS, e.url);
     return streams.map(s => ({ ...s, lang: e.lang }));
   }));
   return out.flat();
+}
+
+/** Rend un tableau vide au lieu de faire attendre : un lecteur perdu vaut
+ *  mieux que toute la source perdue. */
+function withBudget(
+  p: Promise<ExtractedStream[]>,
+  ms: number,
+  label: string,
+): Promise<ExtractedStream[]> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    p,
+    new Promise<ExtractedStream[]>(resolve => {
+      timer = setTimeout(() => {
+        log.debug(`abandon de ${label} après ${ms}ms`);
+        resolve([]);
+      }, ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
 }

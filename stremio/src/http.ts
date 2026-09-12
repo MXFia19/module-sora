@@ -81,6 +81,17 @@ export async function request(url: string, opts: HttpOptions = {}): Promise<Http
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+
+      // Une expiration n'est pas un raté de réseau : l'hôte est joignable, il
+      // est lent. Réessayer, c'est repayer le budget entier — 12 s + 12 s
+      // suffisaient à faire sauter les 25 s d'un scraper et à jeter tous les
+      // flux qu'il avait déjà résolus. On ne réessaie que ce qui a de bonnes
+      // chances de passer au coup suivant : coupure, reset, DNS.
+      if (ctrl.signal.aborted) {
+        log.debug(`expiré ${url} (${timeoutMs}ms) — pas de seconde tentative`);
+        return emptyResponse(url);
+      }
+
       if (i < attempts - 1) {
         log.debug(`échec ${url} (${msg}) — nouvelle tentative`);
         await sleep(400 * (i + 1));
