@@ -184,9 +184,23 @@ départ. Bouton **Create instance**, puis :
 > ⚠️ Vérifiez l'étiquette verte **« Always Free-eligible »** sur la forme
 > choisie. Sans elle, l'instance est facturée.
 
-**Réseau** — laissez Oracle créer un nouveau VCN, mais assurez-vous que
-**« Assign a public IPv4 address »** est bien sur *Yes*. Sans adresse
-publique, la machine n'est joignable de nulle part.
+**Réseau** — laissez Oracle créer un nouveau VCN (*Create new virtual cloud
+network*), puis vérifiez que **« Automatically assign public IPv4 address »**
+est bien activé. Sans adresse publique, la machine n'est joignable de nulle
+part.
+
+> Si le bouton est grisé avec *« You must select a public subnet to assign a
+> public IPv4 address »*, c'est que le sous-réseau choisi est **privé** — un
+> sous-réseau privé n'a pas de route vers la passerelle Internet, donc aucune
+> adresse publique ne peut y être attachée. Remontez dans la section
+> *Networking* et, au choix :
+>
+> - sélectionnez **Create new virtual cloud network** : Oracle crée alors un
+>   VCN complet avec passerelle Internet et sous-réseau public, et le bouton
+>   se débloque ;
+> - ou, pour garder un VCN existant, choisissez sous *Subnet* celui dont le
+>   nom contient **Public** (l'assistant de création de VCN en produit
+>   toujours un, à côté du privé).
 
 **Clé SSH** — choisissez *Generate a key pair for me* et **téléchargez la clé
 privée** avant de continuer. Oracle ne la propose qu'une fois ; si vous
