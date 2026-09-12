@@ -261,9 +261,14 @@ toutes les lectures en cours.
   sites pour vous seul. En public, votre serveur le fait pour tout le monde :
   les sources peuvent bannir son IP, et le trafic vidéo proxifié sort de chez
   votre hébergeur sous votre nom.
-- **Les hébergeurs PaaS ne conviennent pas.** Vercel, Netlify et les offres
-  serverless en général coupent les réponses longues et facturent l'egress au
-  prix fort. Il faut une vraie VM.
+- **Vercel est exclu, et la plupart des PaaS avec.** Pas pour une question de
+  durée — Vercel autorise 300 s de fonction même en Hobby, largement assez.
+  Mais ses *Fair Use Guidelines* listent sous « Never fair use » : *Proxies*,
+  *Media hosting for hot-linking* et *Scrapers*. Cet addon est les trois à la
+  fois. S'y ajoute un problème technique : le cache est en mémoire du
+  processus, donc inopérant en serverless — chaque requête rescrape les cinq
+  sites depuis une IP de datacenter partagée, ce qui est le profil qui se fait
+  bannir. Il faut une vraie VM.
 - **Un lien proxifié signé reste valable 6 h** et peut être partagé hors de
   Stremio. `PROXY_TTL_MS` réduit la fenêtre si ça vous gêne.
 - **Diffuser publiquement des liens vers des contenus protégés vous expose**

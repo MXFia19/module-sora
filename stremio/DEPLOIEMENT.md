@@ -118,16 +118,26 @@ vidéo va du CDN au lecteur sans nous — et vous restez dans les clous.
 
 ## Option C — une plateforme gratuite, en mode direct
 
-En mode direct, l'addon n'est qu'une API JSON : quelques kilo-octets par
-requête. Les offres gratuites de Railway, Render, Fly.io ou Koyeb suffisent
-alors, à condition de :
+**Vercel et Netlify sont à écarter d'emblée**, quelle que soit la
+configuration. Leurs conditions d'usage nomment explicitement *Proxies*,
+*Scrapers* et *Media hosting for hot-linking* parmi les usages jamais
+autorisés : cet addon est les trois à la fois, et la sanction est la
+suspension du compte. Ce n'est pas une question de limites techniques — la
+durée d'exécution y serait largement suffisante.
+
+Restent les plateformes à conteneur. En mode direct, l'addon n'est qu'une API
+JSON : quelques kilo-octets par requête. Les offres gratuites de Railway,
+Render, Fly.io ou Koyeb peuvent tenir, à condition de :
 
 - garder `PROXY_ENABLED=false` (l'egress facturé est ce qui coûte cher là-bas) ;
 - accepter le démarrage à froid : une instance endormie met plusieurs secondes
   à répondre, et Stremio peut abandonner entre-temps ;
 - accepter le risque de blocage : les sites sources voient une IP de datacenter
   partagée. C'est déjà ce qui a fait répondre 403 à lulustream depuis mon
-  serveur de test.
+  serveur de test ;
+- accepter de perdre le cache à chaque réveil d'instance, donc de rescraper
+  les cinq sites à chaque ouverture de fiche — ce qui aggrave le point
+  précédent.
 
 Utilisable pour essayer, fragile pour durer. Un VPS à 4 € règle les trois.
 
