@@ -61,6 +61,40 @@ export function similarity(a: string, b: string): number {
   return 1 - levenshtein(a, b) / max;
 }
 
+/** L'un des deux titres contient-il l'autre *de façon significative* ?
+ *
+ *  La contenance brute est un piège : « Yaiba » est inclus dans « Demon Slayer
+ *  -Kimetsu no Yaiba- The Movie: Mugen Train », et suffisait à faire passer la
+ *  fiche d'un tout autre anime à 0.92. On n'accepte donc que deux formes de
+ *  contenance défendables :
+ *    - un préfixe sur frontière de mot (« Demon Slayer » dans « Demon Slayer -
+ *      Le Film : Le train de l'infini »), qui est la façon dont un site nomme
+ *      une déclinaison d'une œuvre ;
+ *    - une inclusion qui couvre l'essentiel du titre le plus long (>= 60 %),
+ *      où le reste ne peut être que du sous-titre.
+ *  Un mot noyé au milieu d'un titre bien plus long n'est ni l'un ni l'autre. */
+function contains(a: string, b: string): boolean {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (!short || !long.includes(short)) return false;
+  const prefix = long.startsWith(short) && (long.length === short.length || long[short.length] === ' ');
+  return prefix || short.length / long.length >= 0.6;
+}
+
+/** Racine de franchise d'un titre de film : « Demon Slayer - Le Film : Le
+ *  train de l'infini » -> « Demon Slayer », « One Piece Film: Strong World »
+ *  -> « One Piece ».
+ *
+ *  Les moteurs de recherche des sites travaillent sur la chaîne entière : leur
+ *  donner le titre complet d'un film ne rend pas la fiche de la franchise mais
+ *  cinq résultats sans rapport. Or c'est la fiche de la franchise qui porte
+ *  l'onglet du film. Rend null quand il n'y a rien à raccourcir. */
+export function franchiseRoot(title: string): string | null {
+  const cut = title.split(/\s*:|\s[-–—]/)[0]?.trim() ?? '';
+  const root = cut.replace(/\s+(le\s+)?(film|movie)s?\.?$/i, '').trim();
+  if (!root || root.length < 4 || root.length === title.trim().length) return null;
+  return root;
+}
+
 export interface Candidate {
   /** Titre tel qu'affiché par la source. */
   title: string;
@@ -104,9 +138,7 @@ export function scoreCandidate(candidate: Candidate, opts: ScoreOptions): Scored
       let s = similarity(mine, t);
       // Un titre source qui contient exactement le titre cherché (« Dune
       // (2021) streaming vf ») ne doit pas être puni par sa longueur.
-      if (s < 1 && (t.includes(mine) || mine.includes(t))) {
-        s = Math.max(s, 0.92);
-      }
+      if (s < 1 && contains(mine, t)) s = Math.max(s, 0.92);
       if (s > best) { best = s; matchedOn = alias; }
     }
   }
@@ -134,5 +166,59 @@ export function pickBest<T extends Candidate>(
   }
 
   if (!best || best.score < threshold) return null;
+  return best;
+}
+
+/** Mots qui ne distinguent rien : ils reviennent dans tous les titres d'une
+ *  même franchise, et dans la moitié des titres de films en général. */
+const FILLER = new Set([
+  'film', 'films', 'movie', 'the', 'le', 'la', 'les', 'l', 'de', 'du', 'des', 'd',
+  'un', 'une', 'et', 'and', 'of', 'a', 'an', 'partie', 'part', 'no',
+]);
+
+/** Mots distinctifs d'un titre, dédoublonnés. */
+export function keywords(title: string): string[] {
+  return [...new Set(stripNoise(title).split(' ').filter(w => w && !FILLER.has(w)))];
+}
+
+/** Part des mots distinctifs d'un titre qu'on retrouve dans l'un des titres
+ *  connus. C'est l'inverse d'une distance d'édition, et c'est ce qu'il faut
+ *  quand la source préfixe le nom de la franchise : « Demon Slayer : Kimetsu
+ *  no Yaiba - Le film : Le train de l'Infini » est à 0.70 de similarité du
+ *  titre TMDB « Demon Slayer - Le Film : Le train de l'infini », donc rejeté,
+ *  alors que chacun de ses mots est présent dans les titres connus. */
+export function coverage(title: string, aliases: string[]): number {
+  const words = keywords(title);
+  if (words.length === 0) return 0;
+
+  let best = 0;
+  for (const alias of aliases) {
+    const theirs = new Set(keywords(alias));
+    const hit = words.filter(w => theirs.has(w)).length / words.length;
+    if (hit > best) best = hit;
+  }
+  return best;
+}
+
+/** Repêchage par mots-clés, à n'employer QUE lorsque `pickBest` n'a rien
+ *  trouvé : il accepte des titres qu'une distance d'édition rejette.
+ *
+ *  Deux garde-fous, parce qu'un critère plus permissif est aussi plus prompt à
+ *  rendre le mauvais film : la couverture doit être quasi totale, et le
+ *  vainqueur doit devancer nettement le suivant. Deux candidats aussi bien
+ *  couverts l'un que l'autre, c'est qu'aucun mot ne les sépare — on préfère
+ *  alors ne rien rendre. */
+export function pickByKeywords<T extends Candidate>(
+  candidates: T[],
+  aliases: string[],
+  { min = 0.8, margin = 0.15 } = {},
+): Scored<T> | null {
+  const scored = candidates
+    .map(c => ({ item: c, score: coverage(c.title, aliases), matchedOn: '' }))
+    .sort((a, b) => b.score - a.score);
+
+  const best = scored[0];
+  if (!best || best.score < min) return null;
+  if (scored[1] && best.score - scored[1].score < margin) return null;
   return best;
 }

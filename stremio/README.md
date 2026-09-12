@@ -182,17 +182,43 @@ affiche le score retenu).
 Mesures réelles, un film (Interstellar) et un épisode d'anime (L'Attaque des
 Titans S1E1) :
 
-| Source | Film | Anime S1E1 |
-|---|---|---|
-| Movix | 12 flux | 7 flux |
-| Purstream | 1 flux + sous-titres | 1 flux |
-| Nakanime | — (anime only) | 13 flux |
-| Anime-Sama | — (anime only) | 9 flux |
-| VoirAnime | — (anime only) | 4 flux |
-| **Total après dédoublonnage** | **10 flux / 4,9 s** | **31 flux / 9,2 s** |
+| Source | Film live | Anime S1E1 | Film d'animation |
+|---|---|---|---|
+| Movix | 12 flux | 7 flux | 7 flux |
+| Purstream | 1 flux + sous-titres | 1 flux | 1 flux |
+| Nakanime | — (anime only) | 13 flux | 10 flux |
+| Anime-Sama | — (anime only) | 9 flux | 6 flux |
+| VoirAnime | — (anime only) | 4 flux | 7 flux |
+| **Total après dédoublonnage** | **10 flux / 4,9 s** | **31 flux / 9,2 s** | — |
+
+Film live : Interstellar. Anime : L'Attaque des Titans S1E1. Film d'animation :
+Your Name. Les trois sources anime traitent les films comme les séries ;
+mesures refaites sur *Le train de l'infini*, *Suzume* et *Le Voyage de
+Chihiro*, chacune rendant des flux sur les trois sources.
 
 Le rapprochement par titre a trouvé la bonne fiche du premier coup sur les
 trois sources anime, sans ajustement de seuil.
+
+### Films d'animation : ce qu'il a fallu en plus
+
+Un film n'est pas un épisode numéro 1, et chaque site le range autrement :
+
+- **anime-sama** le met dans un onglet de la fiche de la franchise. Un onglet
+  par film quand il est nommé (« Film - Train de l'infini »), ou un seul
+  onglet « Films » de dix-sept entrées nommées par `newSPF(...)` — l'ordre de
+  ces noms est l'index dans `episodes.js`, c'est le seul moyen de savoir
+  lequel des dix-sept est le bon.
+- **voir-anime** publie la VF et la VOSTFR d'un même film sous **deux fiches
+  distinctes** : n'en prendre qu'une perd la moitié des langues.
+- **nakanime** annonce `format: MOVIE` — le seul des trois à le dire, ce qui
+  évite de confondre un film avec la série du même nom.
+
+Deux pièges communs, réglés dans `match.ts` : les moteurs de recherche de ces
+sites travaillent sur la chaîne entière et ne digèrent pas un titre de film
+complet (`franchiseRoot` cherche aussi « Demon Slayer » seul), et ces sites
+préfixent le nom de la franchise au titre du film, ce qu'aucune distance
+d'édition ne pardonne (`pickByKeywords` repêche sur les mots, avec un écart
+minimal exigé entre les deux meilleurs candidats).
 
 **Lecture de bout en bout** : master (1,6 Ko) → variante (321 Ko) → segment
 (2,79 Mo de MPEG-TS), le tout à travers le proxy. L'hôte testé refuse la

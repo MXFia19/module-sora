@@ -1,7 +1,7 @@
 import { cached } from '../cache';
 import { request, getText } from '../http';
 import { logger } from '../log';
-import { pickBest } from '../match';
+import { pickBest, pickByKeywords, franchiseRoot } from '../match';
 import { audioLabel } from '../lang';
 import { extractEmbed } from '../extractors';
 import type { MediaRequest, RawStream, Scraper } from '../types';
@@ -89,7 +89,7 @@ async function apiCall<T = any>(
   }
 }
 
-interface Hit { id: number; slug: string; title: string }
+interface Hit { id: number; slug: string; title: string; format?: string }
 
 async function search(keyword: string): Promise<Hit[]> {
   return cached(`nakanime:search:${keyword.toLowerCase()}`, async () => {
@@ -100,6 +100,10 @@ async function search(keyword: string): Promise<Hit[]> {
       id: a.id,
       slug: a.slug ?? String(a.id),
       title: String(a.title ?? a.name ?? ''),
+      // L'API annonce 'MOVIE' ou 'TV' : c'est le seul site des trois à le
+      // dire, autant s'en servir pour ne pas confondre un film avec la série
+      // du même nom.
+      format: a.format ? String(a.format) : undefined,
     })).filter((h: Hit) => h.id && h.title);
   }, { ttlMs: SEARCH_TTL_MS });
 }
@@ -163,46 +167,43 @@ async function fetchSources(animeId: number, episodeId: number, title: string): 
   return Array.isArray(data) ? data : [];
 }
 
-async function resolve(req: MediaRequest): Promise<RawStream[]> {
-  if (req.type !== 'series' || !req.episode) return [];
-
-  // 1) Trouver l'anime.
-  let hit: Hit | null = null;
+/** Trouve la fiche. Pour un film on écarte d'emblée les fiches annoncées
+ *  comme séries : sur une franchise, le film et la série portent le même nom,
+ *  et c'est exactement le genre de confusion qui sert le mauvais contenu. */
+async function findAnime(req: MediaRequest): Promise<Hit | null> {
+  const queries: string[] = [];
   for (const alias of req.aliases.slice(0, 4)) {
-    const hits = await search(alias);
-    const best = pickBest(hits.map(h => ({ title: h.title, raw: h })), { aliases: req.aliases });
+    queries.push(alias);
+    const root = req.type === 'movie' ? franchiseRoot(alias) : null;
+    if (root) queries.push(root);
+  }
+
+  for (const query of [...new Set(queries)].slice(0, 6)) {
+    const hits = await search(query);
+    const eligible = req.type === 'movie'
+      ? hits.filter(h => h.format !== 'TV')
+      : hits;
+
+    const cands = eligible.map(h => ({ title: h.title, raw: h }));
+    // Les fiches de nakanime préfixent le nom de la franchise (« Demon Slayer
+    // : Kimetsu no Yaiba - Le film : Le train de l'Infini »), ce qu'aucune
+    // distance d'édition ne pardonne. Le repêchage par mots-clés ne joue
+    // qu'ici, sur des fiches déjà réduites aux films.
+    const best = pickBest(cands, { aliases: req.aliases })
+      ?? (req.type === 'movie' ? pickByKeywords(cands, req.aliases) : null);
     if (best) {
-      hit = best.item.raw;
-      log.debug(`fiche: #${hit.id} « ${hit.title} » (score ${best.score.toFixed(2)})`);
-      break;
+      const hit = best.item.raw;
+      log.debug(`fiche: #${hit.id} « ${hit.title} » [${hit.format ?? '?'}] (score ${best.score.toFixed(2)}, via « ${query} »)`);
+      return hit;
     }
   }
-  if (!hit) {
-    log.debug(`aucune fiche pour « ${req.title} »`);
-    return [];
-  }
 
-  // 2) Trouver l'épisode. nakanime numérote par saison, comme Stremio : on
-  //    peut donc rapprocher directement, avec le numéro absolu en secours.
-  const data = await animeData(hit.id, hit.slug);
-  const list = data?.episodesList ?? [];
-  if (list.length === 0) {
-    log.debug(`fiche #${hit.id} sans liste d'épisodes`);
-    return [];
-  }
+  log.debug(`aucune fiche pour « ${req.title} »`);
+  return null;
+}
 
-  const seasonOf = new Map((data?.seasons ?? []).map(s => [s.id, s.number]));
-  const season = req.season ?? 1;
-
-  const episode = list.find(e => (seasonOf.get(e.seasonId ?? -1) ?? 1) === season && e.number === req.episode)
-    ?? (req.absoluteEpisode ? list.find(e => e.number === req.absoluteEpisode) : undefined);
-
-  if (!episode) {
-    log.debug(`s${season}e${req.episode} absent (${list.length} épisodes listés)`);
-    return [];
-  }
-
-  // 3) Résoudre les lecteurs annoncés par l'API.
+/** Résout un épisode identifié en flux jouables. */
+async function streamsOf(hit: Hit, episode: { id: number; number: number }): Promise<RawStream[]> {
   const sources = await fetchSources(hit.id, episode.id, `Episode ${episode.number}`);
   if (sources.length === 0) {
     log.debug(`aucune source pour l'épisode ${episode.id}`);
@@ -229,11 +230,50 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
   return resolved.flat();
 }
 
+async function resolve(req: MediaRequest): Promise<RawStream[]> {
+  if (req.type === 'series' && !req.episode) return [];
+
+  const hit = await findAnime(req);
+  if (!hit) return [];
+
+  const data = await animeData(hit.id, hit.slug);
+  const list = data?.episodesList ?? [];
+  if (list.length === 0) {
+    log.debug(`fiche #${hit.id} sans liste d'épisodes`);
+    return [];
+  }
+
+  if (req.type === 'movie') {
+    // Un film est publié en une entrée unique. Plusieurs entrées veut dire
+    // qu'on est tombé sur une série : mieux vaut ne rien rendre.
+    if (list.length > 1) {
+      log.debug(`fiche #${hit.id} annoncée comme film mais ${list.length} entrées — écartée`);
+      return [];
+    }
+    return streamsOf(hit, list[0]!);
+  }
+
+  // nakanime numérote par saison, comme Stremio : on peut donc rapprocher
+  // directement, avec le numéro absolu en secours.
+  const seasonOf = new Map((data?.seasons ?? []).map(s => [s.id, s.number]));
+  const season = req.season ?? 1;
+
+  const episode = list.find(e => (seasonOf.get(e.seasonId ?? -1) ?? 1) === season && e.number === req.episode)
+    ?? (req.absoluteEpisode ? list.find(e => e.number === req.absoluteEpisode) : undefined);
+
+  if (!episode) {
+    log.debug(`s${season}e${req.episode} absent (${list.length} épisodes listés)`);
+    return [];
+  }
+
+  return streamsOf(hit, episode);
+}
+
 export const nakanime: Scraper = {
   id: 'nakanime',
   name: 'Nakanime',
   language: 'French',
-  supports: ['series'],
+  supports: ['movie', 'series'],
   animeOnly: true,
   resolve,
 };

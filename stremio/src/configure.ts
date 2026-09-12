@@ -21,7 +21,9 @@ export function configurePage(base: string | null, scrapers: Scraper[], encoded?
   const sources = scrapers.map(s => ({
     id: s.id,
     name: s.name,
-    note: s.animeOnly ? 'anime uniquement' : s.supports.join(' + '),
+    // Les sources anime servent films ET séries, mais seulement de
+    // l'animation : les deux informations comptent pour l'utilisateur.
+    note: s.animeOnly ? `anime uniquement — ${s.supports.join(' + ')}` : s.supports.join(' + '),
   }));
 
   return `<!doctype html><html lang="fr"><meta charset="utf-8">

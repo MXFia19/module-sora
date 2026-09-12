@@ -68,8 +68,8 @@ export interface Scraper {
   name: string;
   /** Langue dominante — purement informatif. */
   language: string;
-  /** Types de contenu servis. Un scraper anime-only n'est pas appelé pour
-   *  un film hors anime, ça économise une requête par recherche. */
+  /** Types de contenu servis. Le serveur n'appelle pas un scraper pour un
+   *  type qu'il ne déclare pas, ça économise une requête par recherche. */
   supports: MediaType[];
   /** Ne traite que de l'anime : le serveur saute l'appel si le contenu TMDB
    *  n'est pas identifié comme animation. */

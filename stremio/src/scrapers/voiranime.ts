@@ -1,7 +1,7 @@
 import { cached } from '../cache';
 import { getText, absolute } from '../http';
 import { logger } from '../log';
-import { pickBest } from '../match';
+import { pickBest, pickByKeywords, scoreCandidate, franchiseRoot } from '../match';
 import { audioLabel } from '../lang';
 import { extractAll } from '../extractors';
 import type { MediaRequest, RawStream, Scraper } from '../types';
@@ -134,28 +134,82 @@ async function embedsOf(episodeUrl: string): Promise<string[]> {
   return [...found];
 }
 
-async function resolve(req: MediaRequest): Promise<RawStream[]> {
-  if (req.type !== 'series' || !req.episode) return [];
-
-  // 1) Trouver la fiche.
-  let animeUrl: string | null = null;
+/** Fiches correspondant au contenu cherché.
+ *
+ *  Pour une série on n'en garde qu'une : c'est elle qui porte la liste des
+ *  épisodes. Pour un film on garde toutes celles qui passent le seuil, parce
+ *  que voir-anime publie la VF et la VOSTFR d'un même film sous deux fiches
+ *  distinctes (« Kimi no Na wa. » et « Kimi no Na wa. (VF) ») : n'en prendre
+ *  qu'une revient à perdre la moitié des langues. */
+async function findAnime(req: MediaRequest, all: boolean): Promise<string[]> {
+  const queries: string[] = [];
   for (const alias of req.aliases.slice(0, 4)) {
-    const hits = await search(alias);
-    const best = pickBest(hits, { aliases: req.aliases, year: req.year });
-    if (best) {
-      animeUrl = best.item.href;
-      log.debug(`fiche: ${animeUrl} (score ${best.score.toFixed(2)})`);
-      break;
+    queries.push(alias);
+    const root = req.type === 'movie' ? franchiseRoot(alias) : null;
+    if (root) queries.push(root);
+  }
+
+  for (const query of [...new Set(queries)].slice(0, 6)) {
+    const hits = await search(query);
+    if (!all) {
+      const best = pickBest(hits, { aliases: req.aliases, year: req.year });
+      if (best) {
+        log.debug(`fiche: ${best.item.href} (score ${best.score.toFixed(2)}, via « ${query} »)`);
+        return [best.item.href];
+      }
+      continue;
+    }
+
+    let matches = hits
+      .map(h => ({ h, s: scoreCandidate(h, { aliases: req.aliases, year: req.year }) }))
+      .filter(x => x.s.score >= 0.82)
+      .sort((a, b) => b.s.score - a.s.score)
+      .slice(0, 3);
+
+    // Rien par similarité : reste le repêchage par mots-clés, pour les fiches
+    // qui préfixent le nom de la franchise au titre du film.
+    if (matches.length === 0) {
+      const byWords = pickByKeywords(hits, req.aliases);
+      if (byWords) matches = [{ h: byWords.item, s: byWords }];
+    }
+
+    if (matches.length > 0) {
+      log.debug(`${matches.length} fiche(s) via « ${query} »: ${matches.map(m => `${m.h.title} (${m.s.score.toFixed(2)})`).join(', ')}`);
+      return matches.map(m => m.h.href);
     }
   }
-  if (!animeUrl) {
-    log.debug(`aucune fiche pour « ${req.title} »`);
+
+  log.debug(`aucune fiche pour « ${req.title} »`);
+  return [];
+}
+
+/** Résout une page d'épisode (ou de film) en flux jouables. */
+async function streamsOf(episodeUrl: string): Promise<RawStream[]> {
+  const embeds = await embedsOf(episodeUrl);
+  if (embeds.length === 0) {
+    log.debug(`aucun lecteur sur ${episodeUrl}`);
     return [];
   }
+  log.debug(`${embeds.length} lecteur(s) sur ${episodeUrl}`);
 
-  // 2) Choisir l'épisode. La liste est en numérotation absolue : pour une
-  //    saison > 1, le numéro Stremio ne correspond à rien ici, seul le
-  //    numéro absolu a un sens.
+  // La langue n'est pas annoncée par lecteur : elle est dans le slug de
+  // l'épisode quand elle l'est.
+  const lang = audioLabel(episodeUrl);
+  const extracted = await extractAll(embeds.map(url => ({ url, lang })), `${BASE}/`);
+
+  return extracted.map(e => ({
+    url: e.url,
+    quality: 'HD',
+    language: e.lang,
+    server: e.server,
+    headers: e.headers,
+    container: e.url.includes('.m3u8') ? ('hls' as const) : ('mp4' as const),
+  }));
+}
+
+async function resolveSeries(req: MediaRequest, animeUrl: string): Promise<RawStream[]> {
+  // La liste est en numérotation absolue : pour une saison > 1, le numéro
+  // Stremio ne correspond à rien ici, seul le numéro absolu a un sens.
   const list = await episodes(animeUrl);
   if (list.length === 0) return [];
 
@@ -171,34 +225,65 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
     return [];
   }
 
-  // 3) Résoudre les lecteurs.
-  const embeds = await embedsOf(episode.href);
-  if (embeds.length === 0) {
-    log.debug(`aucun lecteur sur ${episode.href}`);
+  return streamsOf(episode.href);
+}
+
+async function resolveMovie(req: MediaRequest, animeUrl: string): Promise<RawStream[]> {
+  const list = await episodes(animeUrl);
+  if (list.length === 0) {
+    log.debug(`fiche sans entrée: ${animeUrl}`);
     return [];
   }
-  log.debug(`${embeds.length} lecteur(s) à résoudre pour l'épisode ${wanted}`);
 
-  // La langue n'est pas annoncée par lecteur : elle est dans le slug de
-  // l'épisode quand elle l'est.
-  const lang = audioLabel(episode.href);
-  const extracted = await extractAll(embeds.map(url => ({ url, lang })), `${BASE}/`);
+  // Un film a sa propre fiche, avec une entrée unique : le rapprochement de
+  // titre a déjà été fait en choisissant la fiche.
+  if (list.length === 1) return streamsOf(list[0]!.href);
 
-  return extracted.map(e => ({
-    url: e.url,
-    quality: 'HD',
-    language: e.lang,
-    server: e.server,
-    headers: e.headers,
-    container: e.url.includes('.m3u8') ? 'hls' : 'mp4',
+  // Plusieurs entrées : c'est une fiche de série, ou une fiche qui regroupe
+  // les films d'une franchise. Seul un rapprochement sur le libellé permet de
+  // trancher, et à défaut on ne rend rien plutôt que le mauvais film.
+  const best = pickBest(
+    list.map(e => ({ title: e.title, raw: e })),
+    { aliases: req.aliases },
+  );
+  if (!best) {
+    log.debug(`${list.length} entrées sur ${animeUrl}, aucune ne correspond à « ${req.title} »`);
+    return [];
+  }
+
+  log.debug(`entrée « ${best.item.raw.title} » (score ${best.score.toFixed(2)})`);
+  return streamsOf(best.item.raw.href);
+}
+
+async function resolve(req: MediaRequest): Promise<RawStream[]> {
+  if (req.type === 'series' && !req.episode) return [];
+
+  const fiches = await findAnime(req, req.type === 'movie');
+  if (fiches.length === 0) return [];
+
+  if (req.type === 'series') return resolveSeries(req, fiches[0]!);
+
+  // Les fiches d'un film sont indépendantes (VOSTFR d'un côté, VF de l'autre) :
+  // une qui tombe ne doit pas emporter les autres.
+  const perFiche = await Promise.all(fiches.map(async url => {
+    try {
+      return await resolveMovie(req, url);
+    } catch (e) {
+      log.debug(`${url}: ${e instanceof Error ? e.message : e}`);
+      return [];
+    }
   }));
+
+  const streams = perFiche.flat();
+  const seen = new Set<string>();
+  return streams.filter(s => !seen.has(s.url) && seen.add(s.url));
 }
 
 export const voiranime: Scraper = {
   id: 'voiranime',
   name: 'VoirAnime',
   language: 'French',
-  supports: ['series'],
+  supports: ['movie', 'series'],
   animeOnly: true,
   resolve,
 };
