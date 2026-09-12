@@ -9,11 +9,27 @@ const BASE = 'https://api.themoviedb.org/3';
 
 const META_TTL_MS = 24 * 60 * 60 * 1000; // les métadonnées ne bougent pas.
 
-function api(path: string, params: Record<string, string | number> = {}): string {
-  const q = new URLSearchParams({ api_key: config.tmdbApiKey, ...Object.fromEntries(
+/** TMDB accepte deux formes de clé : la v3 en paramètre d'URL, et le jeton v4
+ *  en en-tête Bearer. On reconnaît le v4 à son préfixe JWT. Accepter les deux
+ *  évite de renvoyer les gens vers « l'autre » champ de leur page TMDB. */
+function isV4Token(key: string): boolean {
+  return key.startsWith('eyJ');
+}
+
+function api(path: string, params: Record<string, string | number> = {}, key?: string): string {
+  const effective = key || config.tmdbApiKey;
+  const entries = Object.fromEntries(
     Object.entries(params).map(([k, v]) => [k, String(v)]),
-  ) });
+  );
+  const q = new URLSearchParams(
+    isV4Token(effective) ? entries : { api_key: effective, ...entries },
+  );
   return `${BASE}${path}?${q}`;
+}
+
+function authHeaders(key?: string): Record<string, string> | undefined {
+  const effective = key || config.tmdbApiKey;
+  return isV4Token(effective) ? { Authorization: `Bearer ${effective}` } : undefined;
 }
 
 interface TmdbDetails {
@@ -33,9 +49,11 @@ interface TmdbDetails {
 /** id IMDb (tt…) -> id TMDB. Stremio livre presque toujours du IMDb ; les
  *  sources, elles, sont keyées TMDB. C'est la seule vraie glu à ajouter au
  *  portage depuis Sora, qui partait d'une recherche par titre. */
-export async function imdbToTmdb(imdbId: string, type: MediaType): Promise<string | null> {
+export async function imdbToTmdb(imdbId: string, type: MediaType, key?: string): Promise<string | null> {
   return cached(`tmdb:find:${imdbId}:${type}`, async () => {
-    const data = await getJson<any>(api(`/find/${imdbId}`, { external_source: 'imdb_id' }));
+    const data = await getJson<any>(
+      api(`/find/${imdbId}`, { external_source: 'imdb_id' }, key),
+      { headers: authHeaders(key) });
     const arr = type === 'movie' ? data?.movie_results : data?.tv_results;
     const hit = Array.isArray(arr) && arr.length > 0 ? arr[0] : null;
     if (!hit) {
@@ -46,21 +64,23 @@ export async function imdbToTmdb(imdbId: string, type: MediaType): Promise<strin
   }, { ttlMs: META_TTL_MS, shouldCache: v => v !== null });
 }
 
-async function details(tmdbId: string, type: MediaType, language: string): Promise<TmdbDetails | null> {
+async function details(tmdbId: string, type: MediaType, language: string, key?: string): Promise<TmdbDetails | null> {
   const path = type === 'movie' ? `/movie/${tmdbId}` : `/tv/${tmdbId}`;
+  // La clé ne fait pas partie de la clé de cache : la fiche renvoyée est la
+  // même pour tout le monde, seul le quota consommé diffère.
   return cached(`tmdb:det:${type}:${tmdbId}:${language}`,
-    () => getJson<TmdbDetails>(api(path, { language })),
+    () => getJson<TmdbDetails>(api(path, { language }, key), { headers: authHeaders(key) }),
     { ttlMs: META_TTL_MS, shouldCache: v => v !== null });
 }
 
 /** Titres alternatifs déclarés par TMDB : c'est ce qui rattrape les sites FR
  *  qui titrent autrement que la fiche officielle. */
-async function alternativeTitles(tmdbId: string, type: MediaType): Promise<string[]> {
+async function alternativeTitles(tmdbId: string, type: MediaType, key?: string): Promise<string[]> {
   const path = type === 'movie'
     ? `/movie/${tmdbId}/alternative_titles`
     : `/tv/${tmdbId}/alternative_titles`;
   return cached(`tmdb:alt:${type}:${tmdbId}`, async () => {
-    const data = await getJson<any>(api(path));
+    const data = await getJson<any>(api(path, {}, key), { headers: authHeaders(key) });
     const arr: any[] = data?.titles || data?.results || [];
     return arr
       .filter(t => !t.iso_3166_1 || ['FR', 'US', 'GB', 'JP', 'BE', 'CA'].includes(t.iso_3166_1))
@@ -102,13 +122,14 @@ export async function buildRequest(
   type: MediaType,
   season?: number,
   episode?: number,
+  key?: string,
 ): Promise<MediaRequest | null> {
   let tmdbId: string | null = null;
   let imdbId: string | undefined;
 
   if (/^tt\d+$/i.test(rawId)) {
     imdbId = rawId;
-    tmdbId = await imdbToTmdb(rawId, type);
+    tmdbId = await imdbToTmdb(rawId, type, key);
   } else if (/^tmdb:/i.test(rawId)) {
     tmdbId = rawId.slice(5);
   } else if (/^\d+$/.test(rawId)) {
@@ -118,9 +139,9 @@ export async function buildRequest(
   if (!tmdbId) return null;
 
   const [fr, orig, alts] = await Promise.all([
-    details(tmdbId, type, config.tmdbLanguage),
-    details(tmdbId, type, 'en-US'),
-    alternativeTitles(tmdbId, type),
+    details(tmdbId, type, config.tmdbLanguage, key),
+    details(tmdbId, type, 'en-US', key),
+    alternativeTitles(tmdbId, type, key),
   ]);
 
   if (!fr && !orig) {

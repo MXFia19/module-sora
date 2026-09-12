@@ -1,12 +1,16 @@
 import express from 'express';
+import type { Request, Response } from 'express';
 import { config, publicBase } from './config';
 import { logger } from './log';
-import { cached, cacheClear, cacheStats } from './cache';
+import { cached, cacheSet, cacheClear, cacheStats } from './cache';
 import { buildRequest } from './tmdb';
 import { handleProxy } from './proxy';
-import { enabledScrapers } from './scrapers';
+import { enabledScrapers, allScrapers } from './scrapers';
 import { dedupe, sortStreams, toStremio } from './display';
 import { relaxHeaders } from './direct';
+import { decodeConfig, applyConfig, DEFAULT_CONFIG } from './userconfig';
+import type { UserConfig } from './userconfig';
+import { configurePage } from './configure';
 import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
 import type { MediaType, RawStream } from './types';
 
@@ -26,23 +30,40 @@ app.use((_req, res, next) => {
   next();
 });
 
-const MANIFEST = {
-  id: 'community.mxfia19.sora',
-  version: '0.1.0',
-  name: 'Sora',
-  description: 'Agrégateur de flux — portage Stremio des modules Sora (movix, anime-sama, nakanime, purstream, voiranime).',
-  logo: 'https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg',
-  resources: ['stream'],
-  types: ['movie', 'series'] as MediaType[],
-  catalogs: [] as unknown[],
-  /** Ce que l'addon sait traiter : IMDb (ce que donne Cinemeta) et TMDB. */
-  idPrefixes: ['tt', 'tmdb:'],
-  behaviorHints: { configurable: false, p2p: false },
-};
+function manifest(c: UserConfig) {
+  const configured = c !== DEFAULT_CONFIG;
+  return {
+    id: 'community.mxfia19.sora',
+    version: '0.2.0',
+    name: 'Sora',
+    description: [
+      'Agrégateur de flux — portage Stremio des modules Sora',
+      '(movix, anime-sama, nakanime, purstream, voiranime).',
+      configured ? `Mode ${c.mode}, langues ${c.languages.join(' > ')}.` : '',
+    ].filter(Boolean).join(' '),
+    logo: 'https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg',
+    resources: ['stream'],
+    types: ['movie', 'series'] as MediaType[],
+    catalogs: [] as unknown[],
+    /** Ce que l'addon sait traiter : IMDb (ce que donne Cinemeta) et TMDB. */
+    idPrefixes: ['tt', 'tmdb:'],
+    // `configurable` fait apparaître le bouton « Configurer » dans Stremio,
+    // qui renvoie vers /configure.
+    behaviorHints: { configurable: true, configurationRequired: false, p2p: false },
+  };
+}
 
-app.get('/manifest.json', (_req, res) => {
-  res.json(MANIFEST);
-});
+// La configuration voyage dans le chemin, avant /manifest.json : c'est la
+// convention Stremio pour un addon configurable, et elle permet à une seule
+// instance de servir des réglages différents à chaque utilisateur.
+app.get('/manifest.json', (_req, res) => res.json(manifest(DEFAULT_CONFIG)));
+app.get('/c/:config/manifest.json', (req, res) =>
+  res.json(manifest(decodeConfig(req.params.config))));
+
+app.get('/configure', (_req, res) =>
+  res.type('html').send(configurePage(publicBase(), allScrapers(), undefined)));
+app.get('/c/:config/configure', (req, res) =>
+  res.type('html').send(configurePage(publicBase(), allScrapers(), req.params.config)));
 
 app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html><meta charset="utf-8">
@@ -50,12 +71,17 @@ app.get('/', (_req, res) => {
 <style>body{font:14px system-ui;margin:40px auto;max-width:40rem;padding:0 1rem}code{background:#eee;padding:2px 6px;border-radius:4px}</style>
 <h1>Sora</h1>
 <p>Addon actif. Sources : ${enabledScrapers().map(s => s.name).join(', ') || '<em>aucune</em>'}.</p>
-<p>À installer dans Stremio : <code>${publicBase()}/manifest.json</code></p>`);
+<p><a href="/configure">Configurer et générer mon lien d'installation →</a></p>
+<p>Ou, avec les réglages par défaut : <code>${publicBase()}/manifest.json</code></p>`);
 });
 
 /** Le seul endpoint qui compte. Stremio appelle
  *  /stream/movie/tt0816692.json ou /stream/series/tt0944947:1:1.json */
-app.get('/stream/:type/:id.json', rateLimit, async (req, res) => {
+app.get('/stream/:type/:id.json', rateLimit, (req, res) => handleStream(req, res, DEFAULT_CONFIG));
+app.get('/c/:config/stream/:type/:id.json', rateLimit, (req, res) =>
+  handleStream(req, res, decodeConfig(req.params.config)));
+
+async function handleStream(req: Request, res: Response, userConfig: UserConfig): Promise<void> {
   const type = req.params.type as MediaType;
   // Avec plusieurs handlers, Express type les params en `string | undefined` :
   // la route les garantit présents, mais le repli évite un cast aveugle.
@@ -70,17 +96,26 @@ app.get('/stream/:type/:id.json', rateLimit, async (req, res) => {
   const { id, season, episode } = parseStremioId(rawId);
 
   try {
+    // Le cache porte sur le résultat BRUT du scraping : deux utilisateurs qui
+    // ouvrent le même film partagent le travail, même avec des préférences
+    // opposées. Seule la clé TMDB entre dans la clé de cache, parce qu'une
+    // clé invalide ne doit pas empoisonner le résultat des autres.
+    const keyPart = userConfig.tmdbKey ? `:k${userConfig.tmdbKey.slice(-6)}` : '';
+    const cacheKey = `streams:${type}:${rawId}${keyPart}`;
     const streams = await cached(
-      `streams:${type}:${rawId}`,
-      () => resolveStreams(type, id, season, episode),
+      cacheKey,
+      () => resolveStreams(type, id, season, episode, userConfig, cacheKey),
     );
-    log.info(`${type} ${rawId} -> ${streams.length} flux en ${Date.now() - started}ms`);
-    res.json({ streams: streams.map(toStremio) });
+
+    const shown = applyConfig(streams, userConfig);
+    const who = userConfig.nickname ? ` [${userConfig.nickname}]` : '';
+    log.info(`${type} ${rawId}${who} -> ${shown.length}/${streams.length} flux en ${Date.now() - started}ms`);
+    res.json({ streams: shown.map(toStremio) });
   } catch (e) {
     log.error(`échec sur ${type} ${rawId}:`, e);
     res.json({ streams: [] });
   }
-});
+}
 
 interface ParsedId {
   id: string;
@@ -108,15 +143,21 @@ async function resolveStreams(
   id: string,
   season?: number,
   episode?: number,
+  userConfig: UserConfig = DEFAULT_CONFIG,
+  cacheKey?: string,
 ): Promise<RawStream[]> {
-  const req = await buildRequest(id, type, season, episode);
+  const req = await buildRequest(id, type, season, episode, userConfig.tmdbKey);
   if (!req) {
     log.warn(`identifiant non résolu: ${id}`);
     return [];
   }
   log.info(`« ${req.title} »${req.year ? ` (${req.year})` : ''} tmdb=${req.tmdbId}${req.anime ? ' [anime]' : ''}${season ? ` s${season}e${episode}` : ''}`);
 
-  const scrapers = enabledScrapers().filter(s => {
+  const chosen = userConfig.sources.length > 0
+    ? enabledScrapers().filter(s => userConfig.sources.includes(s.id))
+    : enabledScrapers();
+
+  const scrapers = chosen.filter(s => {
     if (!s.supports.includes(type)) return false;
     // Une source anime-only n'a rien à dire sur un film live : l'appeler
     // coûte une requête et ne peut rendre qu'un faux positif.
@@ -125,8 +166,8 @@ async function resolveStreams(
   });
 
   // Chaque scraper est isolé : un plantage ou un dépassement de budget ne
-  // retire que sa propre contribution.
-  const results = await Promise.all(scrapers.map(async s => {
+  // retire que sa propre contribution. Ces promesses ne rejettent jamais.
+  const tasks = scrapers.map(async s => {
     const t0 = Date.now();
     try {
       const out = await withTimeout(s.resolve(req), config.scraperTimeoutMs);
@@ -135,11 +176,61 @@ async function resolveStreams(
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       log.warn(`  ${s.name}: échec — ${msg} (${Date.now() - t0}ms)`);
-      return [];
+      return [] as RawStream[];
     }
-  }));
+  });
 
-  return relaxHeaders(dedupe(sortStreams(results.flat())));
+  const finish = (parts: RawStream[][]) => relaxHeaders(dedupe(sortStreams(parts.flat())));
+
+  if (userConfig.minStreams <= 0) return finish(await Promise.all(tasks));
+
+  const early = await firstEnough(tasks, userConfig.minStreams);
+
+  // Les sources encore en route ne sont pas annulées : elles finissent en
+  // arrière-plan et remplacent l'entrée de cache par la liste complète. La
+  // prochaine ouverture de la même fiche voit tout, sans avoir attendu.
+  if (cacheKey) {
+    void Promise.all(tasks)
+      .then(finish)
+      .then(full => {
+        if (full.length > early.length) {
+          log.debug(`${cacheKey}: complété en arrière-plan (${early.length} -> ${full.length})`);
+          cacheSet(cacheKey, full, config.cacheTtlMs);
+        }
+      })
+      .catch(() => { /* déjà tracé par chaque scraper */ });
+  }
+
+  return finish([early]);
+}
+
+/** Rend la main dès que `min` flux sont réunis, ou quand tout le monde a
+ *  répondu. Une seule source lente ne doit pas faire attendre l'utilisateur
+ *  devant un écran vide alors que quatre autres ont déjà livré. */
+function firstEnough(tasks: Promise<RawStream[]>[], min: number): Promise<RawStream[]> {
+  if (tasks.length === 0) return Promise.resolve([]);
+
+  return new Promise(resolve => {
+    const acc: RawStream[] = [];
+    let done = 0;
+    let settled = false;
+
+    const maybeResolve = () => {
+      if (settled) return;
+      if (acc.length >= min || done === tasks.length) {
+        settled = true;
+        resolve([...acc]);
+      }
+    };
+
+    for (const t of tasks) {
+      void t.then(part => {
+        acc.push(...part);
+        done++;
+        maybeResolve();
+      });
+    }
+  });
 }
 
 function withTimeout<T>(p: Promise<T[]>, ms: number): Promise<T[]> {

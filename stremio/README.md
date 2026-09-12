@@ -73,6 +73,10 @@ La sonde rejoue exactement ce que fait Stremio, mais dans un terminal. En
 ```
 src/
   index.ts        manifest + /stream + /proxy + /health
+  userconfig.ts   config par utilisateur, encodée dans l'URL
+  configure.ts    page de génération du lien d'installation
+  direct.ts       teste quels flux se passent du proxy
+  ratelimit.ts    limite par IP + plafond de flux simultanés
   tmdb.ts         id IMDb → id TMDB, titres, alias, épisode absolu
   match.ts        rapprochement titre ↔ résultat, avec seuil
   proxy.ts        proxy signé + réécriture HLS
@@ -141,6 +145,48 @@ npm install && npm test
 npm run probe -- movie tt0816692
 ```
 
+## Page de configuration — un lien par utilisateur
+
+`https://votre-instance/configure` génère un lien d'installation personnel.
+Une seule instance sert alors des réglages différents à chacun : la config est
+encodée dans le chemin de l'URL (`/c/<config>/manifest.json`), ce qui est la
+convention Stremio pour un addon configurable.
+
+Ce que chacun règle pour lui :
+
+| Réglage | Pourquoi ça compte |
+|---|---|
+| **Sa propre clé TMDB** | Le quota de l'hébergeur ne s'épuise pas, et une clé révoquée ne pénalise que son propriétaire. Formats v3 et v4 acceptés. |
+| **Mode direct ou proxy** | Direct = zéro bande passante côté serveur, au prix des quelques flux qui exigent un `Referer`. |
+| **Sources actives** | Moins de sources, réponse plus rapide. |
+| **Langues, qualités, tri** | Ordre des langues par glisser-déposer, qualités exclues, qualité préférée. |
+| **Réponse rapide dès N flux** | Voir plus bas — c'est le réglage qui change le plus le confort. |
+| **Pseudo** | Apparaît dans les logs de l'hébergeur, pour rattacher un signalement à une config. |
+
+La page tourne entièrement dans le navigateur : rien n'est envoyé au serveur,
+rien n'est stocké. La clé TMDB finit dans le lien de l'utilisateur, pas dans
+une base chez l'hébergeur — et la page prévient qu'un tel lien ne se partage
+pas.
+
+L'URL sans configuration (`/manifest.json`) reste celle d'une instance
+personnelle : elle montre tout, proxy compris.
+
+### Réponse rapide
+
+Une seule source lente bloque toute la réponse : mesuré, purstream a mis 25 s
+là où quatre autres avaient déjà livré. Avec un seuil, l'addon rend la main dès
+qu'il a de quoi remplir l'écran, et les retardataires continuent en
+arrière-plan pour compléter le cache.
+
+| | Flux | Délai |
+|---|---|---|
+| Attendre toutes les sources | 28 | 10,2 s |
+| Seuil à 5 flux | 11 | **3,7 s** |
+| Même épisode rejoué | 28 | 23 ms |
+
+La troisième ligne est le point : on n'échange pas des flux contre de la
+vitesse, on décale seulement leur arrivée.
+
 ## Héberger publiquement
 
 Pour que d'autres installent l'addon avec une simple URL, il faut le faire
@@ -156,9 +202,13 @@ echo "PROBE_DIRECT=true" >> .env
 ADDON_DOMAIN=sora.exemple.fr docker compose -f docker-compose.public.yml up -d --build
 ```
 
-Caddy obtient le certificat tout seul. Vos utilisateurs installent ensuite
-`https://sora.exemple.fr/manifest.json`, et c'est tout — le HTTPS rend aussi
-l'addon utilisable depuis `web.stremio.com`, qui refuse le HTTP simple.
+Caddy obtient le certificat tout seul. Vos utilisateurs vont ensuite sur
+`https://sora.exemple.fr/configure`, règlent ce qu'ils veulent et repartent
+avec leur propre lien d'installation. Le HTTPS rend aussi l'addon utilisable
+depuis `web.stremio.com`, qui refuse le HTTP simple.
+
+Conseillez-leur d'apporter leur clé TMDB et de laisser le mode « direct » :
+votre quota et votre bande passante ne bougent alors pas.
 
 ### Le chiffre qui décide de tout : la bande passante
 
