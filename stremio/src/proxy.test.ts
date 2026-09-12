@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { proxify, rewriteHls } from './proxy';
 
+process.env.PROXY_SECRET = process.env.PROXY_SECRET || 'secret-de-test';
+
 function payloadOf(proxyUrl: string): { u: string; h?: Record<string, string>; e: number } {
   const data = new URL(proxyUrl).searchParams.get('d')!;
   return JSON.parse(Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
@@ -56,4 +58,41 @@ test('rewriteHls fait repasser variantes, segments et clés par le proxy', () =>
 test('rewriteHls laisse les lignes vides intactes', () => {
   const out = rewriteHls('#EXTM3U\n\n#EXT-X-ENDLIST\n', 'https://cdn.test/m.m3u8');
   assert.equal(out, '#EXTM3U\n\n#EXT-X-ENDLIST\n');
+});
+
+test('isHls ne se fie qu’au corps, jamais à l’extension de l’URL', async () => {
+  // Régression vérifiée en conditions réelles : un CDN qui refuse la requête
+  // rend une page nginx tout en gardant `.m3u8` dans l'URL. Réécrite comme un
+  // manifeste, chaque ligne de HTML devenait un faux lien proxifié et le
+  // player recevait une playlist absurde au lieu de l'erreur.
+  const errorPage = '<html>\n<head><title>403 Forbidden</title></head>\n<body>\n<center><h1>403 Forbidden</h1></center>\n</body>\n</html>';
+
+  const http = await import('node:http');
+  const { app } = await import('./index');
+
+  const origin = http.createServer((_req, res) => {
+    res.writeHead(403, { 'content-type': 'text/html' });
+    res.end(errorPage);
+  });
+  const originPort = await new Promise<number>(r =>
+    origin.listen(0, '127.0.0.1', () => r((origin.address() as { port: number }).port)));
+
+  const addon = http.createServer(app);
+  const addonPort = await new Promise<number>(r =>
+    addon.listen(0, '127.0.0.1', () => r((addon.address() as { port: number }).port)));
+
+  process.env.PUBLIC_URL = `http://127.0.0.1:${addonPort}`;
+  const { proxify: fresh } = await import('./proxy');
+
+  try {
+    const res = await fetch(fresh(`http://127.0.0.1:${originPort}/hls/master.m3u8`));
+    const body = await res.text();
+
+    assert.equal(res.status, 403, 'le vrai statut de l’hébergeur doit remonter');
+    assert.equal(body, errorPage, 'le corps doit être relayé tel quel');
+    assert.ok(!body.includes('/proxy/s'), 'aucune ligne ne doit avoir été réécrite');
+  } finally {
+    origin.close();
+    addon.close();
+  }
 });

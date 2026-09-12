@@ -6,10 +6,9 @@ Portage autonome des modules Sora vers Stremio. Cinq sources françaises :
 Projet indépendant : pas de fork à resynchroniser, pas de SDK non maintenu.
 Un serveur Node + TypeScript, un conteneur, aucune base de données.
 
-> ⚠️ Les scrapers de ce dépôt **n'ont pas encore été exécutés contre les sites
-> réels** : ils ont été écrits dans un environnement sans accès sortant. La
-> logique hors réseau est couverte par des tests ; le reste demande une passe
-> de validation (voir « Première mise en route »).
+**Validé en conditions réelles** : les cinq sources rendent des flux, et la
+chaîne HLS complète (manifeste → variante → segment) a été jouée à travers le
+proxy jusqu'à récupérer de la vidéo MPEG-TS. Voir [Résultats de validation](#résultats-de-validation).
 
 ## Installation
 
@@ -112,21 +111,43 @@ rendre plutôt que servir un voisin. Si une source rend zéro flux sur un titre
 que vous savez présent, c'est le premier endroit à regarder (`LOG_LEVEL=debug`
 affiche le score retenu).
 
-## Première mise en route
+## Résultats de validation
 
-Dans l'ordre, du plus simple au plus fragile :
+Mesures réelles, un film (Interstellar) et un épisode d'anime (L'Attaque des
+Titans S1E1) :
 
-1. `npm test` — la logique hors réseau (29 tests).
-2. `npm run probe -- movie tt0816692 --only movix` — movix est keyé TMDB, donc
-   sans rapprochement par titre : si ça marche, la chaîne TMDB → source →
-   extraction → proxy est bonne.
-3. `--only purstream`, puis les trois sources anime, qui dépendent du
-   rapprochement par titre et demanderont sans doute un ajustement du seuil
-   dans `match.ts`.
-4. Lecture réelle dans Stremio : c'est là que se voient les headers manquants.
+| Source | Film | Anime S1E1 |
+|---|---|---|
+| Movix | 12 flux | 7 flux |
+| Purstream | 1 flux + sous-titres | 1 flux |
+| Nakanime | — (anime only) | 13 flux |
+| Anime-Sama | — (anime only) | 9 flux |
+| VoirAnime | — (anime only) | 4 flux |
+| **Total après dédoublonnage** | **10 flux / 4,9 s** | **31 flux / 9,2 s** |
+
+Le rapprochement par titre a trouvé la bonne fiche du premier coup sur les
+trois sources anime, sans ajustement de seuil.
+
+**Lecture de bout en bout** : master (1,6 Ko) → variante (321 Ko) → segment
+(2,79 Mo de MPEG-TS), le tout à travers le proxy. L'hôte testé refuse la
+requête sans User-Agent : la preuve que l'injection de headers fait son
+travail.
+
+### Premier démarrage
+
+```bash
+cp .env.example .env       # TMDB_API_KEY
+npm install && npm test
+npm run probe -- movie tt0816692
+```
 
 ## Limites connues
 
+- **lulustream / luluvdo** : l'extraction est correcte (l'URL retenue est la
+  seule présente dans la page), mais leur CDN a répondu 403 à toutes les
+  requêtes du serveur de test, avec ou sans headers. À revérifier depuis votre
+  propre hébergement : un blocage d'IP de datacenter est l'explication la plus
+  probable.
 - **Filemoon** n'est pas porté. Il exige une preuve de travail et une
   attestation signée, que les modules Sora délèguent à un Cloudflare Worker
   externe. Le module `voir-anime` le désactive déjà de son côté.
@@ -137,6 +158,9 @@ Dans l'ordre, du plus simple au plus fragile :
   celle de Cinemeta.
 - **Cache mémoire uniquement** : il repart à zéro au redémarrage, ce qui ne
   coûte qu'une poignée de requêtes.
+- **Les flux ne sont pas testés avant d'être proposés** : un hébergeur mort
+  apparaît quand même dans la liste. Les sonder doublerait le temps de
+  réponse ; Stremio permet de passer au suivant d'un clic.
 
 ## Licence et usage
 

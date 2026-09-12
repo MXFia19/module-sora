@@ -84,10 +84,15 @@ const FORWARD_FROM_UPSTREAM = [
   'cache-control', 'expires', 'last-modified', 'etag',
 ];
 
-function isHls(url: string, contentType: string, body: string): boolean {
-  if (/\.m3u8(\?|$)/i.test(url)) return true;
-  if (/mpegurl/i.test(contentType)) return true;
-  return body.startsWith('#EXTM3U');
+/** Seul le CORPS fait foi.
+ *
+ *  Se fier à l'extension de l'URL ou au content-type annoncé est un piège
+ *  vérifié : un CDN qui refuse la requête rend une page d'erreur nginx en
+ *  gardant `.m3u8` dans l'URL. Réécrite comme un manifeste, chaque ligne de
+ *  HTML devient un faux lien proxifié, et le player reçoit un playlist
+ *  absurde au lieu de l'erreur. */
+function isHls(body: string): boolean {
+  return body.trimStart().startsWith('#EXTM3U');
 }
 
 /** Réécrit un manifeste HLS pour que variantes, segments et clés repassent
@@ -145,16 +150,21 @@ export async function handleProxy(req: Request, res: Response): Promise<void> {
 
     // Un manifeste est petit : on le lit en entier pour le réécrire. Un
     // segment ou un MP4 est gros : on le fait transiter en flux.
-    const looksTextual = /mpegurl|text\/plain/i.test(contentType) || /\.m3u8(\?|$)/i.test(payload.u);
+    const looksTextual = /mpegurl|text\//i.test(contentType) || /\.m3u8(\?|$)/i.test(payload.u);
     if (looksTextual) {
       const body = await upstream.text();
-      if (isHls(payload.u, contentType, body)) {
+      if (isHls(body)) {
         const rewritten = rewriteHls(body, upstream.url || payload.u, payload.h);
         res.status(upstream.status)
           .set('content-type', 'application/vnd.apple.mpegurl')
           .set('cache-control', 'no-cache')
           .send(rewritten);
         return;
+      }
+      // Pas un manifeste : on relaie tel quel. Le player verra le vrai statut
+      // de l'hébergeur, et les logs le vrai message d'erreur.
+      if (!upstream.ok) {
+        log.warn(`${upstream.status} de ${payload.u} — corps non-HLS (${body.length}o)`);
       }
       res.status(upstream.status).set('content-type', contentType || 'text/plain').send(body);
       return;

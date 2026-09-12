@@ -105,6 +105,21 @@ async function extractGeneric(embedUrl: string, referer: string): Promise<Extrac
   return { url, server: name, headers: { Referer: host ? `${host}/` : referer } };
 }
 
+/** Marqueurs de fichier absent servis par certains hébergeurs à la place d'une
+ *  erreur : l'URL a la bonne forme mais ne contient aucune vidéo. */
+const PLACEHOLDER = /novideo|void\.mp4|no_video|deleted/i;
+
+/** Une URL n'est retenue que si elle est absolue ET pointe un média.
+ *
+ *  Les deux conditions comptent : un lien relatif (`/embed/novideo.mp4`) a
+ *  bien l'extension attendue mais n'est pas joignable, et le servir donnerait
+ *  une entrée qui échoue à la lecture — pire que ne rien proposer. */
+function isPlayable(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  if (PLACEHOLDER.test(url)) return false;
+  return /\.(m3u8|mp4)(\?|$)/i.test(url);
+}
+
 /** Résout un lien d'embed en flux jouables. Ne jette jamais : un hébergeur
  *  cassé ne doit retirer que sa propre entrée de la liste. */
 export async function extractEmbed(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
@@ -119,11 +134,7 @@ export async function extractEmbed(embedUrl: string, referer: string): Promise<E
       return [];
     }
 
-    // Un lien qui n'est ni HLS ni MP4 est une page, pas un flux : le laisser
-    // passer donnerait une entrée qui échoue à la lecture, ce qui est pire
-    // que de ne rien proposer.
-    const playable = (Array.isArray(result) ? result : [result])
-      .filter(r => /\.(m3u8|mp4)(\?|$)/i.test(r.url));
+    const playable = (Array.isArray(result) ? result : [result]).filter(r => isPlayable(r.url));
 
     if (playable.length === 0) log.debug(`aucune URL jouable depuis ${embedUrl}`);
     return playable;

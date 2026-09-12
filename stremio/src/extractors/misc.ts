@@ -1,4 +1,4 @@
-import { request, getText } from '../http';
+import { request, getText, absolute } from '../http';
 import type { ExtractedStream } from './index';
 
 /** YourUpload expose le MP4 dans la balise og:video, puis redirige vers un
@@ -9,7 +9,9 @@ export async function extractYourUpload(embedUrl: string, referer: string): Prom
     ?? html.match(/file\s*:\s*["']([^"']+\.mp4[^"']*)["']/i);
   if (!m?.[1]) return null;
 
-  let url = m[1];
+  // og:video est parfois relatif ('/embed/xyz.mp4') : le laisser tel quel
+  // produirait une entrée injouable.
+  let url = absolute(m[1], embedUrl);
   const head = await request(url, { headers: { Referer: embedUrl }, redirect: 'manual' });
   const location = head.headers.get('location');
   if (location) url = new URL(location, url).toString();
