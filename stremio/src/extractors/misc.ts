@@ -12,6 +12,11 @@ export async function extractYourUpload(embedUrl: string, referer: string): Prom
   // og:video est parfois relatif ('/embed/xyz.mp4') : le laisser tel quel
   // produirait une entrée injouable.
   let url = absolute(m[1], embedUrl);
+
+  // Vidéo retirée : YourUpload sert '/embed/novideo.mp4'. Le filtre en aval
+  // l'écarterait de toute façon, autant ne pas dépenser la requête qui suit.
+  if (/novideo/i.test(url)) return null;
+
   const head = await request(url, { headers: { Referer: embedUrl }, redirect: 'manual' });
   const location = head.headers.get('location');
   if (location) url = new URL(location, url).toString();

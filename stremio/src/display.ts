@@ -47,13 +47,36 @@ export function sortStreams(streams: RawStream[]): RawStream[] {
 
 /** Deux sources qui re-hébergent le même fichier rendent la même URL : on ne
  *  l'affiche qu'une fois, en gardant la première (donc la mieux classée). */
+/** Paramètres de query qui désignent le fichier, par opposition à ceux qui
+ *  n'en autorisent que l'accès (token, expires, ip, signature...). */
+const IDENTIFYING_PARAMS = ['id', 'v', 'videoid', 'file'];
+
+/** Clé d'identité d'un flux : deux URLs qui la partagent pointent le même
+ *  fichier.
+ *
+ *  Jeter toute la query serait plus simple mais faux : la plupart des
+ *  hébergeurs mettent le fichier dans le chemin et ne signent que la query,
+ *  mais Streamtape sert TOUTES ses vidéos sur `/get_video`, où seul `id`
+ *  distingue la VF de la VOSTFR. Les écraser ensemble faisait disparaître un
+ *  flux sur deux. */
+export function identityKey(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const ids = IDENTIFYING_PARAMS
+      .map(p => [p, u.searchParams.get(p)] as const)
+      .filter((e): e is readonly [string, string] => e[1] !== null)
+      .map(([p, v]) => `${p}=${v}`);
+    return `${u.origin}${u.pathname}${ids.length ? `?${ids.join('&')}` : ''}`;
+  } catch {
+    return rawUrl.split('?')[0] ?? rawUrl;
+  }
+}
+
 export function dedupe(streams: RawStream[]): RawStream[] {
   const seen = new Set<string>();
   const out: RawStream[] = [];
   for (const s of streams) {
-    // La query porte souvent un token de session : deux URLs qui ne diffèrent
-    // que par lui pointent le même fichier.
-    const key = s.url.split('?')[0] ?? s.url;
+    const key = identityKey(s.url);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(s);

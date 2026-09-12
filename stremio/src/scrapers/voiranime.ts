@@ -117,8 +117,12 @@ async function embedsOf(episodeUrl: string): Promise<string[]> {
 
   for (const m of html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) addFrame(m[1]!);
 
-  const redirects = [...html.matchAll(/data-redirect=["']([^"']+\?host=[^"']+)["']/gi)]
-    .map(m => absolute(m[1]!.replace(/&amp;/g, '&'), BASE));
+  // La page déclare chaque lecteur deux fois (mise en page bureau et mobile).
+  // Sans dédoublonnage on télécharge quatorze fois 180 Ko pour huit lecteurs.
+  const redirects = [...new Set(
+    [...html.matchAll(/data-redirect=["']([^"']+\?host=[^"']+)["']/gi)]
+      .map(m => absolute(m[1]!.replace(/&amp;/g, '&'), BASE)),
+  )];
 
   if (redirects.length > 0) {
     log.debug(`${redirects.length} lien(s) data-redirect à résoudre`);

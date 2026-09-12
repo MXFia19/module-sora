@@ -74,14 +74,51 @@ export async function extractVoe(embedUrl: string, referer: string): Promise<str
 /** Streamtape masque l'URL dans un innerHTML reconstruit côté client. */
 export async function extractStreamtape(embedUrl: string, referer: string): Promise<string | null> {
   const html = await getText(embedUrl, { headers: { Referer: referer } });
-  const m = html.match(/document\.getElementById\(['"]robotlink['"]\)\.innerHTML\s*=\s*[^;]*?\(['"]([^'"]+)['"]\)/i)
-    ?? html.match(/document\.getElementById\(['"]robotlink['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]/i);
-  if (!m?.[1]) return null;
+  return streamtapeLink(html);
+}
 
-  const token = m[1];
-  const idx = token.indexOf('/get_video');
-  if (idx < 0) return null;
-  return `https://streamtape.com${token.slice(idx)}&dl=1`;
+/** Rejoue l'assemblage du lien fait par la page.
+ *
+ *  Streamtape écrit son lien ainsi, entouré de trois leurres portant d'autres
+ *  identifiants (`ideoolink`, `botlink`) — seul `robotlink` compte :
+ *
+ *    document.getElementById('robotlink').innerHTML =
+ *      '//strea' + ('xcdmtape.com/get_video?id=…').substring(2).substring(1)
+ *
+ *  Le point important est que la coupure se déplace d'une page à l'autre :
+ *  ici « /get_video » est dans la chaîne rognée, ailleurs il est déjà dans le
+ *  préfixe littéral (« //streamtape.co » + « m/get_video?… »). Chercher un
+ *  repère fixe dans l'un des deux morceaux marche donc une fois sur deux — et
+ *  c'est bien ce qu'on observait : un même film rendait son flux VF ou son
+ *  flux VOSTFR selon la page servie. On recolle les morceaux comme le
+ *  navigateur le ferait, et la coupure n'a plus d'importance. */
+export function streamtapeLink(html: string): string | null {
+  const assign = html.match(/document\.getElementById\(['"]robotlink['"]\)\.innerHTML\s*=\s*([^;\n]+)/i);
+  if (!assign?.[1]) return null;
+
+  const expr = assign[1];
+  const call = expr.match(/\((['"])([\s\S]*?)\1\)((?:\s*\.substring\(\s*\d+\s*\))*)/);
+  if (!call) return null;
+
+  // Tout ce qui précède l'appel est le préfixe, en une ou plusieurs chaînes.
+  const prefix = [...expr.slice(0, call.index).matchAll(/['"]([^'"]*)['"]/g)]
+    .map(m => m[1]!)
+    .join('');
+
+  let token = call[2]!;
+  for (const cut of call[3]!.matchAll(/\.substring\(\s*(\d+)\s*\)/g)) {
+    token = token.slice(Number(cut[1]));
+  }
+
+  const joined = prefix + token;
+  if (!joined.includes('/get_video')) return null;
+
+  const url = joined.startsWith('//') ? `https:${joined}`
+    : joined.startsWith('/') ? `https://streamtape.com${joined}`
+    : /^https?:\/\//i.test(joined) ? joined
+    : `https://${joined}`;
+
+  return url.includes('dl=1') ? url : `${url}&dl=1`;
 }
 
 /** Sendvid : l'URL est en clair dans la page, sous trois formes selon l'âge

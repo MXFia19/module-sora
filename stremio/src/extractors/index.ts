@@ -1,4 +1,5 @@
 import { getText, origin } from '../http';
+import { cached } from '../cache';
 import { logger } from '../log';
 import { unpackAll, findMediaUrl } from './unpack';
 import { extractEmbed4me } from './embed4me';
@@ -109,20 +110,48 @@ async function extractGeneric(embedUrl: string, referer: string): Promise<Extrac
  *  erreur : l'URL a la bonne forme mais ne contient aucune vidéo. */
 const PLACEHOLDER = /novideo|void\.mp4|no_video|deleted/i;
 
-/** Une URL n'est retenue que si elle est absolue ET pointe un média.
- *
- *  Les deux conditions comptent : un lien relatif (`/embed/novideo.mp4`) a
- *  bien l'extension attendue mais n'est pas joignable, et le servir donnerait
- *  une entrée qui échoue à la lecture — pire que ne rien proposer. */
-function isPlayable(url: string): boolean {
+/** Une URL n'est retenue que si elle est absolue et ne porte pas un marqueur
+ *  de fichier absent. Un lien relatif (`/embed/novideo.mp4`) a bien
+ *  l'extension attendue mais n'est pas joignable, et le servir donnerait une
+ *  entrée qui échoue à la lecture — pire que ne rien proposer. */
+export function isPlayable(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false;
-  if (PLACEHOLDER.test(url)) return false;
+  return !PLACEHOLDER.test(url);
+}
+
+/** Exigence supplémentaire pour le repli générique UNIQUEMENT : l'URL doit
+ *  porter une extension de média.
+ *
+ *  Le repli ramasse la première URL plausible d'une page qu'il ne connaît
+ *  pas ; sans ce garde-fou il rendrait des pages HTML et des images. Un
+ *  extracteur nommé, lui, sait ce qu'il a extrait — et l'exiger de lui coûtait
+ *  cher : Streamtape sert ses vidéos sur `/get_video?id=…`, sans extension,
+ *  et chacun de ses flux était jeté après avoir été correctement extrait. */
+export function looksLikeMedia(url: string): boolean {
   return /\.(m3u8|mp4)(\?|$)/i.test(url);
 }
 
+/** Durée de mémorisation d'une extraction. Courte : les URLs rendues sont
+ *  signées et expirent. Elle sert surtout à l'intérieur d'une même requête,
+ *  où deux sources tombent régulièrement sur le même lecteur. */
+const EXTRACT_TTL_MS = 5 * 60 * 1000;
+
 /** Résout un lien d'embed en flux jouables. Ne jette jamais : un hébergeur
- *  cassé ne doit retirer que sa propre entrée de la liste. */
-export async function extractEmbed(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
+ *  cassé ne doit retirer que sa propre entrée de la liste.
+ *
+ *  Mémorisé par URL d'embed : sur un film, nakanime, anime-sama et voir-anime
+ *  pointent souvent le MÊME lecteur, et voir-anime le pointe deux fois (une
+ *  fiche VF, une fiche VOSTFR). Sans ça la même page de 125 Ko est téléchargée
+ *  et déchiffrée autant de fois qu'il y a de sources qui la citent. La
+ *  déduplication des appels en vol de `cached` couvre le cas concurrent, qui
+ *  est le cas normal ici. */
+export function extractEmbed(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
+  return cached(`extract:${embedUrl}`, () => extractOnce(embedUrl, referer), {
+    ttlMs: EXTRACT_TTL_MS,
+  });
+}
+
+async function extractOnce(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
   const host = HOSTS.find(h => h.match.test(embedUrl));
   try {
     const result = host
@@ -134,7 +163,8 @@ export async function extractEmbed(embedUrl: string, referer: string): Promise<E
       return [];
     }
 
-    const playable = (Array.isArray(result) ? result : [result]).filter(r => isPlayable(r.url));
+    const playable = (Array.isArray(result) ? result : [result])
+      .filter(r => isPlayable(r.url) && (host ? true : looksLikeMedia(r.url)));
 
     if (playable.length === 0) log.debug(`aucune URL jouable depuis ${embedUrl}`);
     return playable;
