@@ -324,15 +324,14 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
   });
 
   const resolved = await Promise.all(usable.map(async link => {
-    // Un lien déjà direct n'a pas besoin d'extracteur. On garde un User-Agent
-    // de navigateur : plusieurs CDN refusent les clients de lecture bruts.
+    // Un lien déjà direct n'a pas besoin d'extracteur, ni de headers : il est
+    // servi tel quel au lecteur, sans passer par le proxy.
     if (/\.(m3u8|mp4)(\?|$)/i.test(link.url)) {
       return [{
         url: link.url,
         quality: link.quality,
         language: link.language,
         server: `direct (${link.via})`,
-        headers: { Accept: '*/*' },
         container: link.url.includes('.m3u8') ? ('hls' as const) : ('mp4' as const),
       }];
     }

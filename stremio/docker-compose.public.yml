@@ -1,0 +1,47 @@
+# Déploiement public : addon + Caddy pour le HTTPS.
+#
+#   ADDON_DOMAIN=sora.exemple.fr docker compose -f docker-compose.public.yml up -d --build
+#
+# À utiliser à la place de docker-compose.yml (pas en plus). L'addon n'est PAS
+# exposé directement : seul Caddy publie des ports, tout le reste passe par le
+# réseau interne du compose.
+services:
+  sora-stremio:
+    build: .
+    image: sora-stremio:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 7000
+      PUBLIC_URL: https://${ADDON_DOMAIN:?définir ADDON_DOMAIN}
+      # Caddy est le seul intermédiaire : req.ip doit être l'IP réelle du
+      # client, sinon la limite par IP s'applique à tout le monde en bloc.
+      TRUST_PROXY: 1
+      # Valeurs de départ prudentes pour une instance ouverte, à ajuster selon
+      # l'uplink de la machine (voir « Héberger publiquement » dans le README).
+      RATE_LIMIT_STREAM_PER_MIN: ${RATE_LIMIT_STREAM_PER_MIN:-20}
+      PROXY_MAX_CONCURRENT: ${PROXY_MAX_CONCURRENT:-15}
+    expose:
+      - "7000"
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ADDON_DOMAIN: ${ADDON_DOMAIN:?définir ADDON_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificats : à conserver, sinon Let's Encrypt
+      - caddy_config:/config  # finit par limiter les demandes répétées
+    depends_on:
+      - sora-stremio
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -35,6 +35,12 @@ export function sortStreams(streams: RawStream[]): RawStream[] {
     if (lang !== 0) return lang;
     const q = rank(QUALITY_RANK, b.quality, 2) - rank(QUALITY_RANK, a.quality, 2);
     if (q !== 0) return q;
+    // À langue et qualité égales, un flux qui se lit en direct passe devant :
+    // il ne coûte rien au serveur et évite un intermédiaire au lecteur. Le
+    // critère arrive en dernier pour ne jamais dégrader ce que l'utilisateur
+    // voit en premier.
+    const direct = Number(hasMeaningfulHeaders(a.headers)) - Number(hasMeaningfulHeaders(b.headers));
+    if (direct !== 0) return direct;
     return (a.source ?? '').localeCompare(b.source ?? '');
   });
 }
@@ -61,11 +67,26 @@ function sizeLabel(bytes?: number): string {
   return gb >= 1 ? ` • ${gb.toFixed(2)} Go` : ` • ${Math.round(bytes / 1024 ** 2)} Mo`;
 }
 
+/** Headers qui changent réellement la réponse de l'hébergeur, et justifient
+ *  donc de faire transiter la vidéo par nous.
+ *
+ *  `Accept` et `User-Agent` n'en font pas partie : tout lecteur envoie déjà
+ *  les siens. Mesuré sur un CDN qui refuse les requêtes sans User-Agent —
+ *  Chrome, VLC, mpv et AppleCoreMedia passent tous, seule l'absence d'UA est
+ *  rejetée. Proxifier pour ça reviendrait à relayer chaque octet de vidéo
+ *  sans rien apporter, ce qui se paie cher dès qu'on héberge pour d'autres. */
+const MEANINGFUL_HEADERS = ['referer', 'origin', 'cookie', 'authorization'];
+
+export function hasMeaningfulHeaders(headers?: Record<string, string>): boolean {
+  if (!headers) return false;
+  return Object.keys(headers).some(h => MEANINGFUL_HEADERS.includes(h.toLowerCase()));
+}
+
 /** Un flux -> l'objet attendu par Stremio.
  *  Les headers exigés par l'hébergeur déclenchent le passage par le proxy :
  *  c'est le seul endroit où cette décision est prise. */
 export function toStremio(s: RawStream): StremioStream {
-  const needsProxy = config.proxyEnabled && s.headers && Object.keys(s.headers).length > 0;
+  const needsProxy = config.proxyEnabled && hasMeaningfulHeaders(s.headers);
   const url = needsProxy ? proxify(s.url, s.headers) : s.url;
 
   const source = s.source ?? s.server;
@@ -80,7 +101,7 @@ export function toStremio(s: RawStream): StremioStream {
     subtitles: (s.subtitles ?? []).map((sub, i) => ({
       id: `${source}-${sub.lang}-${i}`,
       // Un sous-titre a les mêmes contraintes de headers que le flux.
-      url: config.proxyEnabled && sub.headers ? proxify(sub.url, sub.headers) : sub.url,
+      url: config.proxyEnabled && hasMeaningfulHeaders(sub.headers) ? proxify(sub.url, sub.headers) : sub.url,
       lang: sub.lang,
     })),
     behaviorHints: {

@@ -141,6 +141,80 @@ npm install && npm test
 npm run probe -- movie tt0816692
 ```
 
+## Héberger publiquement
+
+Pour que d'autres installent l'addon avec une simple URL, il faut le faire
+tourner sur une machine joignable, avec un domaine et du HTTPS.
+
+```bash
+# sur un VPS, DNS du domaine pointé dessus, ports 80 et 443 ouverts
+git clone -b gh-main-r2ievx https://github.com/MXFia19/module-sora
+cd module-sora/stremio
+cp .env.example .env          # TMDB_API_KEY + PROXY_SECRET
+echo "PROBE_DIRECT=true" >> .env
+
+ADDON_DOMAIN=sora.exemple.fr docker compose -f docker-compose.public.yml up -d --build
+```
+
+Caddy obtient le certificat tout seul. Vos utilisateurs installent ensuite
+`https://sora.exemple.fr/manifest.json`, et c'est tout — le HTTPS rend aussi
+l'addon utilisable depuis `web.stremio.com`, qui refuse le HTTP simple.
+
+### Le chiffre qui décide de tout : la bande passante
+
+Un flux proxifié fait transiter **chaque octet de la vidéo par votre serveur**.
+Un film de 2 h en 1080p ≈ **3,5 Go**, et dix spectateurs simultanés ≈ **40 Mbps
+d'uplink en continu**. C'est ça qui coûte, pas le CPU.
+
+D'où `PROBE_DIRECT=true`. L'addon teste chaque flux sans headers et ne
+proxifie que ceux qui en ont réellement besoin :
+
+| | Flux proxifiés | Servis en direct |
+|---|---|---|
+| Sans `PROBE_DIRECT` | 31 / 31 | 0 |
+| Avec `PROBE_DIRECT` | 4 / 31 | **27 (87 %)** |
+
+Les scrapers attachaient le `Referer` du site source à l'URL de lecture, alors
+qu'il ne servait qu'à récupérer la page d'embed. Le CDN final, lui, ne le
+réclame presque jamais — vérifié sur une dizaine d'hébergeurs. Les flux
+directs ne coûtent alors rien d'autre qu'une réponse JSON.
+
+Le verdict est mémorisé par hôte : ~3 s au premier appel pour un CDN inconnu,
+puis rien. À langue et qualité égales, un flux direct est proposé avant un
+flux proxifié.
+
+Avec ça, un VPS d'entrée de gamme (~5 €/mois, 20 To de trafic) tient
+confortablement. Sans, les 20 To partent en ~5 500 films.
+
+### Garde-fous
+
+Le `docker-compose.public.yml` les active avec des valeurs prudentes :
+
+| Variable | Défaut public | Ce qu'elle protège |
+|---|---|---|
+| `RATE_LIMIT_STREAM_PER_MIN` | 20 / IP | Les sites sources. Trop d'appels et c'est **l'IP de votre serveur** qui se fait bannir chez eux, pas celle de l'utilisateur. |
+| `PROXY_MAX_CONCURRENT` | 15 | Votre uplink. Au-delà, mieux vaut refuser proprement que dégrader la lecture de tout le monde. |
+| `TRUST_PROXY` | 1 | Sans ça, toutes les requêtes semblent venir de Caddy et la limite par IP punit tout le monde d'un bloc. |
+
+`PROXY_SECRET` devient obligatoire en public : sans lui, un redémarrage coupe
+toutes les lectures en cours.
+
+### Ce qu'il faut savoir avant de rendre ça public
+
+- **Vous devenez l'intermédiaire.** En usage personnel, votre IP interroge les
+  sites pour vous seul. En public, votre serveur le fait pour tout le monde :
+  les sources peuvent bannir son IP, et le trafic vidéo proxifié sort de chez
+  votre hébergeur sous votre nom.
+- **Les hébergeurs PaaS ne conviennent pas.** Vercel, Netlify et les offres
+  serverless en général coupent les réponses longues et facturent l'egress au
+  prix fort. Il faut une vraie VM.
+- **Un lien proxifié signé reste valable 6 h** et peut être partagé hors de
+  Stremio. `PROXY_TTL_MS` réduit la fenêtre si ça vous gêne.
+- **Diffuser publiquement des liens vers des contenus protégés vous expose**
+  bien plus qu'un usage privé, et l'exposition dépend de votre juridiction et
+  de votre hébergeur. C'est une décision qui vous appartient ; ce README ne
+  fait que la signaler.
+
 ## Limites connues
 
 - **lulustream / luluvdo** : l'extraction est correcte (l'URL retenue est la

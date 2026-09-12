@@ -6,12 +6,18 @@ import { buildRequest } from './tmdb';
 import { handleProxy } from './proxy';
 import { enabledScrapers } from './scrapers';
 import { dedupe, sortStreams, toStremio } from './display';
+import { relaxHeaders } from './direct';
+import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
 import type { MediaType, RawStream } from './types';
 
 const log = logger('Addon');
 const app = express();
 
 app.disable('x-powered-by');
+
+// Derrière un reverse-proxy, req.ip doit être l'IP du client et non celle du
+// proxy, sinon la limite par IP s'applique à tout le monde en bloc.
+if (config.trustProxy > 0) app.set('trust proxy', config.trustProxy);
 
 /** Stremio (web et desktop) appelle l'addon depuis une autre origine. */
 app.use((_req, res, next) => {
@@ -49,9 +55,11 @@ app.get('/', (_req, res) => {
 
 /** Le seul endpoint qui compte. Stremio appelle
  *  /stream/movie/tt0816692.json ou /stream/series/tt0944947:1:1.json */
-app.get('/stream/:type/:id.json', async (req, res) => {
+app.get('/stream/:type/:id.json', rateLimit, async (req, res) => {
   const type = req.params.type as MediaType;
-  const rawId = decodeURIComponent(req.params.id);
+  // Avec plusieurs handlers, Express type les params en `string | undefined` :
+  // la route les garantit présents, mais le repli évite un cast aveugle.
+  const rawId = decodeURIComponent(req.params.id ?? '');
 
   if (type !== 'movie' && type !== 'series') {
     res.json({ streams: [] });
@@ -131,7 +139,7 @@ async function resolveStreams(
     }
   }));
 
-  return dedupe(sortStreams(results.flat()));
+  return relaxHeaders(dedupe(sortStreams(results.flat())));
 }
 
 function withTimeout<T>(p: Promise<T[]>, ms: number): Promise<T[]> {
@@ -144,10 +152,15 @@ function withTimeout<T>(p: Promise<T[]>, ms: number): Promise<T[]> {
 
 // Le suffixe est libre (/proxy/s, /proxy/s.m3u8, /proxy/s.mp4) : il ne sert
 // qu'à renseigner les players qui devinent le type depuis l'extension.
-app.get('/proxy/s*', handleProxy);
+app.get('/proxy/s*', concurrencyGuard, handleProxy);
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, cache: cacheStats(), scrapers: enabledScrapers().map(s => s.id) });
+  res.json({
+    ok: true,
+    cache: cacheStats(),
+    scrapers: enabledScrapers().map(s => s.id),
+    activeStreams: activeStreams(),
+  });
 });
 
 app.post('/admin/cache/clear', (_req, res) => {
@@ -163,6 +176,9 @@ if (require.main === module) {
     log.info(`sources actives: ${enabledScrapers().map(s => s.id).join(', ') || 'aucune'}`);
     if (!config.publicUrl) {
       log.warn('PUBLIC_URL non définie — les liens proxifiés pointeront sur 127.0.0.1 (usage local uniquement).');
+    }
+    if (config.rateLimitStreamPerMin > 0 || config.proxyMaxConcurrent > 0) {
+      log.info(`garde-fous: ${config.rateLimitStreamPerMin || '∞'} req/min par IP, ${config.proxyMaxConcurrent || '∞'} flux simultanés`);
     }
   });
 }

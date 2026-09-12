@@ -64,6 +64,22 @@ export const config = {
   /** Durée de validité d'un lien proxifié. */
   get proxyTtlMs(): number { return num('PROXY_TTL_MS', 6 * 60 * 60 * 1000); },
 
+  /** Garde-fous pour une instance publique. 0 = désactivé, ce qui convient
+   *  à un usage personnel où le seul client est soi-même. */
+  get rateLimitStreamPerMin(): number { return num('RATE_LIMIT_STREAM_PER_MIN', 0); },
+  get proxyMaxConcurrent(): number { return num('PROXY_MAX_CONCURRENT', 0); },
+  /** Teste chaque flux sans headers et ne proxifie que ceux qui en ont
+   *  vraiment besoin. Coûte une requête d'un octet par flux, économise la
+   *  bande passante de tous les autres. Recommandé dès qu'on héberge pour
+   *  plus d'une personne. */
+  get probeDirect(): boolean { return bool('PROBE_DIRECT', false); },
+  /** Nombre de reverse-proxies devant l'addon. Sans ça, toutes les requêtes
+   *  semblent venir de Caddy et la limite par IP punit tout le monde d'un
+   *  coup. Ne jamais le laisser à 0 derrière un reverse-proxy, ni le monter
+   *  sans en avoir un : ce serait croire un X-Forwarded-For envoyé par le
+   *  client lui-même. */
+  get trustProxy(): number { return num('TRUST_PROXY', 0); },
+
   /** Verbosité. 'debug' trace chaque requête HTTP sortante. */
   get logLevel(): 'debug' | 'info' | 'warn' | 'error' {
     return str('LOG_LEVEL', 'info') as 'debug' | 'info' | 'warn' | 'error';

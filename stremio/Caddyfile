@@ -1,0 +1,30 @@
+# Caddy obtient et renouvelle le certificat TLS tout seul : il suffit que le
+# DNS du domaine pointe sur la machine et que les ports 80 et 443 soient
+# ouverts. C'est ce qui rend l'addon installable depuis web.stremio.com, qui
+# refuse le HTTP simple.
+
+{$ADDON_DOMAIN} {
+	encode gzip
+
+	# Les segments vidéo ne doivent PAS être compressés : ils sont déjà
+	# compressés, et gzipper un flux ajoute de la latence pour rien.
+	@video path /proxy/*
+	route @video {
+		reverse_proxy sora-stremio:7000 {
+			# Un film entier transite par ici : pas de tampon, et des délais
+			# larges, sinon Caddy coupe au milieu d'une lecture.
+			flush_interval -1
+			transport http {
+				response_header_timeout 60s
+				read_timeout 0
+			}
+		}
+	}
+
+	reverse_proxy sora-stremio:7000
+
+	log {
+		output stdout
+		format console
+	}
+}
