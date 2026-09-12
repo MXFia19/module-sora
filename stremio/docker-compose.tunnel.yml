@@ -1,0 +1,41 @@
+# Variante « depuis chez soi », via un tunnel Cloudflare.
+#
+#   TUNNEL_TOKEN=eyJ... ADDON_DOMAIN=sora.exemple.fr \
+#     docker compose -f docker-compose.tunnel.yml up -d --build
+#
+# Aucun port n'est ouvert sur la box : c'est cloudflared qui sort vers
+# Cloudflare et maintient la connexion. L'IP de la maison n'est pas exposée,
+# et le certificat TLS est géré par Cloudflare — donc pas de Caddy ici.
+#
+# ⚠️ À n'utiliser qu'en mode « direct ». Les conditions d'utilisation de
+# Cloudflare interdisent de faire transiter de gros volumes vidéo par leur
+# réseau : en mode direct, seul du JSON passe par le tunnel, la vidéo va du
+# CDN au lecteur sans nous. PROXY_ENABLED=false rend cette limite explicite
+# plutôt que de compter sur la discipline des utilisateurs.
+services:
+  sora-stremio:
+    build: .
+    image: sora-stremio:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 7000
+      PUBLIC_URL: https://${ADDON_DOMAIN:?définir ADDON_DOMAIN}
+      TRUST_PROXY: 1
+      PROXY_ENABLED: "false"
+      PROBE_DIRECT: "true"
+      RATE_LIMIT_STREAM_PER_MIN: ${RATE_LIMIT_STREAM_PER_MIN:-20}
+    expose:
+      - "7000"
+    security_opt:
+      - no-new-privileges:true
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?définir TUNNEL_TOKEN}
+    depends_on:
+      - sora-stremio

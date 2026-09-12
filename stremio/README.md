@@ -192,6 +192,12 @@ vitesse, on décale seulement leur arrivée.
 Pour que d'autres installent l'addon avec une simple URL, il faut le faire
 tourner sur une machine joignable, avec un domaine et du HTTPS.
 
+Le parcours complet, du VPS vierge au lien partageable, est dans
+[DEPLOIEMENT.md](DEPLOIEMENT.md) — avec deux variantes : depuis chez soi par
+tunnel Cloudflare, et sur une plateforme gratuite en mode direct.
+
+En résumé :
+
 ```bash
 # sur un VPS, DNS du domaine pointé dessus, ports 80 et 443 ouverts
 git clone -b gh-main-r2ievx https://github.com/MXFia19/module-sora
