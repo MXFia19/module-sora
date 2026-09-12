@@ -155,7 +155,40 @@ npm run build:static          # écrit dist-static/index.html
 ```
 
 Déposez `dist-static/` sur Vercel, Netlify, GitHub Pages, Cloudflare Pages —
-n'importe lequel, gratuitement. **Rien n'y scrape ni n'y proxifie**, donc
+n'importe lequel, gratuitement.
+
+### Avec GitHub Pages, automatiquement
+
+Le dépôt contient déjà le workflow `.github/workflows/pages.yml`. Une seule
+chose à faire, une fois :
+
+**Settings → Pages → Source → « GitHub Actions »**
+
+Sans ce réglage, le job de déploiement échoue à sa dernière étape : Pages
+refuse un artefact tant que la source est restée sur « Deploy from a branch ».
+
+Ensuite, chaque modification de la page sur `main` la republie. Le workflow
+lance les tests avant de déployer — une page qui fabriquerait des liens
+illisibles par l'addon ne doit pas partir en production. L'adresse finale est
+`https://<votre-compte>.github.io/module-sora/`.
+
+Pour publier sans attendre un push : onglet **Actions** → *Page
+d'installation* → **Run workflow**.
+
+Le workflow ne se déclenche que sur `main`. Tant que la branche de
+développement n'est pas fusionnée, utilisez le bouton **Run workflow**.
+
+### À la main, sans Actions
+
+```bash
+npm run build:static
+git checkout --orphan gh-pages
+git rm -rf . && cp stremio/dist-static/index.html .
+git add index.html && git commit -m "page d'installation"
+git push -u origin gh-pages
+```
+
+Puis **Settings → Pages → Source → Deploy from a branch → `gh-pages` / root**. **Rien n'y scrape ni n'y proxifie**, donc
 aucune des conditions d'usage qui excluent cet addon d'un PaaS ne s'applique :
 c'est de l'HTML statique, au même titre qu'un blog.
 
