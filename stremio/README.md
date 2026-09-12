@@ -266,6 +266,10 @@ toutes les lectures en cours.
   sites pour vous seul. En public, votre serveur le fait pour tout le monde :
   les sources peuvent bannir son IP, et le trafic vidéo proxifié sort de chez
   votre hébergeur sous votre nom.
+- **Oracle Cloud Always Free** est l'exception parmi les offres gratuites :
+  10 To/mois de trafic sortant, soit assez pour laisser le proxy actif. Ses
+  pièges (pare-feu interne en plus des règles cloud, reprise des instances
+  inactives) sont détaillés dans [DEPLOIEMENT.md](DEPLOIEMENT.md).
 - **Vercel est exclu, et la plupart des PaaS avec.** Pas pour une question de
   durée — Vercel autorise 300 s de fonction même en Hobby, largement assez.
   Mais ses *Fair Use Guidelines* listent sous « Never fair use » : *Proxies*,

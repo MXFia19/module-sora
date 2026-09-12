@@ -89,6 +89,91 @@ votre bande passante ne bougent alors pas.
 
 ---
 
+## Oracle Cloud Always Free — les spécificités
+
+C'est la meilleure offre gratuite pour cet usage, mais elle a trois pièges qui
+ne se posent nulle part ailleurs.
+
+### Ce que vous avez
+
+| | Ampere A1 (ARM) | E2.1.Micro (AMD) |
+|---|---|---|
+| Ressources | jusqu'à 4 OCPU / 24 Go | 1/8 OCPU / 1 Go |
+| Débit réseau | selon la taille | **50 Mbps** |
+| Trafic sortant | **10 To/mois**, sur les deux | |
+
+Les 10 To changent la donne par rapport à un VPS ordinaire : **vous pouvez
+laisser le proxy actif**. À ~3,5 Go le film, cela représente environ 2 800
+films par mois. `PROBE_DIRECT=true` reste utile — moins vous relayez, moins
+vous êtes exposé — mais ce n'est plus une nécessité budgétaire.
+
+Sur le Micro, c'est le plafond de **50 Mbps** qui limite : environ 12 lectures
+simultanées à 4 Mbps. Réglez `PROXY_MAX_CONCURRENT=10` en conséquence.
+
+### Piège 1 — le pare-feu interne, celui qui fait perdre une soirée
+
+Ouvrir les ports dans la console Oracle **ne suffit pas**. Les images Oracle
+embarquent en plus des règles iptables restrictives *dans* la machine. Tant
+qu'on ne les touche pas, le port paraît ouvert côté cloud et reste muet.
+
+Il faut donc faire les deux :
+
+**a) Côté console Oracle** — Networking → VCN → Security Lists → *Add Ingress
+Rules* :
+
+| Source | Protocole | Port |
+|---|---|---|
+| `0.0.0.0/0` | TCP | 80 |
+| `0.0.0.0/0` | TCP | 443 |
+
+**b) Dans la machine**, en SSH :
+
+```bash
+# Ubuntu sur OCI
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+sudo netfilter-persistent save
+
+# Oracle Linux (firewalld)
+sudo firewall-cmd --permanent --add-port=80/tcp --add-port=443/tcp
+sudo firewall-cmd --reload
+```
+
+Si Caddy n'obtient pas son certificat, c'est neuf fois sur dix ce point b) qui
+manque.
+
+### Piège 2 — la récupération des instances inactives
+
+Oracle reprend les instances Always Free jugées inactives. Les critères, sur
+une fenêtre de 7 jours, sont cumulatifs — l'instance n'est reprise que si
+**tous** sont vrais :
+
+- CPU au 95ᵉ centile < 20 %
+- réseau < 20 %
+- mémoire < 20 % (sur les formes A1 uniquement)
+
+Un addon qui sert quelques requêtes par jour coche les trois. Le réflexe n'est
+pas de faire tourner une boucle inutile, mais de **prendre une forme à votre
+taille** : une A1 à 1 OCPU / 6 Go franchit naturellement les seuils là où une
+4 OCPU / 24 Go restera sous la barre quoi que vous fassiez. Le Micro n'est pas
+concerné par le critère mémoire, et son huitième d'OCPU dépasse 20 % dès qu'il
+travaille un peu.
+
+### Piège 3 — l'architecture ARM
+
+Si vous avez pris une A1, vous êtes en `aarch64`. Notre image se construit
+depuis les sources et `node:22-alpine` est multi-architecture, donc
+`docker compose up -d --build` fonctionne tel quel. C'est seulement à retenir
+si vous ajoutez un jour une dépendance avec du binaire natif.
+
+### Ensuite
+
+Le reste est identique à l'option A : installer Docker, pointer le DNS,
+lancer `docker-compose.public.yml`. Pensez simplement à faire les deux moitiés
+du pare-feu avant de lancer Caddy.
+
+---
+
 ## Option B — depuis chez vous, sans ouvrir de port
 
 Pour héberger sur une machine à la maison (vieux PC, Raspberry Pi, NAS) sans
