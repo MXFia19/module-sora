@@ -167,6 +167,45 @@ depuis les sources et `node:22-alpine` est multi-architecture, donc
 si vous ajoutez un jour une dépendance avec du binaire natif.
 
 
+### Créer l'instance
+
+Avant tout, il faut une machine — la liste *Compute → Instances* est vide au
+départ. Bouton **Create instance**, puis :
+
+**Image et forme** — bouton *Edit* de la section « Image and shape ».
+
+- Image : **Canonical Ubuntu 24.04**. Les commandes de ce guide la supposent.
+- Forme : *Change shape*, puis au choix
+  - **Ampere / VM.Standard.A1.Flex** réglée sur **1 OCPU et 6 Go**. C'est le
+    bon compromis : assez pour l'addon, et assez petit pour franchir
+    naturellement les seuils d'activité d'Oracle (voir « Piège 2 »).
+  - **VM.Standard.E2.1.Micro** (AMD) si l'Ampere est indisponible.
+
+> ⚠️ Vérifiez l'étiquette verte **« Always Free-eligible »** sur la forme
+> choisie. Sans elle, l'instance est facturée.
+
+**Réseau** — laissez Oracle créer un nouveau VCN, mais assurez-vous que
+**« Assign a public IPv4 address »** est bien sur *Yes*. Sans adresse
+publique, la machine n'est joignable de nulle part.
+
+**Clé SSH** — choisissez *Generate a key pair for me* et **téléchargez la clé
+privée** avant de continuer. Oracle ne la propose qu'une fois ; si vous
+passez à côté, il faut recréer l'instance.
+
+**Volume** — les 50 Go proposés par défaut conviennent.
+
+Puis **Create**. L'instance est prête en une à deux minutes, et son adresse
+apparaît dans la colonne *Public IP*.
+
+#### Si Oracle répond « Out of host capacity »
+
+C'est fréquent sur les formes Ampere, très demandées. Dans l'ordre :
+
+1. changez de **domaine de disponibilité** (AD-1, AD-2, AD-3) et réessayez ;
+2. réduisez la taille demandée (1 OCPU passe plus souvent que 4) ;
+3. prenez le **Micro AMD**, presque toujours disponible ;
+4. ou réessayez plus tard : la capacité se libère par vagues.
+
 ### Premier lancement, pas à pas (sans domaine)
 
 Le plus simple est de faire tourner l'addon sur l'IP brute d'abord. Ça marche
@@ -175,7 +214,8 @@ certificat le premier jour. Le domaine et le HTTPS s'ajoutent après.
 
 **1. Se connecter.** L'IP publique est dans la console Oracle : *Compute →
 Instances → votre instance → Public IP address*. L'utilisateur dépend de
-l'image : `ubuntu` pour Ubuntu, `opc` pour Oracle Linux.
+l'image : `ubuntu` pour Ubuntu, `opc` pour Oracle Linux. Sur Windows, ces
+commandes fonctionnent dans PowerShell.
 
 ```bash
 chmod 600 votre-cle.key        # sinon SSH refuse de s'en servir
