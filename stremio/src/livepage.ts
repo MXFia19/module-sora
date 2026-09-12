@@ -135,7 +135,7 @@ function handle(e) {
 
 let src;
 function connect() {
-  src = new EventSource('debug/events');
+  src = new EventSource('/debug/events');
   src.onopen = () => { $('#led').classList.add('on'); $('#state').textContent = 'en direct'; };
   src.onmessage = ev => {
     const d = JSON.parse(ev.data);

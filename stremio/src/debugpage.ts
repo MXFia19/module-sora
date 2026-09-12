@@ -67,7 +67,7 @@ pre .debug{color:var(--dim)} pre .warn{color:var(--warn)} pre .error{color:var(-
 </style>
 <main>
 <h1>Diagnostic</h1>
-<p class="sub">Sources enregistrées : ${sources} — <a href="live" style="color:#79c0ff">console en direct →</a></p>
+<p class="sub">Sources enregistrées : ${sources} — <a href="/debug/live" style="color:#79c0ff">console en direct →</a></p>
 
 <div class="bar">
   <div class="row">
@@ -215,7 +215,7 @@ async function run() {
   $('#out').innerHTML = '<div class="bar"><span class="spin"></span> Interrogation des sources…' +
     ' <span class="note">quelques secondes, chaque source est testée séparément</span></div>';
   try {
-    const res = await fetch('debug/run?' + p);
+    const res = await fetch('/debug/run?' + p);
     render(await res.json());
   } catch (e) {
     $('#out').innerHTML = '<div class="err">Le serveur n\\'a pas répondu : ' + esc(e.message) + '</div>';
