@@ -2,6 +2,7 @@ import { cached } from '../cache';
 import { getJson, getText } from '../http';
 import { logger } from '../log';
 import { audioLabel } from '../lang';
+import { pickBest, pickByKeywords } from '../match';
 import { extractEmbed } from '../extractors';
 import type { MediaRequest, RawStream, Scraper } from '../types';
 
@@ -253,9 +254,74 @@ async function collectAnime(domain: string, req: MediaRequest, out: LinkSet): Pr
   }
   if (animes.length === 0) return;
 
-  // Deux rapprochements en un seul passage : saison+épisode d'un côté,
-  // position absolue de l'autre. Le premier prime quand il existe.
-  const anime = animes[0];
+  // L'index anime est cherché par titre, donc il peut rendre autre chose que
+  // ce qu'on demande. Prendre le premier résultat sans rien vérifier, c'est
+  // exactement le travers que `match.ts` existe pour éviter.
+  const named = animes.map(a => ({
+    title: String(a?.name ?? ''),
+    extraTitles: String(a?.alternative_names_string ?? '')
+      .split(',').map(t => t.trim()).filter(Boolean),
+    raw: a,
+  }));
+  const picked = pickBest(named, { aliases: req.aliases })
+    ?? pickByKeywords(named, req.aliases);
+
+  if (!picked) {
+    log.debug(`index anime: aucun des ${animes.length} résultats ne correspond à « ${req.title} »`);
+    return;
+  }
+  const anime = picked.item.raw;
+
+  const links = req.type === 'movie'
+    ? movieLinks(anime, req)
+    : episodeLinks(anime, req);
+
+  for (const group of links ?? []) {
+    for (const player of group?.players ?? []) {
+      out.add(player, group?.language, null, 'movix-anime');
+    }
+  }
+}
+
+/** Un film est rangé dans une saison nommée « Film », avec un unique épisode
+ *  d'index 1. Le rapprochement saison+épisode ne peut donc rien en tirer : il
+ *  cherche la saison 1 et un numéro d'épisode qu'une demande de film n'a pas,
+ *  et l'anime était trouvé pour rien. */
+function movieLinks(anime: any, req: MediaRequest): any {
+  const seasons: any[] = anime?.seasons ?? [];
+  const films = seasons.filter(s => /\bfilms?\b/i.test(String(s?.name ?? '')));
+
+  // Chaque épisode d'une saison « Film » est un film ; ailleurs, une fiche qui
+  // n'a qu'un seul épisode en tout EST le film.
+  const total = seasons.reduce((n, s) => n + (s?.episodes?.length ?? 0), 0);
+  const pool = films.length > 0
+    ? films.flatMap(s => (s?.episodes ?? []).map((e: any) => ({ season: s, ep: e })))
+    : total === 1
+      ? seasons.flatMap(s => (s?.episodes ?? []).map((e: any) => ({ season: s, ep: e })))
+      : [];
+
+  if (pool.length === 0) {
+    log.debug(`index anime: aucun film sur « ${anime?.name} » (${seasons.length} saison(s))`);
+    return null;
+  }
+  if (pool.length === 1) return pool[0]!.ep?.streaming_links ?? null;
+
+  // Plusieurs films sur la fiche : le libellé doit trancher, sinon on ne rend
+  // rien plutôt que de servir un autre film de la même franchise.
+  const best = pickByKeywords(
+    pool.map(x => ({ title: `${x.season?.name ?? ''} ${x.ep?.name ?? ''}`.trim(), raw: x })),
+    req.aliases,
+  );
+  if (!best) {
+    log.debug(`index anime: ${pool.length} films, aucun ne correspond à « ${req.title} »`);
+    return null;
+  }
+  return best.item.raw.ep?.streaming_links ?? null;
+}
+
+/** Deux rapprochements en un seul passage : saison+épisode d'un côté,
+ *  position absolue de l'autre. Le premier prime quand il existe. */
+function episodeLinks(anime: any, req: MediaRequest): any {
   let absIndex = 0;
   let exact: any = null;
   let absolute: any = null;
@@ -269,11 +335,7 @@ async function collectAnime(domain: string, req: MediaRequest, out: LinkSet): Pr
     }
   }
 
-  for (const group of exact ?? absolute ?? []) {
-    for (const player of group?.players ?? []) {
-      out.add(player, group?.language, null, 'movix-anime');
-    }
-  }
+  return exact ?? absolute ?? null;
 }
 
 async function resolve(req: MediaRequest): Promise<RawStream[]> {
