@@ -163,6 +163,11 @@ Ce que chacun règle pour lui :
 | **Réponse rapide dès N flux** | Voir plus bas — c'est le réglage qui change le plus le confort. |
 | **Pseudo** | Apparaît dans les logs de l'hébergeur, pour rattacher un signalement à une config. |
 
+`npm run build:static` en produit une version **autonome** : un fichier HTML
+de 12 Ko, sans serveur derrière, où l'utilisateur saisit l'adresse de son
+propre addon. Hébergeable gratuitement n'importe où — c'est l'option pour qui
+ne veut rien faire tourner (voir [DEPLOIEMENT.md](DEPLOIEMENT.md), option D).
+
 La page tourne entièrement dans le navigateur : rien n'est envoyé au serveur,
 rien n'est stocké. La clé TMDB finit dans le lien de l'utilisateur, pas dans
 une base chez l'hébergeur — et la page prévient qu'un tel lien ne se partage

@@ -9,12 +9,21 @@ const log = logger('Proxy');
 /** Secret de signature. Sans PROXY_SECRET en environnement, on en tire un au
  *  démarrage : ça marche, mais les liens déjà distribués meurent au
  *  redémarrage — d'où l'avertissement. */
-const SECRET: string = (() => {
-  if (config.proxySecret) return config.proxySecret;
-  const generated = crypto.randomBytes(32).toString('hex');
-  log.warn('PROXY_SECRET absent — secret éphémère généré. Les liens proxifiés seront invalidés au prochain redémarrage.');
-  return generated;
-})();
+/** Résolu à la première signature, pas à l'import : un outil qui charge ce
+ *  module sans jamais proxifier (la génération de page statique, un test)
+ *  n'a pas à tirer un secret ni à afficher un avertissement hors sujet. */
+let cachedSecret: string | null = null;
+
+function secret(): string {
+  if (cachedSecret !== null) return cachedSecret;
+  if (config.proxySecret) {
+    cachedSecret = config.proxySecret;
+  } else {
+    cachedSecret = crypto.randomBytes(32).toString('hex');
+    log.warn('PROXY_SECRET absent — secret éphémère généré. Les liens proxifiés seront invalidés au prochain redémarrage.');
+  }
+  return cachedSecret;
+}
 
 interface Payload {
   /** URL amont. */
@@ -34,7 +43,7 @@ function unb64url(s: string): Buffer {
 }
 
 function sign(data: string): string {
-  return b64url(crypto.createHmac('sha256', SECRET).update(data).digest());
+  return b64url(crypto.createHmac('sha256', secret()).update(data).digest());
 }
 
 /** Les URLs proxifiées sont signées, pas chiffrées. Sans signature, l'addon

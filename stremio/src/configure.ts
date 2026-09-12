@@ -13,7 +13,10 @@ function esc(s: string): string {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
-export function configurePage(base: string, scrapers: Scraper[], encoded?: string): string {
+/** `base` fixe : la page est servie par l'instance, elle connaît son adresse.
+ *  `base` à `null` : page statique, l'utilisateur saisit où tourne SON addon —
+ *  c'est le mode « le site ne sert qu'à fabriquer le lien ». */
+export function configurePage(base: string | null, scrapers: Scraper[], encoded?: string): string {
   const c = decodeConfig(encoded);
   const sources = scrapers.map(s => ({
     id: s.id,
@@ -68,6 +71,22 @@ a{color:#79c0ff}
 <main>
 <h1>Sora</h1>
 <p class="sub">Réglez, puis copiez votre lien d'installation Stremio.</p>
+
+${base === null ? `<section>
+  <h2>Où tourne votre addon</h2>
+  <p class="hint">Cette page ne fait que fabriquer le lien : elle n'héberge rien et ne voit
+  passer aucun flux. L'addon tourne chez vous. Pour le lancer, une fois :</p>
+  <div class="out">git clone -b gh-main-r2ievx https://github.com/MXFia19/module-sora<br>
+  cd module-sora/stremio &amp;&amp; cp .env.example .env<br>
+  <span style="color:#8b949e"># renseigner TMDB_API_KEY dans .env</span><br>
+  docker compose up -d --build</div>
+  <label for="base">Adresse de votre addon</label>
+  <input type="text" id="base" value="http://127.0.0.1:7000"
+    placeholder="http://127.0.0.1:7000">
+  <p class="hint">Laissez tel quel si Stremio et l'addon tournent sur la même machine.
+  Depuis un téléphone ou une TV, mettez l'IP locale de la machine
+  (ex. <code>http://192.168.1.20:7000</code>).</p>
+</section>` : ''}
 
 <section>
   <h2>Livraison des flux</h2>
@@ -169,7 +188,11 @@ a{color:#79c0ff}
 </section>
 </main>
 <script>
-const BASE = ${JSON.stringify(base)};
+const FIXED_BASE = ${JSON.stringify(base)};
+function currentBase() {
+  if (FIXED_BASE !== null) return FIXED_BASE;
+  return ($('#base').value.trim() || 'http://127.0.0.1:7000').replace(/\\/+$/, '');
+}
 const $ = s => document.querySelector(s);
 const all = s => [...document.querySelectorAll(s)];
 
@@ -201,7 +224,7 @@ function build() {
   // base64url, comme côté serveur.
   const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(cfg))))
     .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
-  return BASE + '/c/' + b64 + '/manifest.json';
+  return currentBase() + '/c/' + b64 + '/manifest.json';
 }
 
 function refresh() {
@@ -217,6 +240,8 @@ function refresh() {
     msgs.push('Aucune qualité cochée : aucun flux ne passera le filtre.');
   if ($('#key').value.trim())
     msgs.push('Votre clé TMDB est inscrite dans ce lien : ne le partagez pas.');
+  if (FIXED_BASE === null && /127\\.0\\.0\\.1|localhost/.test(currentBase()))
+    msgs.push("Adresse locale : ce lien ne marchera que sur la machine qui fait tourner l'addon.");
 
   $('#warn').hidden = msgs.length === 0;
   $('#warn').innerHTML = msgs.map(m => '⚠️ ' + m).join('<br>');

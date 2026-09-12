@@ -143,6 +143,42 @@ Utilisable pour essayer, fragile pour durer. Un VPS à 4 € règle les trois.
 
 ---
 
+## Option D — page statique seule, l'addon chez chaque utilisateur
+
+Si vous ne voulez rien héberger qui tourne, `npm run build:static` produit une
+page **autonome** : un seul fichier HTML de 12 Ko, sans serveur derrière. Elle
+fabrique le lien dans le navigateur, à partir d'une adresse que l'utilisateur
+saisit.
+
+```bash
+npm run build:static          # écrit dist-static/index.html
+```
+
+Déposez `dist-static/` sur Vercel, Netlify, GitHub Pages, Cloudflare Pages —
+n'importe lequel, gratuitement. **Rien n'y scrape ni n'y proxifie**, donc
+aucune des conditions d'usage qui excluent cet addon d'un PaaS ne s'applique :
+c'est de l'HTML statique, au même titre qu'un blog.
+
+Ce que ça résout : la configuration, qui est la partie pénible. La page donne
+la commande à lancer, et fabrique le lien réglé aux préférences de chacun.
+
+**Ce que ça ne résout pas** : chaque utilisateur doit toujours lancer l'addon
+chez lui (`docker compose up -d`). La page rend cette étape confortable, elle
+ne la supprime pas.
+
+Le choix se pose donc ainsi :
+
+| | Qui héberge | Ce que l'utilisateur fait | Coût pour vous |
+|---|---|---|---|
+| Options A / B | Vous | Colle une URL | VPS ou machine allumée |
+| Option D | Personne | Lance un conteneur, puis colle l'URL | Rien |
+
+Un dernier point en faveur de D, au-delà du coût : chaque utilisateur scrape
+depuis **sa propre IP résidentielle**. Aucune IP partagée à faire bannir, et
+votre responsabilité s'arrête à une page HTML.
+
+---
+
 ## Ensuite
 
 **Mettre à jour :**
