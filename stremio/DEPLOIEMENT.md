@@ -166,6 +166,89 @@ depuis les sources et `node:22-alpine` est multi-architecture, donc
 `docker compose up -d --build` fonctionne tel quel. C'est seulement à retenir
 si vous ajoutez un jour une dépendance avec du binaire natif.
 
+
+### Premier lancement, pas à pas (sans domaine)
+
+Le plus simple est de faire tourner l'addon sur l'IP brute d'abord. Ça marche
+dans Stremio Desktop et Android, et ça évite de bloquer sur le DNS et le
+certificat le premier jour. Le domaine et le HTTPS s'ajoutent après.
+
+**1. Se connecter.** L'IP publique est dans la console Oracle : *Compute →
+Instances → votre instance → Public IP address*. L'utilisateur dépend de
+l'image : `ubuntu` pour Ubuntu, `opc` pour Oracle Linux.
+
+```bash
+chmod 600 votre-cle.key        # sinon SSH refuse de s'en servir
+ssh -i votre-cle.key ubuntu@VOTRE_IP
+```
+
+**2. Faire le point.** Le script ne modifie rien, il affiche seulement l'état :
+
+```bash
+sudo apt update && sudo apt install -y git curl
+git clone -b main https://github.com/MXFia19/module-sora
+cd module-sora/stremio
+bash scripts/diagnostic.sh
+```
+
+Il vous dit votre architecture, votre IP publique, ce qui manque au pare-feu
+et si Docker est là. Gardez sa sortie sous les yeux pour les étapes suivantes.
+
+**3. Ouvrir le port 7000, des DEUX côtés.**
+
+Dans la console Oracle : *Networking → Virtual Cloud Networks → votre VCN →
+Security Lists → Default Security List → Add Ingress Rules*
+
+| Source | Protocole | Port |
+|---|---|---|
+| `0.0.0.0/0` | TCP | 7000 |
+
+Puis dans la machine :
+
+```bash
+sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 7000 -j ACCEPT
+sudo netfilter-persistent save
+```
+
+**4. Installer Docker.**
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+exit                           # se déconnecter puis se reconnecter
+```
+
+La reconnexion est nécessaire : l'appartenance au groupe `docker` n'est prise
+en compte qu'à l'ouverture de session.
+
+**5. Lancer.**
+
+```bash
+cd module-sora/stremio
+cp .env.example .env
+nano .env                      # TMDB_API_KEY, et PUBLIC_URL=http://VOTRE_IP:7000
+docker compose up -d --build
+```
+
+La première construction prend quelques minutes.
+
+**6. Vérifier.**
+
+```bash
+bash scripts/diagnostic.sh
+```
+
+La dernière section doit afficher « joignable depuis l'extérieur ». Sinon,
+c'est une des deux moitiés du pare-feu qui manque.
+
+**7. Installer dans Stremio.** Collez `http://VOTRE_IP:7000/manifest.json`
+dans *Addons → Install via URL*, ou ouvrez
+`stremio://VOTRE_IP:7000/manifest.json`.
+
+**Et après ?** Quand ça marche, ajoutez un domaine et repassez sur
+`docker-compose.public.yml` pour avoir le HTTPS — indispensable pour
+`web.stremio.com` et pour partager proprement.
+
 ### Ensuite
 
 Le reste est identique à l'option A : installer Docker, pointer le DNS,
