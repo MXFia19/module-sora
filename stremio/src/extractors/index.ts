@@ -125,7 +125,8 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
   // reconnaître par leur nom est une course perdue : la page, elle, est
   // toujours la même — un <title>Redirecting…</title> et un saut vers le
   // vrai lecteur. On la suit, et le domaine du jour n'a plus d'importance.
-  const jump = html.match(/(?:window\.)?location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
+  const jump = html.match(
+    /location\s*\.\s*(?:href\s*=|replace\s*\(|assign\s*\()\s*['"](https?:\/\/[^'"]+)['"]/i);
   if (jump?.[1] && html.length < 4000) {
     log.debug(`coquille de redirection -> ${jump[1]}`);
     page = jump[1];

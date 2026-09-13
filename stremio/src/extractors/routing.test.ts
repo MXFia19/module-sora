@@ -88,3 +88,22 @@ test('Vidara lit son URL sur /api/stream', async () => {
   assert.ok(call, 'l\'API doit être appelée');
   assert.match(String(call.body), /"filecode":"AbC123"/);
 });
+
+test('les trois écritures du saut sont reconnues', async () => {
+  // location.href =, location.replace(…) et location.assign(…) font la même
+  // chose ; n'en reconnaître qu'une laissait passer les deux autres.
+  for (const [i, saut] of [
+    "window.location.href = 'https://cible.invalid/e/a'",
+    "location.replace('https://cible.invalid/e/a')",
+    "window.location.assign('https://cible.invalid/e/a')",
+  ].entries()) {
+    const { result } = await withFetch(
+      {
+        ['facade' + i + '.invalid']: { body: '<title>Redirecting...</title><script>' + saut + ';</script>' },
+        'cible.invalid': { body: 'var p={"file":"https://cdn.invalid/z/master.m3u8"};' },
+      },
+      () => extractEmbed('https://facade' + i + '.invalid/e/a', 'https://site.invalid/'),
+    );
+    assert.equal(result[0]?.url, 'https://cdn.invalid/z/master.m3u8', 'forme ' + i);
+  }
+});
