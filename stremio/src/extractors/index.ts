@@ -4,6 +4,7 @@ import { logger } from '../log';
 import { unpackAll, findMediaUrl } from './unpack';
 import { extractEmbed4me } from './embed4me';
 import { extractFsvid } from './fsvid';
+import { extractByse, isBysePage } from './byse';
 import {
   extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
@@ -114,7 +115,7 @@ const HOSTS: Host[] = [
 /** Repli générique : la page contient soit l'URL en clair, soit un bloc packé
  *  qui la contient. Couvre Vidhide et toute la famille qui partage ce lecteur,
  *  sans avoir à les nommer une par une. */
-async function extractGeneric(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream | null> {
+async function extractGeneric(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream | ExtractedStream[] | null> {
   let page = embedUrl;
   let html = await getText(embedUrl, { headers: { Referer: referer } });
   if (!html) return null;
@@ -132,12 +133,19 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     if (!html) return null;
   }
 
-  // Page quasi vide qui ne charge son lecteur qu'en JS : c'est la signature de
-  // la famille embedseek, qui essaime sous des noms qui changent
-  // (serix.upns.live…). Inutile de les nommer un par un — mais inutile aussi
-  // d'essayer son API sur tout ce qui porte un identifiant : six requêtes
-  // perdues en 404 par film sur des pages qui n'ont rien à voir.
+  // Coquille de 1,6 Ko qui ne charge son lecteur qu'en JS. Deux familles ont
+  // cette tête, et elles se distinguent à leur titre. Les reconnaître par la
+  // page plutôt que par le domaine est ce qui évite la course perdue d'avance
+  // — filemoon.sx, bysebuho.com et gn1r5n.org servent la même application.
   if (html.length < 4000 && /assets\/index-[\w.-]+\.js/.test(html)) {
+    if (isBysePage(html)) {
+      const byse = await extractByse(page, referer);
+      if (byse) {
+        log.debug(`byse reconnu sur ${page}`);
+        return byse;
+      }
+    }
+
     const seek = await extractEmbed4me(page);
     if (seek) {
       log.debug(`embedseek reconnu sur ${page}`);
