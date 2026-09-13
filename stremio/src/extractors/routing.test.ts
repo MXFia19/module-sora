@@ -107,3 +107,26 @@ test('les trois écritures du saut sont reconnues', async () => {
     assert.equal(result[0]?.url, 'https://cdn.invalid/z/master.m3u8', 'forme ' + i);
   }
 });
+
+test('la coquille hgcloud est reconnue et son saut rejoué sur les miroirs', async () => {
+  // hglink.to ne sert que 452 octets ; son main.js obfusqué ne cite aucun
+  // domaine, donc la cible se rejoue sur les miroirs connus.
+  const { result, seen } = await withFetch(
+    {
+      'hglink.invalid': {
+        body: '<html><head><title>Loading...</title></head><body>'
+          + '<div class="loading-text">Page is loading, please wait...</div>'
+          + '<script src="/main.js?v=1.1.9"></script></body></html>',
+      },
+      // Le premier miroir ne connaît pas la vidéo, le second oui.
+      'vibuxer.com': { status: 404, body: '' },
+      'audinifer.com': { body: 'var p={"file":"https://cdn.invalid/hg/master.m3u8?t=1"};' },
+    },
+    () => extractEmbed('https://hglink.invalid/e/abc123', 'https://site.invalid/'),
+  );
+
+  assert.equal(result[0]?.server, 'HgCloud');
+  assert.equal(result[0]?.url, 'https://cdn.invalid/hg/master.m3u8?t=1');
+  // L'identifiant doit être repris tel quel sur le miroir.
+  assert.ok(seen.some(r => r.url === 'https://audinifer.com/e/abc123'));
+});

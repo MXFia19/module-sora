@@ -5,6 +5,7 @@ import { unpackAll, findMediaUrl } from './unpack';
 import { extractEmbed4me } from './embed4me';
 import { extractFsvid } from './fsvid';
 import { extractByse, isBysePage } from './byse';
+import { extractHgCloud, isHgCloudPage } from './hgcloud';
 import {
   extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
@@ -132,6 +133,16 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     page = jump[1];
     html = await getText(page, { headers: { Referer: referer } });
     if (!html) return null;
+  }
+
+  // Coquille « Page is loading » dont le saut est calculé par un main.js
+  // obfusqué : on ne peut pas le lire, on rejoue le saut sur ses miroirs.
+  if (isHgCloudPage(html)) {
+    const hg = await extractHgCloud(page, referer);
+    if (hg) {
+      log.debug(`hgcloud reconnu sur ${page}`);
+      return hg;
+    }
   }
 
   // Coquille de 1,6 Ko qui ne charge son lecteur qu'en JS. Deux familles ont
