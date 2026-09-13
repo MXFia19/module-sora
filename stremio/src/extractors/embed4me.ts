@@ -32,7 +32,15 @@ export async function extractEmbed4me(embedUrl: string): Promise<Embed4meResult 
   // que le User-Agent. Contre-intuitif, mais vérifié dans les modules Sora.
   const hex = (await getText(api, { headers: { Accept: '*/*' } })).trim();
   if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length % 32 !== 0) {
-    log.debug(`réponse non chiffrée pour ${id}`);
+    // Cette API dit pourquoi elle refuse, et ça vaut la peine de le répéter :
+    // « Video not found or deleted » est une fin de course normale, alors
+    // qu'un « rien extrait » nu ressemble à une panne de notre côté et envoie
+    // chercher un bug qui n'existe pas. Le message tient en quelques octets,
+    // on le relaie tel quel.
+    const raison = hex.startsWith('{')
+      ? (() => { try { return JSON.parse(hex).message ?? JSON.parse(hex).error; } catch { return null; } })()
+      : null;
+    log.debug(`${id} : ${raison ?? `réponse non chiffrée (${hex.length}o)`}`);
     return null;
   }
 
