@@ -1,4 +1,4 @@
-import { getText, origin, absolute } from '../http';
+import { getText, request, origin, absolute } from '../http';
 import { cached } from '../cache';
 import { logger } from '../log';
 import { unpackAll, findMediaUrl, declaredHlsLink } from './unpack';
@@ -121,9 +121,16 @@ const HOSTS: Host[] = [
  *  qui la contient. Couvre Vidhide et toute la famille qui partage ce lecteur,
  *  sans avoir à les nommer une par une. */
 async function extractGeneric(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream | ExtractedStream[] | null> {
-  let page = embedUrl;
-  let html = await getText(embedUrl, { headers: { Referer: referer } });
+  // L'URL d'arrivée, pas celle de départ : plusieurs façades ne sont qu'une
+  // 302 vers le vrai lecteur (kokoflix.lol/chamber_go.php -> bysesayeveum.com
+  // /e/<code>). Le client suit la redirection tout seul, mais si on garde
+  // l'URL de départ, les extracteurs qui lisent un code dans le chemin
+  // cherchent dans « chamber_go.php » et ne trouvent rien.
+  const first = await request(embedUrl, { headers: { Referer: referer } });
+  let page = first.url || embedUrl;
+  let html = first.text;
   if (!html) return null;
+  if (page !== embedUrl) log.debug(`redirection suivie -> ${page}`);
 
   // Coquille de redirection. VOE renouvelle ses domaines de façade en
   // permanence (rebeccapracticeloss.com, kokoflix.lol/osaka_go.php…) et les

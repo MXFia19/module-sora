@@ -146,3 +146,35 @@ test('un mur anti-robot est signalé comme tel, pas comme un échec', async () =
   );
   assert.equal(result.length, 0);
 });
+
+test('une façade en 302 est résolue sur son URL d’arrivée', async () => {
+  // Régression : kokoflix.lol/chamber_go.php n'est qu'une 302 vers
+  // bysesayeveum.com/e/<code>. Le client suit la redirection tout seul, mais
+  // si on garde l'URL de départ, Byse cherche son code dans
+  // « chamber_go.php » et ne trouve rien — quinze liens perdus par film.
+  const real = globalThis.fetch;
+  const vues: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    const url = typeof input === 'string' ? input : input.url;
+    vues.push(url);
+    if (url.includes('chamber_go.php')) {
+      // Ce que rend fetch après avoir suivi une 302 : le corps du lecteur,
+      // mais `res.url` porte l'adresse d'arrivée.
+      return Object.defineProperty(
+        new Response('<html><script>var p={"file":"https://cdn.invalid/c/master.m3u8"};</script></html>'),
+        'url', { value: 'https://lecteur-arrivee.invalid/e/vt0c77ar6763' });
+    }
+    return new Response('', { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const r = await extractEmbed(
+      'https://facade.invalid/chamber_go.php?id=1S7sbT2Vj0zmpBLWF8yUE',
+      'https://movix.invalid/');
+    assert.equal(r.length, 1);
+    // Le Referer prouve que la suite du traitement a bien vu l'URL d'arrivée.
+    assert.equal(r[0]!.headers.Referer, 'https://lecteur-arrivee.invalid/');
+  } finally {
+    globalThis.fetch = real;
+  }
+});
