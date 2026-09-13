@@ -7,6 +7,8 @@ import { extractFsvid } from './fsvid';
 import { extractByse, isBysePage } from './byse';
 import { extractHgCloud, isHgCloudPage } from './hgcloud';
 import { extractBlinkflux, isBlinkfluxPage } from './blinkflux';
+import { extractVidsonic } from './vidsonic';
+import { extractXshotcok } from './xshotcok';
 import {
   extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
@@ -184,8 +186,27 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
   // elle, devine — et c'est la seule qui a besoin du garde-fou d'extension,
   // sans quoi elle rendrait des pages HTML et des images. L'appliquer aux
   // trois écartait les manifestes servis en `.txt`, ce que fait hls3.
+  // VidSonic écrit son URL dans la page, en hexadécimal coupé puis inversé.
+  // Identification positive : on ne rend rien tant que le décodage ne donne
+  // pas une URL, donc pas de faux positif à craindre sur les autres pages.
+  const sonic = extractVidsonic(html);
+  if (sonic) {
+    log.debug(`vidsonic reconnu sur ${page}`);
+    return sonic;
+  }
+
   const voe = decodeVoe(html);
   const depacke = unpackAll(html);
+
+  // xshotcok (clone hxfile) : le bloc dépaqueté ne porte qu'une charge utile
+  // chiffrée, et les fonctions de déchiffrement écrites dans la page sont des
+  // leurres vides. On retrouve la clé sans exécuter leur JS.
+  const xshot = extractXshotcok(depacke, page);
+  if (xshot) {
+    log.debug(`xshotcok reconnu sur ${page}`);
+    return xshot;
+  }
+
   const declare = declaredHlsLink(html, page) ?? declaredHlsLink(depacke, page);
   const devine = findMediaUrl(html) ?? findMediaUrl(depacke);
 
