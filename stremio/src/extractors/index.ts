@@ -175,6 +175,17 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     // lecteur (vidzy.org encadre un embed vidzy.cc). On le suit une fois.
     // Petite page et iframe unique : une vraie page de lecteur en a
     // plusieurs, dont des publicités qu'on ne veut surtout pas suivre.
+    // Un mur anti-robot n'est pas une extraction ratée, et le dire évite de
+    // chercher un bug de notre côté. mixdrop met désormais un reCAPTCHA v3
+    // devant la résolution de son URL : la page se charge normalement, mais
+    // le lien ne s'obtient qu'en postant un jeton qu'aucun client sans
+    // navigateur ne peut produire.
+    const mur = /recaptcha\/api\.js|grecaptcha\.execute|challenges\.cloudflare\.com\/turnstile|hcaptcha\.com\/1\/api\.js/.exec(html);
+    if (mur) {
+      log.debug(`${page} : protégé par un captcha (${mur[0].split('/')[0]}) — rien à extraire sans navigateur`);
+      return null;
+    }
+
     const frames = [...html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]!);
     if (depth < 1 && html.length < 8000 && frames.length === 1) {
       const inner = absolute(frames[0]!.replace(/&amp;/g, '&'), page);

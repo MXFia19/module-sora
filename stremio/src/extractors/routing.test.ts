@@ -130,3 +130,19 @@ test('la coquille hgcloud est reconnue et son saut rejoué sur les miroirs', asy
   // L'identifiant doit être repris tel quel sur le miroir.
   assert.ok(seen.some(r => r.url === 'https://audinifer.com/e/abc123'));
 });
+
+test('un mur anti-robot est signalé comme tel, pas comme un échec', async () => {
+  // mixdrop met un reCAPTCHA v3 devant la résolution de son URL. Le dire
+  // explicitement évite de chercher un bug qui n'existe pas — c'est la même
+  // leçon que « Video not found or deleted » côté embedseek.
+  const { result } = await withFetch(
+    {
+      'mur.invalid': {
+        body: '<html><script src="https://www.google.com/recaptcha/api.js?render=abc"></script>'
+          + '<body>lecteur</body></html>',
+      },
+    },
+    () => extractEmbed('https://mur.invalid/e/xyz', 'https://site.invalid/'),
+  );
+  assert.equal(result.length, 0);
+});
