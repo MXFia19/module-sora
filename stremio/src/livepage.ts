@@ -2,7 +2,12 @@
  *
  *  Pensée pour être ouverte sur un écran pendant qu'on manipule Stremio sur
  *  un autre appareil. Les requêtes apparaissent comme des cartes dépliables,
- *  et le détail technique reste replié tant qu'on n'en a pas besoin. */
+ *  et le détail technique reste replié tant qu'on n'en a pas besoin.
+ *
+ *  Le journal garde TOUT ce que le serveur envoie et ne filtre qu'à
+ *  l'affichage. C'est ce qui permet de resserrer ou d'élargir la vue après
+ *  coup : filtrer à la réception, comme on le faisait, revenait à jeter ce
+ *  qu'on allait vouloir relire. */
 export function livePage(): string {
   return `<!doctype html><html lang="fr"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -14,15 +19,20 @@ export function livePage(): string {
 body{margin:0;padding:1rem;background:var(--bg);color:var(--fg);
  font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:60rem;margin:0 auto}
-header{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}
-h1{font-size:1.3rem;margin:0;flex:1}
+header{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.8rem}
+h1{font-size:1.3rem;margin:0}
 .live{display:inline-flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--dim)}
 .led{width:8px;height:8px;border-radius:50%;background:var(--err)}
 .led.on{background:var(--ok);animation:p 2s infinite}
 @keyframes p{50%{opacity:.35}}
-button,select{padding:.4rem .8rem;border-radius:7px;border:1px solid var(--line);background:#21262d;
- color:var(--fg);font:inherit;cursor:pointer}
+.sp{flex:1}
+button,select,input{padding:.4rem .7rem;border-radius:7px;border:1px solid var(--line);background:#21262d;
+ color:var(--fg);font:inherit}
+button{cursor:pointer}
+button:hover{border-color:var(--dim)}
 button.on{border-color:var(--accent);background:#132a4d}
+button.danger:hover{border-color:var(--err);color:var(--err)}
+input[type=search]{background:#0d1117;min-width:11rem;flex:1}
 .hint{color:var(--dim);font-size:.85rem;margin:0 0 1rem}
 .req{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);
  border-radius:8px;margin-bottom:.6rem;overflow:hidden}
@@ -32,7 +42,6 @@ button.on{border-color:var(--accent);background:#132a4d}
 .rh:hover{background:#1c2128}
 .rh .ti{font-weight:600}
 .rh .id{color:var(--dim);font-size:.82rem;font-family:ui-monospace,monospace}
-.rh .sp{flex:1}
 .rb{border-top:1px solid var(--line);padding:.7rem .9rem;display:none}
 .req.open .rb{display:block}
 .badge{font-size:.72rem;padding:.12rem .45rem;border-radius:4px;background:#21262d;color:var(--dim);white-space:nowrap}
@@ -42,40 +51,71 @@ button.on{border-color:var(--accent);background:#132a4d}
 .src .n{width:8rem;color:var(--dim)}
 .bar{height:6px;border-radius:3px;background:var(--ok);min-width:2px}
 .bar.z{background:#30363d} .bar.e{background:var(--err)}
+.tools{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.6rem 0}
+h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:1.4rem 0 0}
 pre{background:#0d1117;border:1px solid var(--line);border-radius:7px;padding:.6rem;margin:0;
- overflow:auto;max-height:26rem;font-size:.76rem;line-height:1.5;
+ overflow:auto;max-height:30rem;font-size:.76rem;line-height:1.5;
  font-family:ui-monospace,SFMono-Regular,monospace}
 pre div{white-space:pre-wrap;word-break:break-all}
 .debug{color:#6e7681} .info{color:var(--fg)} .warn{color:var(--warn)} .error{color:var(--err)}
-.sc{color:#79c0ff}
+.sc{color:#79c0ff;cursor:pointer}
+.sc:hover{text-decoration:underline}
+mark{background:#3b2f0b;color:#ffd75f;border-radius:2px}
 .empty{color:var(--dim);text-align:center;padding:2rem}
+.toast{position:fixed;bottom:1.2rem;left:50%;transform:translateX(-50%);background:#21262d;
+ border:1px solid var(--line);border-radius:8px;padding:.6rem 1.1rem;opacity:0;
+ transition:opacity .3s;pointer-events:none;z-index:9}
+.toast.show{opacity:1}
 </style>
 <main>
 <header>
   <h1>Console</h1>
   <span class="live"><span class="led" id="led"></span><span id="state">connexion…</span></span>
-  <button id="pause">Pause</button>
-  <select id="lvl">
-    <option value="debug">Tout</option>
-    <option value="info" selected>info et plus</option>
-    <option value="warn">avertissements</option>
-  </select>
-  <button id="clear">Vider</button>
+  <span class="sp"></span>
+  <button id="cache" class="danger" title="Oblige les sources à tout re-chercher à la prochaine requête">Vider le cache <span class="badge" id="centries">?</span></button>
+  <a href="/debug" style="color:#79c0ff;font-size:.85rem">diagnostic →</a>
 </header>
 <p class="hint">Laissez cette page ouverte et utilisez Stremio sur votre téléphone :
 chaque requête apparaît ici, avec ce que chaque source a rendu.</p>
 
 <div id="reqs"></div>
-<h2 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)">Journal brut</h2>
+
+<h2>Journal</h2>
+<div class="tools">
+  <input type="search" id="q" placeholder="filtrer : movix, 403, m3u8…" autocomplete="off">
+  <select id="lvl">
+    <option value="debug">Tout</option>
+    <option value="info" selected>info et plus</option>
+    <option value="warn">avertissements</option>
+    <option value="error">erreurs</option>
+  </select>
+  <button id="pause">Pause</button>
+  <button id="copy">Copier</button>
+  <button id="clear">Effacer</button>
+  <span class="badge" id="count">0 ligne</span>
+</div>
 <pre id="raw"></pre>
 </main>
+<div class="toast" id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const RANK = { debug: 10, info: 20, warn: 30, error: 40 };
+const KEEP = 3000;
 let paused = false;
+let logs = [];
 
 function hhmmss(t) { return new Date(t).toLocaleTimeString('fr-FR'); }
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._id);
+  t._id = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+/* ---------- requêtes ---------- */
 
 function addRequest(r) {
   if ($('#reqs .empty')) $('#reqs').innerHTML = '';
@@ -114,19 +154,47 @@ function addRequest(r) {
   while ($('#reqs').children.length > 40) $('#reqs').lastElementChild.remove();
 }
 
-function addLog(l) {
-  if (RANK[l.level] < RANK[$('#lvl').value]) return;
+/* ---------- journal ---------- */
+
+function visible() {
+  const min = RANK[$('#lvl').value];
+  const q = $('#q').value.trim().toLowerCase();
+  return logs.filter(l =>
+    RANK[l.level] >= min &&
+    (q === '' || (l.scope + ' ' + l.message).toLowerCase().indexOf(q) >= 0));
+}
+
+function lineHtml(l, q) {
+  let msg = esc(l.message);
+  if (q) {
+    // Surligner sans casser les entités : on ne cherche que dans le texte
+    // déjà échappé, et la requête l'est aussi.
+    const needle = esc(q).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&');
+    msg = msg.replace(new RegExp(needle, 'gi'), m => '<mark>' + m + '</mark>');
+  }
+  return '<span class="sc" data-s="' + esc(l.scope) + '">' + hhmmss(l.at) + ' ' + esc(l.scope) + '</span>  ' + msg;
+}
+
+function renderLogs(keepScroll) {
   const raw = $('#raw');
   const atBottom = raw.scrollHeight - raw.scrollTop - raw.clientHeight < 40;
+  const q = $('#q').value.trim().toLowerCase();
+  const rows = visible();
 
-  const d = document.createElement('div');
-  d.className = l.level;
-  d.innerHTML = '<span class="sc">' + hhmmss(l.at) + ' ' + esc(l.scope) + '</span>  ' + esc(l.message);
-  raw.appendChild(d);
+  raw.innerHTML = rows.map(l => '<div class="' + l.level + '">' + lineHtml(l, q) + '</div>').join('');
+  $('#count').textContent = rows.length + ' ligne' + (rows.length > 1 ? 's' : '') +
+    (rows.length < logs.length ? ' sur ' + logs.length : '');
 
-  while (raw.children.length > 600) raw.firstElementChild.remove();
-  if (atBottom) raw.scrollTop = raw.scrollHeight;
+  if (!keepScroll || atBottom) raw.scrollTop = raw.scrollHeight;
 }
+
+function addLog(l) {
+  logs.push(l);
+  if (logs.length > KEEP) logs = logs.slice(-KEEP);
+  renderLogs(true);
+}
+
+/* ---------- flux d'événements ---------- */
 
 function handle(e) {
   if (paused) return;
@@ -148,18 +216,83 @@ function connect() {
   };
 }
 
+/* ---------- commandes ---------- */
+
 $('#pause').addEventListener('click', () => {
   paused = !paused;
   $('#pause').textContent = paused ? 'Reprendre' : 'Pause';
   $('#pause').classList.toggle('on', paused);
 });
+
 $('#clear').addEventListener('click', () => {
-  $('#raw').innerHTML = '';
+  logs = [];
+  renderLogs();
   $('#reqs').innerHTML = '<p class="empty">En attente d\\'une requête…</p>';
 });
 
+$('#lvl').addEventListener('change', () => renderLogs());
+$('#q').addEventListener('input', () => renderLogs());
+
+// Cliquer sur une source la met dans le filtre — et re-cliquer l'enlève.
+$('#raw').addEventListener('click', ev => {
+  const s = ev.target.closest('.sc');
+  if (!s) return;
+  const scope = s.dataset.s;
+  $('#q').value = $('#q').value === scope ? '' : scope;
+  renderLogs();
+});
+
+$('#copy').addEventListener('click', async () => {
+  const text = visible()
+    .map(l => hhmmss(l.at) + '  ' + l.scope + '  ' + l.message)
+    .join('\\n');
+  if (!text) { toast('Rien à copier'); return; }
+
+  // L'API presse-papier exige un contexte sécurisé, et cette page est servie
+  // en HTTP simple : le repli n'est pas un luxe, c'est le cas courant.
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(visible().length + ' ligne(s) copiée(s)');
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast(ok ? visible().length + ' ligne(s) copiée(s)' : 'Copie refusée par le navigateur');
+  }
+});
+
+async function refreshCache() {
+  try {
+    const r = await fetch('/health');
+    const j = await r.json();
+    $('#centries').textContent = j.cache.entries;
+  } catch (e) { $('#centries').textContent = '?'; }
+}
+
+$('#cache').addEventListener('click', async () => {
+  const b = $('#cache');
+  b.disabled = true;
+  try {
+    const r = await fetch('/admin/cache/clear', { method: 'POST' });
+    const j = await r.json();
+    toast(j.cleared + ' entrée(s) vidée(s) — la prochaine requête re-cherchera tout');
+  } catch (e) {
+    toast('Échec : ' + e.message);
+  }
+  b.disabled = false;
+  refreshCache();
+});
+
 $('#reqs').innerHTML = '<p class="empty">En attente d\\'une requête…</p>';
+renderLogs();
 connect();
+refreshCache();
+setInterval(refreshCache, 15000);
 </script>
 </html>`;
 }
