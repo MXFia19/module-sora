@@ -1,4 +1,5 @@
-import { request, getText, absolute } from '../http';
+import { request, getText, absolute, origin } from '../http';
+import { unpackAll, findMediaUrl } from './unpack';
 import type { ExtractedStream } from './index';
 
 /** YourUpload expose le MP4 dans la balise og:video, puis redirige vers un
@@ -76,5 +77,35 @@ export async function extractVidara(embedUrl: string, referer: string): Promise<
     url,
     server: 'Vidara',
     headers: { Referer: `${origin}/` },
+  };
+}
+
+/** En-têtes d'un navigateur ordinaire. Le module Sora les envoie en entier
+ *  pour la famille lulu, et il lit là où le chemin générique — qui ne posait
+ *  que le Referer — se fait refuser. Rien ne prouve que ce soit la cause du
+ *  refus, mais s'aligner sur une implémentation qui fonctionne coûte quatre
+ *  lignes et retire une variable de l'équation. */
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+};
+
+/** Lulustream (luluvdo.com, lulustream.com, luluvid.com, lulu.st). L'URL est
+ *  dans un bloc packé, comme chez beaucoup d'autres — ce qui vaut à cette
+ *  famille son propre extracteur, c'est uniquement le jeu d'en-têtes exigé à
+ *  la lecture, que le chemin générique ne pose pas. */
+export async function extractLulustream(embedUrl: string, referer: string): Promise<ExtractedStream | null> {
+  const html = await getText(embedUrl, { headers: { Referer: referer, ...BROWSER_HEADERS } });
+  if (!html) return null;
+
+  const url = findMediaUrl(html) ?? findMediaUrl(unpackAll(html));
+  if (!url) return null;
+
+  const host = origin(embedUrl);
+  return {
+    url,
+    server: 'Lulustream',
+    headers: { Referer: host ? `${host}/` : referer, ...BROWSER_HEADERS },
   };
 }

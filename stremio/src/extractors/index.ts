@@ -6,7 +6,7 @@ import { extractEmbed4me } from './embed4me';
 import {
   extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
-import { extractYourUpload, extractMailru, extractVidara } from './misc';
+import { extractYourUpload, extractMailru, extractVidara, extractLulustream } from './misc';
 
 const log = logger('Extract');
 
@@ -83,6 +83,11 @@ const HOSTS: Host[] = [
     name: 'YourUpload',
     match: /yourupload/i,
     extract: (embedUrl, referer) => extractYourUpload(embedUrl, referer),
+  },
+  {
+    name: 'Lulustream',
+    match: /luluvdo|lulustream|luluvid|lulu\.st/i,
+    extract: (embedUrl, referer) => extractLulustream(embedUrl, referer),
   },
   {
     name: 'Vidara',
