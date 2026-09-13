@@ -5,7 +5,10 @@ import type { ExtractedStream } from './index';
 
 const log = logger('Fsvid');
 
-/** fsvid.lol — la page pose un leurre bien visible, et il porte son nom :
+/** Famille fsvid.lol / vidzy.cc — même exploitant, même leurre, jusqu'à la
+ *  même URL de repli servie par les deux.
+ *
+ *  La page pose un leurre bien visible, et il porte son nom :
  *
  *     var _fsvHls = "https://s1.fsvid.lol/troll/master.m3u8";
  *
@@ -59,5 +62,9 @@ export async function extractFsvid(embedUrl: string, referer: string): Promise<E
   if (!url) return null;
 
   const host = origin(embedUrl);
-  return { url, server: 'Fsvid', headers: { Referer: host ? `${host}/` : referer } };
+  return {
+    url,
+    server: /vidzy/i.test(embedUrl) ? 'Vidzy' : 'Fsvid',
+    headers: { Referer: host ? `${host}/` : referer },
+  };
 }

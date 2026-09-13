@@ -87,7 +87,9 @@ const HOSTS: Host[] = [
   },
   {
     name: 'Fsvid',
-    match: /fsvid\./i,
+    // vidzy est le même exploitant : même obfuscation, et le leurre des deux
+    // pointe le même fichier sur s1.fsvid.lol.
+    match: /fsvid\.|vidzy\./i,
     extract: (embedUrl, referer) => extractFsvid(embedUrl, referer),
   },
   {
@@ -126,6 +128,19 @@ async function extractGeneric(embedUrl: string, referer: string): Promise<Extrac
     page = jump[1];
     html = await getText(page, { headers: { Referer: referer } });
     if (!html) return null;
+  }
+
+  // Page quasi vide qui ne charge son lecteur qu'en JS : c'est la signature de
+  // la famille embedseek, qui essaime sous des noms qui changent
+  // (serix.upns.live…). Inutile de les nommer un par un — mais inutile aussi
+  // d'essayer son API sur tout ce qui porte un identifiant : six requêtes
+  // perdues en 404 par film sur des pages qui n'ont rien à voir.
+  if (html.length < 4000 && /assets\/index-[\w.-]+\.js/.test(html)) {
+    const seek = await extractEmbed4me(page);
+    if (seek) {
+      log.debug(`embedseek reconnu sur ${page}`);
+      return { ...seek, server: 'Embedseek' };
+    }
   }
 
   // Le lecteur d'arrivée est très souvent un VOE, dont l'URL est chiffrée et
@@ -193,21 +208,9 @@ export function extractEmbed(embedUrl: string, referer: string): Promise<Extract
 async function extractOnce(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
   const host = HOSTS.find(h => h.match.test(embedUrl));
   try {
-    let result = host
+    const result = host
       ? await host.extract(embedUrl, referer)
       : await extractGeneric(embedUrl, referer);
-
-    // La famille embedseek essaime sous des noms qui changent (serix.upns.live,
-    // kokoflix.lol…) derrière une page vide qui ne charge son lecteur qu'en JS.
-    // Inutile de les nommer un par un : son API se valide toute seule, elle ne
-    // rend du chiffré déchiffrable que si c'en est bien une.
-    if (!result && !host && /#[a-zA-Z0-9]+$|[?&]id=[a-zA-Z0-9]+/.test(embedUrl)) {
-      const seek = await extractEmbed4me(embedUrl);
-      if (seek) {
-        log.debug(`embedseek reconnu sur ${embedUrl}`);
-        result = { ...seek, server: 'Embedseek' };
-      }
-    }
 
     if (!result) {
       log.debug(`rien extrait de ${embedUrl}${host ? ` (${host.name})` : ''}`);
