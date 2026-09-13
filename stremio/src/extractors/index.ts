@@ -7,6 +7,7 @@ import { extractFsvid } from './fsvid';
 import { extractByse, isBysePage } from './byse';
 import { extractHgCloud, isHgCloudPage } from './hgcloud';
 import { extractBlinkflux, isBlinkfluxPage } from './blinkflux';
+import { extractFirestream, isFirestreamPage } from './firestream';
 import { extractVidsonic } from './vidsonic';
 import { extractXshotcok } from './xshotcok';
 import {
@@ -186,6 +187,15 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
   // elle, devine — et c'est la seule qui a besoin du garde-fou d'extension,
   // sans quoi elle rendrait des pages HTML et des images. L'appliquer aux
   // trois écartait les manifestes servis en `.txt`, ce que fait hls3.
+  // FireStream ne met rien dans sa page : juste un jeton à rendre à son API.
+  if (isFirestreamPage(html)) {
+    const fire = await extractFirestream(page, html);
+    if (fire) {
+      log.debug(`firestream reconnu sur ${page}`);
+      return fire;
+    }
+  }
+
   // VidSonic écrit son URL dans la page, en hexadécimal coupé puis inversé.
   // Identification positive : on ne rend rien tant que le décodage ne donne
   // pas une URL, donc pas de faux positif à craindre sur les autres pages.
