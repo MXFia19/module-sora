@@ -20,10 +20,31 @@ const DISCOVERY_URL = 'https://movix.online/';
 const FALLBACK_DOMAIN = 'movix.chat';
 const DOMAIN_TTL_MS = 60 * 60 * 1000;
 
-/** Hébergeurs qu'aucun extracteur ne sait ouvrir, ou qui coûtent plus cher en
- *  temps qu'ils ne rapportent. Les écarter tôt évite d'user le budget du
- *  scraper sur des liens qui n'aboutiront pas. */
-const UNSUPPORTED = /waaw|younetu|netu|hqq|veev|listeamed|up4fun|coflix|kakaflix|fembed|sandratable/i;
+/** Hébergeurs écartés avant même d'être tentés, pour ne pas user le budget du
+ *  scraper sur des liens qui n'aboutiront pas.
+ *
+ *  Cette liste est un piège : elle fige un constat. Le jour où un extracteur
+ *  apprend à lire un de ces hôtes, elle continue de le jeter — en silence, et
+ *  sans qu'aucun log ne dise qu'on vient de perdre un flux. `kakaflix` et
+ *  `coflix` y ont figuré alors qu'ils étaient devenus lisibles (VOE, Byse,
+ *  embedseek), et coûtaient deux flux par film.
+ *
+ *  D'où la règle : chaque entrée porte SA raison, et toute raison qui ne tient
+ *  plus sort de la liste. On n'y met que ce qui ne peut pas marcher — jamais
+ *  « on ne sait pas encore faire », puisque le chemin générique, lui, saura
+ *  peut-être. Le diagnostic des extracteurs (page morte, 403, captcha) rend
+ *  déjà les échecs lisibles : les écarter d'avance ne fait gagner que du temps,
+ *  pas de la clarté. */
+const ECARTES: Array<{ motif: RegExp; raison: string }> = [
+  { motif: /\bveev\.\w+/i, raison: 'attestation canvas/WebGL' },
+  { motif: /\b(?:listeamed|sandratableother)\.\w+/i, raison: 'interstitiel publicitaire' },
+  { motif: /\b(?:younetu|netu|hqq)\.\w+/i, raison: 'hébergeur fermé' },
+  { motif: /\bfembed\.com/i, raison: 'ne répond plus, coûte un délai plein' },
+];
+
+export function ecarte(url: string): string | null {
+  return ECARTES.find(e => e.motif.test(url))?.raison ?? null;
+}
 
 async function currentDomain(): Promise<string> {
   return cached('movix:domain', async () => {
@@ -395,8 +416,9 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
   log.debug(`${out.links.length} lien(s) bruts: ${JSON.stringify(out.countByVia)}`);
 
   const usable = out.links.filter(l => {
-    if (UNSUPPORTED.test(l.url)) {
-      log.debug(`hébergeur écarté: ${l.url}`);
+    const raison = ecarte(l.url);
+    if (raison) {
+      log.debug(`hébergeur écarté (${raison}): ${l.url}`);
       return false;
     }
     return true;
