@@ -1,5 +1,5 @@
 import { cached } from '../cache';
-import { getJson, getText } from '../http';
+import { getJson, getText, origin } from '../http';
 import { logger } from '../log';
 import { audioLabel } from '../lang';
 import { pickBest, pickByKeywords } from '../match';
@@ -59,6 +59,9 @@ interface Link {
   quality: string;
   /** Site qui a fourni le lien — affiché pour situer la provenance. */
   via: string;
+  /** Page d'où le lecteur a été relevé. Plusieurs hébergeurs vérifient le
+   *  Referer et refusent un lien réclamé au nom d'un autre site. */
+  referer?: string;
 }
 
 /** Accumulateur de liens : normalise la langue et la qualité, et
@@ -66,8 +69,17 @@ interface Link {
  *  qu'elles se rejoignent. */
 class LinkSet {
   private readonly seen = new Set<string>();
+  private readonly parents = new Map<string, string>();
   readonly links: Link[] = [];
   readonly countByVia: Record<string, number> = {};
+
+  /** Déclare la page d'où proviennent les liens d'un site, quand l'API la
+   *  donne. À appeler avant les `add` de la même sonde. */
+  parent(via: string, pageUrl: unknown): void {
+    if (typeof pageUrl !== 'string') return;
+    const o = origin(pageUrl);
+    if (o) this.parents.set(via, `${o}/`);
+  }
 
   add(url: unknown, language?: unknown, quality?: unknown, via = 'movix'): void {
     if (typeof url !== 'string' || !url.startsWith('http')) return;
@@ -81,6 +93,7 @@ class LinkSet {
       language: audioLabel(String(language ?? '')),
       quality: normalizeQuality(String(quality ?? '')),
       via,
+      referer: this.parents.get(via),
     });
     this.countByVia[via] = (this.countByVia[via] ?? 0) + 1;
   }
@@ -148,6 +161,7 @@ function probes(domain: string, req: MediaRequest, movixId: string | null): Prob
       name: 'Fstream',
       url: () => isTv ? api(`/api/fstream/tv/${id}/season/${s}`) : api(`/api/fstream/movie/${id}`),
       collect: (j, out) => {
+        out.parent('french-stream', j?.search?.bestMatch?.link);
         if (isTv) {
           const ep = j?.episodes?.[String(e)];
           forEachLangGroup(ep?.languages, (lang, p) => out.add(p?.url, lang, p?.quality, 'french-stream'));
@@ -161,6 +175,9 @@ function probes(domain: string, req: MediaRequest, movixId: string | null): Prob
       name: 'Wiflix',
       url: () => isTv ? api(`/api/wiflix/tv/${id}/${s}`) : api(`/api/wiflix/movie/${id}`),
       collect: (j, out) => {
+        // wiflix change d'enseigne (cinestream.info aujourd'hui) : l'API dit
+        // laquelle, la coder en dur serait déjà faux.
+        out.parent('wiflix', j?.wiflix_url);
         if (isTv) {
           forEachLangGroup(j?.episodes?.[String(e)], (lang, p) => out.add(p?.url, lang, null, 'wiflix'));
         } else {
@@ -398,7 +415,7 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
       }];
     }
 
-    const streams = await extractEmbed(link.url, `https://${domain}/`);
+    const streams = await extractEmbed(link.url, link.referer ?? `https://${domain}/`);
     return streams.map(s => ({
       url: s.url,
       quality: link.quality,
