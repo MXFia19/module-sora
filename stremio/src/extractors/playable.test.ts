@@ -24,3 +24,9 @@ test("looksLikeMedia reste exigeant : c'est le garde-fou du repli générique", 
   assert.equal(looksLikeMedia('https://host.tld/v/abc.mp4'), true);
   assert.equal(looksLikeMedia('https://host.tld/page.html'), false);
 });
+
+test('le leurre de fsvid ne peut pas ressortir par une autre voie', () => {
+  assert.equal(isPlayable('https://s1.fsvid.lol/troll/master.m3u8'), false);
+  // La vraie URL du même hôte, elle, passe.
+  assert.equal(isPlayable('https://s1.fsvid.lol/hls2/01/00030/abc_o/master.m3u8?t=x'), true);
+});

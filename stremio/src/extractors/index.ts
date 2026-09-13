@@ -3,6 +3,7 @@ import { cached } from '../cache';
 import { logger } from '../log';
 import { unpackAll, findMediaUrl } from './unpack';
 import { extractEmbed4me } from './embed4me';
+import { extractFsvid } from './fsvid';
 import {
   extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
@@ -85,6 +86,11 @@ const HOSTS: Host[] = [
     extract: (embedUrl, referer) => extractYourUpload(embedUrl, referer),
   },
   {
+    name: 'Fsvid',
+    match: /fsvid\./i,
+    extract: (embedUrl, referer) => extractFsvid(embedUrl, referer),
+  },
+  {
     name: 'Lulustream',
     match: /luluvdo|lulustream|luluvid|lulu\.st/i,
     extract: (embedUrl, referer) => extractLulustream(embedUrl, referer),
@@ -134,8 +140,14 @@ async function extractGeneric(embedUrl: string, referer: string): Promise<Extrac
 }
 
 /** Marqueurs de fichier absent servis par certains hébergeurs à la place d'une
- *  erreur : l'URL a la bonne forme mais ne contient aucune vidéo. */
-const PLACEHOLDER = /novideo|void\.mp4|no_video|deleted/i;
+ *  erreur : l'URL a la bonne forme mais ne contient aucune vidéo.
+ *
+ *  Le dernier n'est pas une erreur mais un piège : fsvid.lol pose cette URL en
+ *  clair dans sa page pour que la vraie, chiffrée, passe inaperçue. Elle ne
+ *  devrait plus jamais arriver ici puisque cet hébergeur a son extracteur,
+ *  mais une filature qui se termine en cul-de-sac vaut mieux qu'un flux mort
+ *  proposé à l'utilisateur. */
+const PLACEHOLDER = /novideo|void\.mp4|no_video|deleted|\/troll\/master\.m3u8/i;
 
 /** Une URL n'est retenue que si elle est absolue et ne porte pas un marqueur
  *  de fichier absent. Un lien relatif (`/embed/novideo.mp4`) a bien
