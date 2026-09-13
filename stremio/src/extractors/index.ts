@@ -6,6 +6,7 @@ import { extractEmbed4me } from './embed4me';
 import { extractFsvid } from './fsvid';
 import { extractByse, isBysePage } from './byse';
 import { extractHgCloud, isHgCloudPage } from './hgcloud';
+import { extractBlinkflux, isBlinkfluxPage } from './blinkflux';
 import {
   extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
@@ -162,6 +163,16 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     if (seek) {
       log.debug(`embedseek reconnu sur ${page}`);
       return { ...seek, server: 'Embedseek' };
+    }
+  }
+
+  // Lecteur maison qui garde son URL côté serveur et ne la rend que contre le
+  // bloc chiffré de sa propre page. Reconnu à ce bloc, pas au domaine.
+  if (isBlinkfluxPage(html)) {
+    const blink = await extractBlinkflux(page, html);
+    if (blink) {
+      log.debug(`blinkflux reconnu sur ${page}`);
+      return blink;
     }
   }
 
