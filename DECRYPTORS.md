@@ -10,6 +10,11 @@ and reuse a proven implementation instead of rewriting it.
 ---
 
 ## 1. Filemoon  — PoW + AES-256-GCM + ECDSA attest
+> ⚠️ **Outdated — see section 10 (Byse Frontend).** The platform renamed itself and dropped
+> the PoW, the captcha and the ECDSA attestation: a single `GET /api/videos/<code>/` is now
+> enough. Only the `key_parts` selection by `version` still holds. `filemoon.sx` is just one
+> domain among many of that same application.
+
 The most complex. Flow: `embed/details → access/challenge → (ECDSA worker) access/attest → embed/captcha → PoW → captcha/verify → embed/playback → AES-GCM decryption`.
 
 - **PoW hash**: custom ChaCha-style hash (NOT SHA256). Preimage = `nonce + ":" + counter`, search for `leadingZeroBits ≥ difficulty`.
@@ -164,3 +169,234 @@ Retrieve the stream URL (.m3u8/.mp4) from the embed page. **The trap is almost a
 
 ---
 *Generated 2026-06-27. `file:Lxxx` refs are indicative (may drift after edits).*
+
+---
+
+# 📦 Part II — Stremio addon (`stremio/src/extractors/`)
+
+This part covers the standalone port (TypeScript, Node). The techniques below were found
+after Part I was written; **some of them correct it** — see the ⚠️ markers.
+
+> **The lesson that keeps coming back: recognise a host BY ITS PAGE, never by its domain.**
+> VOE, embedseek, Byse, fsvid and FireStream all rotate domains; none of them changed the
+> shape of its page. Routing on `match: /name\.tld/` is a race you lose, and it costs
+> streams silently.
+
+---
+
+## 10. Byse Frontend — formerly Filemoon  ⚠️ *corrects section 1*
+
+`filemoon.sx` is now just one domain among many of a platform that names itself
+**Byse Frontend**: `bysebuho.com`, `bysesayeveum.com`, `gn1r5n.org`, `lukefirst.lol`,
+`doply.net`… all serving the SAME application (same bundle, same API). It is recognised by
+`<title>Byse Frontend</title>` in a 1.6 KB shell.
+
+**The PoW, captcha and ECDSA attestation from section 1 are no longer needed.** One call:
+
+    GET <origin>/api/videos/<code>/   ->  { playback: { iv, payload, key_parts[30], version } }
+
+- **AES-256-GCM**, auth tag in the last 16 bytes of `payload`.
+- `version` (1-20) picks the TWO real fragments at indices `[n, 31-n]`; the other 28 are
+  decoys. `version` changes on every call — **read it, never assume it**; that is what
+  makes it work twice in a row.
+- Out-of-range version → the original bundle falls back to all fragments; do the same
+  rather than failing.
+- Deleted video → `{"error":"video record missing: video not found"}`.
+
+`stremio/src/extractors/byse.ts` · `keyParts()` / `decodeByse()` / `isBysePage()`
+
+**Costly trap**: `kokoflix.lol/chamber_go.php?id=…` is only a **302** to
+`bysesayeveum.com/e/<code>`. The HTTP client follows it, but if the code keeps the START
+URL, Byse looks for its code inside "chamber_go.php" and finds nothing — fifteen links
+lost per film. Always resolve on the FINAL URL (`response.url`).
+
+---
+
+## 11. fsvid / vidzy — XOR seeded from the hostname, with a decoy
+
+    seed = Σ location.hostname.charCodeAt(i) & 255
+    plain[i] = base64(payload).reverse()[i] ^ ((start + i*step + seed) & 255)
+
+`start` and `step` are written in clear in the page (`(0x3d + i*89 + H) & 255`).
+
+**The decoy**: the page plants `var _fsvHls = "https://s1.fsvid.lol/troll/master.m3u8"` in
+clear. It is literally called "troll". A generic media-URL search picks up the decoy and
+serves a dead stream. The script itself falls back to it when decryption fails — which is
+what happens when the page is served from a domain other than the expected one.
+
+**Decoding doubles as identification**: it requires both the payload AND the XOR
+constants, and only returns something starting with `http`. So try it on EVERY page rather
+than routing by domain — `vidzy.org` serves sometimes a wrapper, sometimes the fsvid
+player itself, and routing it by name meant picking wrong half the time.
+
+`stremio/src/extractors/fsvid.ts` · `decodeFsvid(page, embedUrl)`
+
+---
+
+## 12. BlinkFlux — decryption delegated to the server
+
+Indexed by **TMDB id**, not by file code:
+`/api/v1/index.php?route=movies/<tmdb>/player&api_key=<key>`.
+
+The page holds no URL, not even encrypted — only a pair handed back to the server:
+
+    POST /api/v1/index.php?route=unlock&api_key=<key>
+    { "token": "", "payload": ENCRYPTED_PAYLOAD, "iv": ENCRYPTED_IV }
+    -> { "success": true, "url": "https://cdn78.vida-loka.store/movies/….mp4?ff=<expiry>.<hash>" }
+
+- `token` empty: the anti-bot field exists but is not enabled; the browser sends nothing
+  more than we do.
+- The payload's `/` are **JS-escaped** (`ox\/OjHb`): sending them as-is gets the call refused.
+- The API key is mandatory but travels in the URL movix gives us — read it back rather
+  than hard-coding it; it belongs to movix and may rotate.
+- Referer is not checked. Progressive MP4 signed for **4 h**, served by Cloudflare and
+  **not IP-bound** → direct playback, no proxy.
+
+`stremio/src/extractors/blinkflux.ts`
+
+---
+
+## 13. VidSonic — hex, split and reversed
+
+Purely decorative obfuscation, no key, no network call:
+
+    '3032323464|6166373866|…|70747468'  ->  drop the "|"  ->  hex to text  ->  reverse
+    -> https://sfy-01-fr.vidsonic.net/secure/…/index.m3u8?server_id=3&expires=…&md5=…
+
+**Performance trap**: the search pattern must stay FLAT
+(`["']([0-9a-fA-F|]{80,4000})["']` then validate in JS). A nested alternation
+(`hex+(\|hex+)+`) makes the engine backtrack over every long hex run — quadratic on a
+700 KB page.
+
+The HLS manifest is signed (`expires` + `md5`) but **not IP-bound** (checked on both
+manifest AND segments from several addresses) → direct, no proxy.
+
+`stremio/src/extractors/vidsonic.ts`
+
+---
+
+## 14. xshotcok (hxfile clone) — base64 + XOR, with decoy functions
+
+Three layers:
+
+1. a **p.a.c.k.e.r** block (decryptor #4);
+2. it holds only a base64 payload and four calls — but the decryption functions written in
+   the page are **empty**: `var _52ad59 = ""; var _2e625d = "";` The real ones come from
+   **`/xher_ads.js`**, a name chosen so an ad blocker removes it;
+3. `decodeURIComponent(atob(payload))` then a **repeating-key XOR** (`_0x3e68eb`).
+
+**We do not execute their JS.** The key is recovered two ways, first valid one wins:
+
+- **(a)** the obfuscator names the variable after the value it receives —
+  `var _0x3e68eb = _2e625d();`. The NAME is the key;
+- **(b)** known-plaintext attack: the plaintext always begins with the anti-iframe guard
+  `\t(function() {\n\t\tvar targetDomains = ['https://` (46 chars), enough to rebuild a
+  key of any plausible length.
+
+A key is only accepted if the resulting plaintext carries a `"file":"http…` entry.
+
+The CDN's redirect token (`svrx-cdn.ctmp.world` → `…-df-1/video.mp4?t=…`) **looks IP-bound**
+→ set a Referer to force the stream through the proxy, otherwise the redirect and the file
+are requested from different addresses.
+
+`stremio/src/extractors/xshotcok.ts`
+
+---
+
+## 15. FireStream — single-use token, IP-bound
+
+The page says it in a comment: *"no API call — URL never in page source"*. True.
+
+    <script id="token-blob" type="text/plain">DauVKi3MvvXc…==</script>
+    POST <origin>/api/videos/<slug>/resolve   { "blob": "<token>" }
+    -> { "signedVideoUrl": "…/video.m3u8?md5=…&expires=…", "signedVideoSdUrl": … }
+
+- **Recognition trap**: `/api/videos/<slug>/resolve` exists NOWHERE in the page; the path
+  is concatenated piece by piece (`'/api/videos/' + slug + '/resolve'`). Searching for the
+  whole string finds nothing. Recognise the page **by the token**, which also follows it
+  when it moves from `firestream.to` to `firestream.site`.
+- The token is **IP-bound**: page and exchange must leave from the same address, otherwise
+  `{"error":"Token bound to different IP"}`. Free on a fixed-address server.
+- The returned manifest is **not** IP-bound → direct, no proxy.
+- The page also exposes `isVpn` / `vpnOrg` (datacentre-IP detection) but only blocks when
+  the creator enabled `blockVpn`.
+
+`stremio/src/extractors/firestream.ts`
+
+---
+
+## 16. Vidara — plain POST
+
+    POST <origin>/api/stream   { "filecode": "<code>", "device": "desktop" }
+    -> { "streaming_url": "…" }
+
+Nothing encrypted. `stremio/src/extractors/misc.ts` · `extractVidara`
+
+---
+
+## 17. hgcloud — replay on mirrors
+
+A shell under 1200 bytes ("Page is loading, please wait" + obfuscated `/main.js`) whose
+jump is computed in unreadable JS. Rather than reading `main.js`, **replay `/e/<id>` on its
+mirrors**: `vibuxer.com`, `audinifer.com`, `huntrexus.com`.
+
+`stremio/src/extractors/hgcloud.ts`
+
+---
+
+## 🧱 Walls that need a real browser
+
+| Host | Wall | Note |
+|---|---|---|
+| **mixdrop** | reCAPTCHA v3 | ⚠️ *corrects the "mixdrop" row in Part I*: unpacking p.a.c.k.e.r is no longer enough; the URL is only obtained by posting a token no browserless client can produce |
+| **emmmmbed** | Cloudflare Turnstile | — |
+| **jilliandescribecompany** | canvas/WebGL attestation `__cherami` | — |
+| **veev.to** | canvas/WebGL attestation in a 740 KB bundle | signed token identified (below), CDN path not found |
+| **listeamed / sandratableother / vudeo / tipfly** | ad interstitial `cdn-fileserver.com`, served by ASN | the FingerprintJS wall has an `fp=-7` fallback we can replay, but the page behind it is still an interstitial |
+
+**veev.to — where it stands** (unfinished): `window._vvto.fc` is a token compressed with
+**classic LZW** (8-bit dictionary, codes > 255 emitted as-is — hence the `ā ĉ Ā Ğ Ĭ ċ`).
+Decompressed it yields `<A>-<B>-<code>-<C>-<expires>-<md5>`, e.g.
+`3100210201-160-1naj1s8yj8im-79-1789314332-89772a99b05149b56066f7e1f37d7fdc`.
+The CDN is derivable from the poster (`s-gb-102760.veevcdn.co/i/01/00525/<code>.jpg`), but
+the manifest path matches none of the XFileSharing conventions tried (all 404). The page's
+first two `fc` values are decoys, one signed `Gujal00_loving_them_moves_buddy`.
+
+---
+
+## 🩺 Diagnosis: "we cannot read it" is not "there is nothing to read"
+
+A deleted file and an unknown host produced the same "nothing extracted", which cost hours
+hunting bugs that did not exist. The addon now relays the host's own sentence verbatim:
+
+- `File is no longer available as it expired or has been deleted` (callistanise family:
+  luluvdo, minochinos, bingezove, smoothpre)
+- `No such file` (StreamHG: wishonly, dhtpre)
+- `Video not found or deleted` (embedseek)
+- `video record missing: video not found` (Byse)
+- `This domain is for sale` (oneupload, ups2up — the service is dead)
+- the HTTP status when the body is not a page (`403` datacentre IP, `404`/`410` deleted,
+  `502`/`520` host down)
+
+Measured on 166 links drawn from 19 films and series: **21 pages diagnosed by name**
+instead of an undifferentiated "nothing extracted".
+
+---
+
+## 📌 Rules learned (Part II)
+
+1. **Recognise by the page, not the domain.** Holds for VOE, embedseek, Byse, fsvid,
+   FireStream, BlinkFlux.
+2. **Resolve on the final URL**, not the starting one — but `fetch` drops the fragment, and
+   the whole embedseek family carries the id AFTER the hash (`bll.embedseek.com/#6fvwj`).
+   Only adopt the returned URL when it really points at a different page.
+3. **A named extractor returning zero is not the last word**: retrying the generic path
+   catches page variants and produces the diagnosis.
+4. **A signed token is not necessarily IP-bound** — nor the opposite. Check before deciding
+   to proxy: proxying for nothing means relaying every byte of video for no gain.
+5. **Never conclude "blocked" from an address that rotates**: 403s seen from a sandbox with
+   a rotating IP do not necessarily reproduce on a fixed-address server. Got this wrong
+   twice.
+
+---
+*Part II written 2026-09-13 — Stremio addon, 104 tests. Mechanisms, not line numbers: code moves.*

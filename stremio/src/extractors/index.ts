@@ -3,7 +3,7 @@ import { cached } from '../cache';
 import { logger } from '../log';
 import { unpackAll, findMediaUrl, declaredHlsLink } from './unpack';
 import { extractEmbed4me } from './embed4me';
-import { extractFsvid } from './fsvid';
+import { extractFsvid, decodeFsvid } from './fsvid';
 import { extractByse, isBysePage } from './byse';
 import { extractHgCloud, isHgCloudPage } from './hgcloud';
 import { extractBlinkflux, isBlinkfluxPage } from './blinkflux';
@@ -117,6 +117,30 @@ const HOSTS: Host[] = [
   },
 ];
 
+/** Pages qui annoncent elles-mêmes qu'il n'y a rien à extraire.
+ *
+ *  Sans ça, un fichier supprimé et un hébergeur qu'on ne sait pas lire
+ *  produisent le même « rien extrait », et on passe des heures à chercher un
+ *  bug là où il n'y en a pas — c'est arrivé assez souvent pour mériter ces
+ *  quinze lignes. Les motifs sont ceux que les hébergeurs écrivent en clair
+ *  dans le corps de leur page ; on relaie leur phrase telle quelle. */
+const PAGES_MORTES: RegExp[] = [
+  /File is no longer available as it expired or has been deleted/i,
+  /No such file/i,
+  /\bFile (?:was|has been) deleted\b/i,
+  /Video (?:not found|does not exist|was deleted|is unavailable)/i,
+  /This (?:domain|website) is for sale/i,
+  /file (?:not found|was deleted)/i,
+];
+
+export function pageMorte(html: string): string | null {
+  for (const re of PAGES_MORTES) {
+    const m = re.exec(html);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 /** Repli générique : la page contient soit l'URL en clair, soit un bloc packé
  *  qui la contient. Couvre Vidhide et toute la famille qui partage ce lecteur,
  *  sans avoir à les nommer une par une. */
@@ -127,10 +151,22 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
   // l'URL de départ, les extracteurs qui lisent un code dans le chemin
   // cherchent dans « chamber_go.php » et ne trouvent rien.
   const first = await request(embedUrl, { headers: { Referer: referer } });
-  let page = first.url || embedUrl;
+  // `fetch` rend l'URL sans son fragment. Or toute la famille embedseek porte
+  // l'identifiant de la vidéo APRÈS le dièse (bll.embedseek.com/#6fvwj) :
+  // adopter l'URL rendue reviendrait à l'effacer. On ne la prend donc que
+  // lorsqu'elle désigne vraiment une autre page.
+  const sansFragment = embedUrl.replace(/#.*$/, '');
+  let page = first.url && first.url !== sansFragment ? first.url : embedUrl;
   let html = first.text;
   if (!html) return null;
   if (page !== embedUrl) log.debug(`redirection suivie -> ${page}`);
+
+  // Un corps d'erreur n'est pas une page de lecteur. Le dire ici évite de
+  // ranger « l'hébergeur est tombé » avec « on ne sait pas lire cette page ».
+  if (!first.ok) {
+    log.debug(`${page} : l'hébergeur répond HTTP ${first.status} — rien à extraire`);
+    return null;
+  }
 
   // Coquille de redirection. VOE renouvelle ses domaines de façade en
   // permanence (rebeccapracticeloss.com, kokoflix.lol/osaka_go.php…) et les
@@ -215,6 +251,17 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
   const voe = decodeVoe(html);
   const depacke = unpackAll(html);
 
+  // fsvid, reconnu à sa page et non à son domaine. vidzy.org sert tantôt un
+  // enrobage, tantôt le lecteur fsvid lui-même : l'aiguiller par son nom
+  // revenait à choisir la mauvaise moitié du temps. Le déchiffrement, lui,
+  // est une identification positive — il exige la charge utile ET les
+  // constantes du XOR, et ne rend que ce qui commence par http.
+  const fsv = decodeFsvid(html, page);
+  if (fsv) {
+    log.debug(`fsvid reconnu sur ${page}`);
+    return { url: fsv, server: 'Fsvid', headers: { Referer: `${origin(page)}/` } };
+  }
+
   // xshotcok (clone hxfile) : le bloc dépaqueté ne porte qu'une charge utile
   // chiffrée, et les fonctions de déchiffrement écrites dans la page sont des
   // leurres vides. On retrouve la clé sans exécuter leur JS.
@@ -239,6 +286,12 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     // devant la résolution de son URL : la page se charge normalement, mais
     // le lien ne s'obtient qu'en postant un jeton qu'aucun client sans
     // navigateur ne peut produire.
+    const mort = pageMorte(html);
+    if (mort) {
+      log.debug(`${page} : l'hébergeur répond « ${mort} » — rien à extraire`);
+      return null;
+    }
+
     const mur = /recaptcha\/api\.js|grecaptcha\.execute|challenges\.cloudflare\.com\/turnstile|hcaptcha\.com\/1\/api\.js/.exec(html);
     if (mur) {
       log.debug(`${page} : protégé par un captcha (${mur[0].split('/')[0]}) — rien à extraire sans navigateur`);
@@ -313,9 +366,17 @@ export function extractEmbed(embedUrl: string, referer: string): Promise<Extract
 async function extractOnce(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream[]> {
   const host = HOSTS.find(h => h.match.test(embedUrl));
   try {
-    const result = host
+    let result = host
       ? await host.extract(embedUrl, referer)
       : await extractGeneric(embedUrl, referer, depth);
+
+    // Un extracteur nommé qui rend zéro n'est pas le dernier mot : l'hébergeur
+    // sert parfois une variante de page qu'il ne reconnaît pas (vidzy.org
+    // bascule entre un enrobage et un lecteur fsvid), et le chemin générique
+    // sait aussi lire les pages qui annoncent un fichier supprimé — sans quoi
+    // « rien extrait » couvre indifféremment une vidéo morte et un hébergeur
+    // qu'on ne sait pas lire. Une requête de plus, uniquement sur échec.
+    if (!result && host) result = await extractGeneric(embedUrl, referer, depth);
 
     if (!result) {
       log.debug(`rien extrait de ${embedUrl}${host ? ` (${host.name})` : ''}`);

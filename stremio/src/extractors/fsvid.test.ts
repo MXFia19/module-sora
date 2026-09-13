@@ -27,3 +27,21 @@ test("un hôte qui ne correspond pas ne rend rien plutôt que le leurre", () => 
 test('une page sans charge utile ne rend rien', () => {
   assert.equal(decodeFsvid('<html>rien ici</html>', EMBED), null);
 });
+
+test('le déchiffrement sert d’identification : vidzy.org est du fsvid', () => {
+  // vidzy.org sert tantôt un enrobage, tantôt le lecteur fsvid lui-même.
+  // L'aiguiller par son nom revenait à choisir la mauvaise moitié du temps ;
+  // la graine vient de location.hostname, donc du domaine qui SERT la page.
+  const pageVidzy = page.replace(/fsvid\.lol/g, 'vidzy.org');
+  // La graine change avec l'hôte : la charge utile d'origine ne peut pas
+  // donner d'URL sous un autre nom, et c'est exactement le garde-fou voulu.
+  assert.equal(decodeFsvid(pageVidzy, 'https://vidzy.org/embed-x.html'), null);
+});
+
+test('une page ordinaire ne déclenche jamais le décodeur', () => {
+  // Il tourne désormais sur CHAQUE page du chemin générique : un faux positif
+  // coûterait un flux mort à l'utilisateur.
+  assert.equal(decodeFsvid('<html><body>un lecteur ordinaire</body></html>', 'https://autre.invalid/e/x'), null);
+  assert.equal(decodeFsvid('<script>var a=atob("aGVsbG8gd29ybGQgaGVsbG8gd29ybGQgaGVsbG8=")</script>',
+    'https://autre.invalid/e/x'), null);
+});

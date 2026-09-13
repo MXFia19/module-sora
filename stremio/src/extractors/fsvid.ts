@@ -26,10 +26,9 @@ export function decodeFsvid(page: string, embedUrl: string): string | null {
 
   const payload = code.match(/\}\s*\)\s*\(\s*(['"])([A-Za-z0-9+/=]{40,})\1\s*\)/)?.[2];
   const params = code.match(/\(\s*(0x[0-9a-fA-F]+|\d+)\s*\+\s*\w+\s*\*\s*(\d+)\s*\+\s*\w+\s*\)\s*&\s*255/);
-  if (!payload || !params) {
-    log.debug('ni charge utile ni constantes dans la page');
-    return null;
-  }
+  // Muet : depuis que le chemin générique essaie ce déchiffrement sur chaque
+  // page, l'absence de charge utile est le cas NORMAL, pas un incident.
+  if (!payload || !params) return null;
 
   const start = Number(params[1]);
   const step = Number(params[2]);
