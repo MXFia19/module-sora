@@ -4,9 +4,9 @@ import { logger } from '../log';
 import { unpackAll, findMediaUrl } from './unpack';
 import { extractEmbed4me } from './embed4me';
 import {
-  extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet,
+  extractVoe, extractStreamtape, extractSendvid, extractVidmoly, extractSibnet, decodeVoe,
 } from './voe';
-import { extractYourUpload, extractMailru } from './misc';
+import { extractYourUpload, extractMailru, extractVidara } from './misc';
 
 const log = logger('Extract');
 
@@ -85,6 +85,11 @@ const HOSTS: Host[] = [
     extract: (embedUrl, referer) => extractYourUpload(embedUrl, referer),
   },
   {
+    name: 'Vidara',
+    match: /\bvidaraa?\b|vidara\.(to|so|cc|net|org)/i,
+    extract: (embedUrl, referer) => extractVidara(embedUrl, referer),
+  },
+  {
     name: 'Mail.ru',
     match: /my\.mail\.ru/i,
     extract: embedUrl => extractMailru(embedUrl),
@@ -95,15 +100,32 @@ const HOSTS: Host[] = [
  *  qui la contient. Couvre Vidhide et toute la famille qui partage ce lecteur,
  *  sans avoir à les nommer une par une. */
 async function extractGeneric(embedUrl: string, referer: string): Promise<ExtractedStream | null> {
-  const html = await getText(embedUrl, { headers: { Referer: referer } });
+  let page = embedUrl;
+  let html = await getText(embedUrl, { headers: { Referer: referer } });
   if (!html) return null;
 
-  const url = findMediaUrl(html) ?? findMediaUrl(unpackAll(html));
+  // Coquille de redirection. VOE renouvelle ses domaines de façade en
+  // permanence (rebeccapracticeloss.com, kokoflix.lol/osaka_go.php…) et les
+  // reconnaître par leur nom est une course perdue : la page, elle, est
+  // toujours la même — un <title>Redirecting…</title> et un saut vers le
+  // vrai lecteur. On la suit, et le domaine du jour n'a plus d'importance.
+  const jump = html.match(/(?:window\.)?location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
+  if (jump?.[1] && html.length < 4000) {
+    log.debug(`coquille de redirection -> ${jump[1]}`);
+    page = jump[1];
+    html = await getText(page, { headers: { Referer: referer } });
+    if (!html) return null;
+  }
+
+  // Le lecteur d'arrivée est très souvent un VOE, dont l'URL est chiffrée et
+  // qu'aucune regex générique ne trouverait.
+  const voe = decodeVoe(html);
+  const url = voe ?? findMediaUrl(html) ?? findMediaUrl(unpackAll(html));
   if (!url) return null;
 
-  const host = origin(embedUrl);
-  const name = embedUrl.match(/https?:\/\/(?:www\.)?([^/]+)/i)?.[1] ?? 'direct';
-  return { url, server: name, headers: { Referer: host ? `${host}/` : referer } };
+  const host = origin(page);
+  const name = page.match(/https?:\/\/(?:www\.)?([^/]+)/i)?.[1] ?? 'direct';
+  return { url, server: voe ? 'VOE' : name, headers: { Referer: host ? `${host}/` : referer } };
 }
 
 /** Marqueurs de fichier absent servis par certains hébergeurs à la place d'une
@@ -154,9 +176,21 @@ export function extractEmbed(embedUrl: string, referer: string): Promise<Extract
 async function extractOnce(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
   const host = HOSTS.find(h => h.match.test(embedUrl));
   try {
-    const result = host
+    let result = host
       ? await host.extract(embedUrl, referer)
       : await extractGeneric(embedUrl, referer);
+
+    // La famille embedseek essaime sous des noms qui changent (serix.upns.live,
+    // kokoflix.lol…) derrière une page vide qui ne charge son lecteur qu'en JS.
+    // Inutile de les nommer un par un : son API se valide toute seule, elle ne
+    // rend du chiffré déchiffrable que si c'en est bien une.
+    if (!result && !host && /#[a-zA-Z0-9]+$|[?&]id=[a-zA-Z0-9]+/.test(embedUrl)) {
+      const seek = await extractEmbed4me(embedUrl);
+      if (seek) {
+        log.debug(`embedseek reconnu sur ${embedUrl}`);
+        result = { ...seek, server: 'Embedseek' };
+      }
+    }
 
     if (!result) {
       log.debug(`rien extrait de ${embedUrl}${host ? ` (${host.name})` : ''}`);

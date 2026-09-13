@@ -47,3 +47,34 @@ export async function extractMailru(embedUrl: string): Promise<ExtractedStream[]
       headers: { Referer: 'https://my.mail.ru/' },
     }));
 }
+
+/** Vidara (vidara.to, vidaraa.cc, vidara.so...) — la page charge crypto-js et
+ *  pako, ce qui laisse craindre le pire, mais ces deux-là ne servent qu'aux
+ *  statistiques : l'URL de lecture vient d'un simple POST /api/stream.
+ *
+ *  Le jeton rendu contient l'IP du demandeur en clair, ce qui en fait un des
+ *  hébergeurs qu'il ne faut surtout pas servir sans proxy à un client distant. */
+export async function extractVidara(embedUrl: string, referer: string): Promise<ExtractedStream | null> {
+  const m = embedUrl.match(/^(https?:\/\/[^/]+)\/e\/([A-Za-z0-9_-]+)/i);
+  if (!m) return null;
+  const [, origin, filecode] = m as unknown as [string, string, string];
+
+  const res = await request(`${origin}/api/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Referer: embedUrl,
+      Origin: origin,
+    },
+    body: JSON.stringify({ filecode, device: 'desktop' }),
+  });
+
+  const url = res.json<any>()?.streaming_url;
+  if (typeof url !== 'string' || !url.startsWith('http')) return null;
+
+  return {
+    url,
+    server: 'Vidara',
+    headers: { Referer: `${origin}/` },
+  };
+}
