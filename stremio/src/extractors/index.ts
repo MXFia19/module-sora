@@ -1,4 +1,4 @@
-import { getText, origin } from '../http';
+import { getText, origin, absolute } from '../http';
 import { cached } from '../cache';
 import { logger } from '../log';
 import { unpackAll, findMediaUrl } from './unpack';
@@ -87,9 +87,11 @@ const HOSTS: Host[] = [
   },
   {
     name: 'Fsvid',
-    // vidzy est le même exploitant : même obfuscation, et le leurre des deux
-    // pointe le même fichier sur s1.fsvid.lol.
-    match: /fsvid\.|vidzy\./i,
+    // vidzy.cc est le même exploitant : même obfuscation, et le leurre des
+    // deux pointe le même fichier sur s1.fsvid.lol. En revanche vidzy.ORG
+    // n'a rien à voir — c'est un enrobage qui encadre une iframe — et le
+    // router ici lui coûtait son flux.
+    match: /fsvid\.|vidzy\.cc/i,
     extract: (embedUrl, referer) => extractFsvid(embedUrl, referer),
   },
   {
@@ -112,7 +114,7 @@ const HOSTS: Host[] = [
 /** Repli générique : la page contient soit l'URL en clair, soit un bloc packé
  *  qui la contient. Couvre Vidhide et toute la famille qui partage ce lecteur,
  *  sans avoir à les nommer une par une. */
-async function extractGeneric(embedUrl: string, referer: string): Promise<ExtractedStream | null> {
+async function extractGeneric(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream | null> {
   let page = embedUrl;
   let html = await getText(embedUrl, { headers: { Referer: referer } });
   if (!html) return null;
@@ -147,7 +149,20 @@ async function extractGeneric(embedUrl: string, referer: string): Promise<Extrac
   // qu'aucune regex générique ne trouverait.
   const voe = decodeVoe(html);
   const url = voe ?? findMediaUrl(html) ?? findMediaUrl(unpackAll(html));
-  if (!url) return null;
+
+  if (!url) {
+    // Page d'enrobage : rien à extraire, juste un cadre autour du vrai
+    // lecteur (vidzy.org encadre un embed vidzy.cc). On le suit une fois.
+    // Petite page et iframe unique : une vraie page de lecteur en a
+    // plusieurs, dont des publicités qu'on ne veut surtout pas suivre.
+    const frames = [...html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(m => m[1]!);
+    if (depth < 1 && html.length < 8000 && frames.length === 1) {
+      const inner = absolute(frames[0]!.replace(/&amp;/g, '&'), page);
+      log.debug(`enrobage -> ${inner}`);
+      return (await extractOnce(inner, page, depth + 1))[0] ?? null;
+    }
+    return null;
+  }
 
   const host = origin(page);
   const name = page.match(/https?:\/\/(?:www\.)?([^/]+)/i)?.[1] ?? 'direct';
@@ -205,12 +220,12 @@ export function extractEmbed(embedUrl: string, referer: string): Promise<Extract
   });
 }
 
-async function extractOnce(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
+async function extractOnce(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream[]> {
   const host = HOSTS.find(h => h.match.test(embedUrl));
   try {
     const result = host
       ? await host.extract(embedUrl, referer)
-      : await extractGeneric(embedUrl, referer);
+      : await extractGeneric(embedUrl, referer, depth);
 
     if (!result) {
       log.debug(`rien extrait de ${embedUrl}${host ? ` (${host.name})` : ''}`);
