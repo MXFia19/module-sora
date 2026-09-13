@@ -1,7 +1,7 @@
 import { cached } from '../cache';
 import { getJson, getText, origin } from '../http';
 import { logger } from '../log';
-import { audioLabel } from '../lang';
+import { audioLabel, toIso639_2 } from '../lang';
 import { pickBest, pickByKeywords } from '../match';
 import { extractEmbed } from '../extractors';
 import type { MediaRequest, RawStream, Scraper } from '../types';
@@ -16,6 +16,18 @@ import type { MediaRequest, RawStream, Scraper } from '../types';
 
 const log = logger('Movix');
 
+/** Les chemins des sondes ci-dessous viennent du backend ouvert de movix
+ *  (`movixcorp/MovixOpenSource`, `API/Mainapi/app.js` + `API/Mainapi/routes/`).
+ *  C'est la seule façon de ne pas les deviner : `/api/films/download/:id` a
+ *  longtemps été écrit `/api/movies/...` ici, et répondait 404 en silence.
+ *
+ *  Sources volontairement NON branchées, et pourquoi :
+ *   - `/api/darkiworld/*` : des liens de téléchargement, pas des flux ; il faut
+ *     un identifiant darkiworld qu'on n'a pas, et la route se défend
+ *     explicitement des robots.
+ *   - `/api/ftv/*` (France TV) : recherche floue par titre sur un catalogue de
+ *     replay disjoint de TMDB — « Squid Game » y ramène « Space Game ».
+ *   - `POST /api/swiftflow/mp4/resolve` : exige un jeton Turnstile. */
 const DISCOVERY_URL = 'https://movix.online/';
 const FALLBACK_DOMAIN = 'movix.chat';
 const DOMAIN_TTL_MS = 60 * 60 * 1000;
@@ -88,10 +100,14 @@ interface Link {
 /** Accumulateur de liens : normalise la langue et la qualité, et
  *  dédoublonne. Les sondes rendent des formes très différentes, c'est ici
  *  qu'elles se rejoignent. */
-class LinkSet {
+export class LinkSet {
   private readonly seen = new Set<string>();
   private readonly parents = new Map<string, string>();
   readonly links: Link[] = [];
+  /** Flux déjà jouables, rendus tels quels par l'API. KissKH ne donne pas un
+   *  lien de lecteur mais un manifeste et ses sous-titres : il n'a rien à
+   *  faire dans `links`, qui ne transporte qu'une URL. */
+  readonly ready: RawStream[] = [];
   readonly countByVia: Record<string, number> = {};
 
   /** Déclare la page d'où proviennent les liens d'un site, quand l'API la
@@ -139,7 +155,7 @@ async function internalId(domain: string, tmdbId: string, title: string): Promis
   }, { shouldCache: v => v !== null });
 }
 
-interface Probe {
+export interface Probe {
   name: string;
   /** null = la sonde ne couvre pas ce type de contenu. */
   url(): string | null;
@@ -149,7 +165,7 @@ interface Probe {
 /** Les sondes de l'API movix. Chacune parle le dialecte du site qu'elle
  *  interroge : la forme des réponses n'est pas homogène, d'où un `collect`
  *  par sonde plutôt qu'un parseur unique. */
-function probes(domain: string, req: MediaRequest, movixId: string | null): Probe[] {
+export function probes(domain: string, req: MediaRequest, movixId: string | null): Probe[] {
   const api = (p: string) => `https://api.${domain}${p}`;
   const isTv = req.type === 'series';
   const id = req.tmdbId;
@@ -159,11 +175,47 @@ function probes(domain: string, req: MediaRequest, movixId: string | null): Prob
   return [
     {
       name: 'Direct',
+      // `/api/films/...` et non `/api/movies/...` : l'API monte cette route
+      // sous « films ». La sonde répondait 404 sur chaque film.
       url: () => !movixId ? null : isTv
         ? api(`/api/series/download/${movixId}/season/${s}/episode/${e}`)
-        : api(`/api/movies/download/${movixId}`),
+        : api(`/api/films/download/${movixId}`),
       collect: (j, out) => (j?.sources ?? []).forEach((x: any) =>
         out.add(x?.m3u8 ?? x?.src, x?.language, x?.quality, 'movix')),
+    },
+    {
+      // KissKH rend un manifeste HLS et ses sous-titres, pas un lecteur : rien
+      // à extraire, le flux est prêt. Il répond 202 le temps de résoudre en
+      // arrière-plan — on ne réessaie pas, ce serait au budget du scraper.
+      name: 'KissKH',
+      url: () => isTv
+        ? api(`/api/kisskh/tv/${id}?season=${s}&episode=${e}`)
+        : api(`/api/kisskh/movie/${id}`),
+      collect: (j, out) => {
+        const subtitles = (j?.subtitles ?? [])
+          .map((t: any) => ({ lang: toIso639_2(String(t?.lang ?? t?.label ?? '')), url: t?.proxyUrl ?? t?.sourceUrl }))
+          .filter((t: any) => typeof t.url === 'string' && t.url.startsWith('http'));
+
+        for (const src of j?.sources ?? []) {
+          if (typeof src?.url !== 'string' || !src.url.startsWith('http')) continue;
+          out.ready.push({
+            url: src.url,
+            quality: normalizeQuality(String(src?.quality ?? '')),
+            language: audioLabel('VOSTFR'),
+            server: `${src?.label ?? 'KissKH'} (kisskh)`,
+            container: src?.type === 'hls' || src.url.includes('.m3u8') ? 'hls' : 'mp4',
+            subtitles: subtitles.length > 0 ? subtitles : undefined,
+          });
+        }
+      },
+    },
+    {
+      // Voirdrama ne connaît que les séries asiatiques : un 404 y est la
+      // réponse normale pour tout le reste, pas un incident.
+      name: 'Voirdrama',
+      url: () => !isTv ? null : api(`/api/drama/tv/${id}?season=${s}&episode=${e}`),
+      collect: (j, out) => (j?.data ?? []).forEach((p: any) =>
+        out.add(p?.link, 'VOSTFR', null, 'voirdrama')),
     },
     {
       name: 'TMDB',
@@ -387,11 +439,16 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
     await Promise.all(probes(domain, req, movixId).map(async probe => {
       const url = probe.url();
       if (!url) return;
-      const before = out.links.length;
+      // Les deux compteurs, sinon une sonde qui ne rend que des flux prêts
+      // (KissKH) s'annonce à « 0 lien » alors qu'elle vient d'en donner un.
+      const avant = out.links.length;
+      const avantPrets = out.ready.length;
       try {
         const json = await getJson<any>(url);
         if (json) probe.collect(json, out);
-        log.debug(`sonde ${probe.name}: ${out.links.length - before} lien(s)`);
+        const liens = out.links.length - avant;
+        const prets = out.ready.length - avantPrets;
+        log.debug(`sonde ${probe.name}: ${liens} lien(s)${prets > 0 ? ` + ${prets} flux prêt(s)` : ''}`);
       } catch (e) {
         log.debug(`sonde ${probe.name}: ${e instanceof Error ? e.message : e}`);
       }
@@ -448,7 +505,7 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
     }));
   }));
 
-  return resolved.flat();
+  return [...out.ready, ...resolved.flat()];
 }
 
 export const movix: Scraper = {
