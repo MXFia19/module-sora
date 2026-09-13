@@ -1,7 +1,7 @@
 import { getText, origin, absolute } from '../http';
 import { cached } from '../cache';
 import { logger } from '../log';
-import { unpackAll, findMediaUrl } from './unpack';
+import { unpackAll, findMediaUrl, declaredHlsLink } from './unpack';
 import { extractEmbed4me } from './embed4me';
 import { extractFsvid } from './fsvid';
 import { extractByse, isBysePage } from './byse';
@@ -167,8 +167,18 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
 
   // Le lecteur d'arrivée est très souvent un VOE, dont l'URL est chiffrée et
   // qu'aucune regex générique ne trouverait.
+  // Trois façons d'obtenir l'URL, et elles ne se valent pas. Le déchiffrement
+  // VOE et le bloc `links` de la page sont des identifications positives : la
+  // page dit elle-même que c'est là. La recherche de la première URL de média,
+  // elle, devine — et c'est la seule qui a besoin du garde-fou d'extension,
+  // sans quoi elle rendrait des pages HTML et des images. L'appliquer aux
+  // trois écartait les manifestes servis en `.txt`, ce que fait hls3.
   const voe = decodeVoe(html);
-  const url = voe ?? findMediaUrl(html) ?? findMediaUrl(unpackAll(html));
+  const depacke = unpackAll(html);
+  const declare = declaredHlsLink(html, page) ?? declaredHlsLink(depacke, page);
+  const devine = findMediaUrl(html) ?? findMediaUrl(depacke);
+
+  const url = voe ?? declare ?? (devine && looksLikeMedia(devine) ? devine : null);
 
   if (!url) {
     // Page d'enrobage : rien à extraire, juste un cadre autour du vrai
@@ -263,8 +273,7 @@ async function extractOnce(embedUrl: string, referer: string, depth = 0): Promis
       return [];
     }
 
-    const playable = (Array.isArray(result) ? result : [result])
-      .filter(r => isPlayable(r.url) && (host ? true : looksLikeMedia(r.url)));
+    const playable = (Array.isArray(result) ? result : [result]).filter(r => isPlayable(r.url));
 
     if (playable.length === 0) log.debug(`aucune URL jouable depuis ${embedUrl}`);
     return playable;

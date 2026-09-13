@@ -1,6 +1,6 @@
 import { getText, origin } from '../http';
 import { logger } from '../log';
-import { unpackAll, findMediaUrl } from './unpack';
+import { unpackAll, findMediaUrl, declaredHlsLink } from './unpack';
 import type { ExtractedStream } from './index';
 
 const log = logger('HgCloud');
@@ -34,7 +34,9 @@ export async function extractHgCloud(embedUrl: string, referer: string): Promise
     const page = await getText(cible, { headers: { Referer: `${origin(embedUrl)}/` } });
     if (!page) continue;
 
-    const url = findMediaUrl(page) ?? findMediaUrl(unpackAll(page));
+    const depacke = unpackAll(page);
+    const url = declaredHlsLink(page, cible) ?? declaredHlsLink(depacke, cible)
+      ?? findMediaUrl(page) ?? findMediaUrl(depacke);
     if (!url) continue;
 
     log.debug(`${id} résolu via ${miroir}`);
