@@ -502,6 +502,47 @@ right level to attack, not the site.
 
 ---
 
+## 21. AnimeSalt — WordPress DooPlay + getVideo POST
+
+`animesalt.cx`. Nothing encrypted; it all fits in HTML plus two POSTs:
+
+```
+GET  /?s=<text>                       -> <article> pointing at /series/<slug>/
+POST /wp-admin/admin-ajax.php
+     action=action_select_season&season=<n>&post=<id>
+                                      -> the <li> of the requested season
+GET  /episode/<slug>-<S>x<E>/         -> <iframe src="https://as-cdnNN.top/video/<hash>">
+POST https://as-cdnNN.top/player/index.php?data=<hash>&do=getVideo
+     hash=<hash>&r=<referrer>         -> {"hls":true,"videoSource":"…/master.m3u8?md5=…&expires=…"}
+```
+
+The episode page gives the hash **directly in its iframe**. The CDN's player is indeed
+p.a.c.k.e.r-packed (section 4), but unpacking it buys nothing: it only holds the jwplayer
+config, the subtitle tracks and a `ck` field (hex-escaped -> base64 -> 32 hex chars) that
+plays no part in resolution. *Knowing how to unpack is not a reason to unpack — look first
+at what the page already hands over.*
+
+**IP-bound link.** `videoSource` is signed `?md5=…&expires=…` by nginx `secure_link`,
+whose hash includes `remote_addr`. From a player the two calls leave the same machine and
+it is transparent. From a rotating-IP sandbox (`160.79.106.x`, a different address on
+**every request**) the stream returns 403 barring coincidence: across five attempts, a
+single 200 — the one where both requests happened to land on the same egress.
+**That lone 200 made me conclude too quickly that the link was not IP-bound.** Three
+confirmation runs corrected it. *One success does not refute a blocking hypothesis — look
+at the rate, not at the existence of a case that passes.* Same family as FireStream
+(section 15).
+
+Five extra multi-language tracks are listed in
+`multi-lang-plyr/player.php?data=<base64>` — plain JSON
+(`[{"language":"Hindi","link":"https://short.icu/…"}]`) but behind a URL shortener, so
+unresolved. They are reported in diagnostics rather than silently dropped.
+
+| Module | Status |
+|---|---|
+| **animesalt** | ⚠️ chain verified up to `videoSource`; playback not verifiable from a rotating IP |
+
+---
+
 ## 🧱 What held (Part III)
 
 - **anilink.cc** — every call to `/api/internal/streams/<anilistId>/<ep>` carries headers
@@ -541,6 +582,11 @@ right level to attack, not the site.
    resembles the production target's.
 5. **Attack the player, not the site.** Shop windows rotate; the few players they embed
    do not.
+6. **One success does not refute a block.** AnimeSalt's link answered 200 once in five
+   from a rotating IP; I wrongly concluded it was not IP-bound. Look at the rate, not at
+   the existence of a case that passes.
+7. **Knowing how to unpack is not a reason to unpack.** as-cdnNN.top's p.a.c.k.e.r hid
+   only the player config; the useful token sat in the clear in the episode page's iframe.
 
 ---
-*Part III generated 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse`, all three verified live.*
+*Part III generated 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse` (verified live, playback included) and `animesalt` (verified up to the signed link).*

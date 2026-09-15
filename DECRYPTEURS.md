@@ -508,6 +508,49 @@ qui l'embarquent — c'est le bon niveau d'attaque, pas le site.
 
 ---
 
+## 21. AnimeSalt — WordPress DooPlay + POST getVideo
+
+`animesalt.cx`. Rien de chiffré, tout tient en HTML et deux POST :
+
+```
+GET  /?s=<texte>                      -> <article> vers /series/<slug>/
+POST /wp-admin/admin-ajax.php
+     action=action_select_season&season=<n>&post=<id>
+                                      -> les <li> de la saison demandée
+GET  /episode/<slug>-<S>x<E>/         -> <iframe src="https://as-cdnNN.top/video/<hash>">
+POST https://as-cdnNN.top/player/index.php?data=<hash>&do=getVideo
+     hash=<hash>&r=<referrer>         -> {"hls":true,"videoSource":"…/master.m3u8?md5=…&expires=…"}
+```
+
+La page d'épisode donne le hash **directement dans son iframe**. Le lecteur du CDN est
+bien empaqueté en p.a.c.k.e.r (section 4), mais le dépaqueter ne sert à rien : il ne
+contient que la configuration jwplayer, les pistes de sous-titres et un champ `ck`
+(hex-échappé → base64 → 32 hexa) qui ne participe pas à la résolution. *Dépaqueter parce
+qu'on sait le faire n'est pas une raison de le faire — regarder d'abord ce que la page
+donne déjà.*
+
+**Lien lié à l'IP.** `videoSource` est signé `?md5=…&expires=…` par le `secure_link`
+nginx, dont l'empreinte inclut `remote_addr`. Depuis un lecteur, les deux appels partent
+de la même machine et c'est transparent. Depuis un bac à sable à IP tournante
+(`160.79.106.x`, une adresse différente **à chaque requête**), le flux rend 403 sauf
+coïncidence : sur cinq essais, un seul 200, celui où les deux requêtes sont retombées par
+hasard sur la même sortie. **Ce 200 isolé m'a fait conclure trop vite que le lien n'était
+pas lié à l'IP.** Trois essais de confirmation ont corrigé le tir. *Un seul succès ne
+réfute pas une hypothèse de blocage — c'est le taux qu'il faut regarder, pas l'existence
+d'un cas qui passe.* Même famille que FireStream (section 15).
+
+Cinq pistes multilingues supplémentaires sont listées dans
+`multi-lang-plyr/player.php?data=<base64>` — du JSON en clair
+(`[{"language":"Hindi","link":"https://short.icu/…"}]`) mais derrière un raccourcisseur,
+donc non résolues. Elles sont signalées dans les diagnostics plutôt que passées sous
+silence.
+
+| Module | Statut |
+|---|---|
+| **animesalt** | ⚠️ chaîne vérifiée jusqu'à `videoSource` ; lecture non vérifiable depuis une IP tournante |
+
+---
+
 ## 🧱 Ce qui a résisté (partie III)
 
 - **anilink.cc** — chaque appel à `/api/internal/streams/<anilistId>/<ep>` porte des
@@ -547,6 +590,12 @@ qui l'embarquent — c'est le bon niveau d'attaque, pas le site.
    client dont la pile ressemble à celle de la cible de production.
 5. **Attaquer le lecteur, pas le site.** Les vitrines tournent ; les quelques lecteurs
    qu'elles embarquent, non.
+6. **Un seul succès ne réfute pas un blocage.** Le lien d'AnimeSalt a répondu 200 une
+   fois sur cinq depuis une IP tournante ; j'en ai conclu à tort qu'il n'était pas lié à
+   l'adresse. C'est le taux qu'il faut regarder, pas l'existence d'un cas qui passe.
+7. **Dépaqueter parce qu'on sait le faire n'est pas une raison de le faire.** Le
+   p.a.c.k.e.r d'as-cdnNN.top ne cachait que la configuration du lecteur ; le jeton utile
+   était en clair dans l'iframe de la page d'épisode.
 
 ---
-*Partie III générée le 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse`, tous trois vérifiés en direct.*
+*Partie III générée le 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse` (vérifiés en direct, lecture comprise) et `animesalt` (vérifié jusqu'au lien signé).*
