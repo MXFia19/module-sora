@@ -85,6 +85,14 @@ export const config = {
    *  qui n'a rien à faire sur une instance ouverte au public. */
   get debugUi(): boolean { return bool('DEBUG_UI', false); },
 
+  /** Fichier où le journal en direct survit aux redémarrages.
+   *
+   *  Vide = rien n'est écrit, et le journal repart de zéro à chaque
+   *  redémarrage — le comportement d'origine. Le docker-compose pointe ce
+   *  réglage sur un volume ; sans volume, écrire dans le conteneur ne servirait
+   *  à rien puisque le fichier partirait avec lui. */
+  get liveLogFile(): string { return str('LIVE_LOG_FILE', ''); },
+
   /** Verbosité. 'debug' trace chaque requête HTTP sortante. */
   get logLevel(): 'debug' | 'info' | 'warn' | 'error' {
     return str('LOG_LEVEL', 'info') as 'debug' | 'info' | 'warn' | 'error';

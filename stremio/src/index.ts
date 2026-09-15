@@ -16,7 +16,7 @@ import { search, trending } from './catalog';
 import * as history from './history';
 import { livePage } from './livepage';
 import { runDiagnostic } from './debug';
-import { pushRequest, snapshot, subscribe, subscriberCount } from './livelog';
+import { pushRequest, purge, restore, snapshot, subscribe, subscriberCount } from './livelog';
 import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
 import type { MediaType, RawStream } from './types';
 
@@ -331,6 +331,10 @@ if (config.debugUi) {
 
   /** Historique des diagnostics : la liste, puis un rapport complet à la
    *  demande. Le rapport pèse trop pour être renvoyé avec la liste. */
+  /** « Effacer » de la console : en mémoire ET sur disque, sinon tout
+   *  reviendrait au redémarrage suivant. */
+  app.post('/debug/live/clear', (_req, res) => res.json({ cleared: purge() }));
+
   app.get('/debug/history', (_req, res) => res.json({ runs: history.list() }));
 
   app.get('/debug/history/:id', (req, res) => {
@@ -392,6 +396,13 @@ if (require.main === module) {
   if (!config.tmdbApiKey) {
     log.error('TMDB_API_KEY manquante — l\'addon ne peut résoudre aucun identifiant. Voir .env.example.');
   }
+  // Avant d'écouter : le journal relit sa fin, pour que /debug/live montre
+  // déjà l'avant-redémarrage plutôt qu'une page blanche.
+  if (config.debugUi && config.liveLogFile) {
+    const repris = restore();
+    if (repris) log.info(`journal repris : ${repris} événement(s) depuis ${config.liveLogFile}`);
+  }
+
   app.listen(config.port, () => {
     log.info(`en écoute sur ${publicBase()}/manifest.json`);
     log.info(`sources actives: ${enabledScrapers().map(s => s.id).join(', ') || 'aucune'}`);

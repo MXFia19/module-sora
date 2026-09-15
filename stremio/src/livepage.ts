@@ -107,6 +107,26 @@ let logs = [];
 
 function hhmmss(t) { return new Date(t).toLocaleTimeString('fr-FR'); }
 
+/* La date, pas seulement l'heure : le journal survit maintenant aux
+   redémarrages, donc une ligne à « 17:10:26 » peut dater d'avant-hier. Le jour
+   n'est affiché que s'il n'est pas aujourd'hui — l'écrire sur chaque ligne
+   d'une session en cours n'apporterait rien et mangerait la largeur. */
+const AUJOURDHUI = new Date().toDateString();
+
+function quand(t) {
+  const d = new Date(t);
+  const jour = d.toDateString() === AUJOURDHUI
+    ? ''
+    : d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ';
+  return jour + d.toLocaleTimeString('fr-FR');
+}
+
+/** Date complète, pour les infobulles et le presse-papier. */
+function quandComplet(t) {
+  return new Date(t).toLocaleString('fr-FR',
+    { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -136,7 +156,7 @@ function addRequest(r) {
 
   el.innerHTML =
     '<div class="rh">' +
-      '<span class="badge">' + hhmmss(r.at) + '</span>' +
+      '<span class="badge" title="' + quandComplet(r.at) + '">' + quand(r.at) + '</span>' +
       '<span class="ti">' + esc(r.title || r.id) + '</span>' +
       '<span class="id">' + esc(r.id) + '</span>' +
       (r.nickname ? '<span class="badge">' + esc(r.nickname) + '</span>' : '') +
@@ -172,7 +192,8 @@ function lineHtml(l, q) {
     const needle = esc(q).replace(/[.*+?^\${}()|[\]\\\\]/g, '\\\\$&');
     msg = msg.replace(new RegExp(needle, 'gi'), m => '<mark>' + m + '</mark>');
   }
-  return '<span class="sc" data-s="' + esc(l.scope) + '">' + hhmmss(l.at) + ' ' + esc(l.scope) + '</span>  ' + msg;
+  return '<span class="sc" data-s="' + esc(l.scope) + '" title="' + quandComplet(l.at) + '">' +
+    quand(l.at) + ' ' + esc(l.scope) + '</span>  ' + msg;
 }
 
 function renderLogs(keepScroll) {
@@ -224,10 +245,13 @@ $('#pause').addEventListener('click', () => {
   $('#pause').classList.toggle('on', paused);
 });
 
-$('#clear').addEventListener('click', () => {
+$('#clear').addEventListener('click', async () => {
   logs = [];
   renderLogs();
   $('#reqs').innerHTML = '<p class="empty">En attente d\\'une requête…</p>';
+  // Côté serveur aussi : effacer seulement l'écran laisserait le journal
+  // revenir en entier au prochain redémarrage.
+  try { await fetch('/debug/live/clear', { method: 'POST' }); } catch (e) { /* l'écran est déjà vide */ }
 });
 
 $('#lvl').addEventListener('change', () => renderLogs());
@@ -244,7 +268,7 @@ $('#raw').addEventListener('click', ev => {
 
 $('#copy').addEventListener('click', async () => {
   const text = visible()
-    .map(l => hhmmss(l.at) + '  ' + l.scope + '  ' + l.message)
+    .map(l => quandComplet(l.at) + '  ' + l.scope + '  ' + l.message)
     .join('\\n');
   if (!text) { toast('Rien à copier'); return; }
 

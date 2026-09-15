@@ -11,9 +11,19 @@ services:
     environment:
       # Le port interne ne bouge pas ; c'est le mapping ci-dessus qui change.
       PORT: 7000
-    # L'addon ne garde rien sur disque : le cache est en mémoire, et le perdre
-    # au redémarrage ne coûte qu'une poignée de requêtes.
+      # Journal de /debug/live, conservé d'un redémarrage à l'autre. Sans le
+      # volume ci-dessous ce fichier partirait avec le conteneur : les deux
+      # vont ensemble.
+      LIVE_LOG_FILE: /data/journal.ndjson
+    # Le cache des sources reste en mémoire — le perdre au redémarrage ne coûte
+    # qu'une poignée de requêtes. Seul le journal mérite le disque : c'est
+    # justement après un redémarrage qu'on veut relire ce qui a précédé.
+    volumes:
+      - sora_journal:/data
     tmpfs:
       - /tmp
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  sora_journal:

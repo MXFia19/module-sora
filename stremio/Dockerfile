@@ -15,6 +15,12 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 
+# Le journal de /debug/live y est écrit quand LIVE_LOG_FILE le demande. Créé
+# ici plutôt que par le volume : un volume nommé hérite des droits du dossier
+# de l'image, et sans ce chown il appartiendrait à root — donc illisible pour
+# l'utilisateur `node` ci-dessous.
+RUN mkdir -p /data && chown node:node /data
+
 # L'addon ne sert que du HTTP : pas de privilèges à conserver.
 USER node
 EXPOSE 7000
