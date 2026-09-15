@@ -474,8 +474,19 @@ time it is not the IP, it is the TLS stack).
 
 VidRift's player ships **unminified and commented** — it states its own cascade
 `['selfhost','vaplayer','vidlove','cinepro']` and its fallback
-`GET /api/source/<type>?token=<playbackToken>&provider=<name>`. Only `selfhost` is
-implemented; the others returned nothing in testing.
+`GET /api/source/<path>?token=<playbackToken>&provider=<name>`.
+
+**Trap on that path**: `sourceTypePath()` returns `movie/<id>` or
+`tv/<id>/<season>/<episode>`, id included. A first attempt on bare `/api/source/movie`
+returned 404, which I first read as a dead fallback — it was a truncated path. With the
+right path, `vaplayer` (source "earth") and `vidlove` (source "star") each return three
+streams; `cinepro` answers 502. In their response `url` is **always empty**: `proxyUrl`
+carries the stream, absolute for vaplayer (`relay.vidrift.in/proxy?url=`), relative for
+vidlove (`/api/proxy/hls?url=`).
+
+The relays matter: VidRift does not always serve the same title self-hosted from one
+request to the next. Inception came back `selfhost` on one run and `vaplayer` on another.
+Without the relays the module returned a single link, sometimes none; with them, six.
 
 ---
 

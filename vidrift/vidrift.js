@@ -16,6 +16,12 @@
 //   - reelvault.click/s/<base64>.<hmac>/vod.m3u8     (signé, périssable)
 // La seconde forme est parfois signée pour un titre absent du CDN : on sonde
 // donc le lien avant de le rendre, plutôt que de promettre un flux mort.
+//
+// Quand l'auto-hébergement manque (ou en plus de lui), le lecteur bascule sur
+// une cascade de relais, qu'il déclare lui-même dans son code non minifié :
+//   GET /api/source/<movie/<id>|tv/<id>/<s>/<e>>?token=<playbackToken>&provider=<nom>
+//   -> {success, source, quality, streams:[{index, url, proxyUrl, type}], subtitles}
+// « url » y est vide : tout passe par « proxyUrl », parfois relatif.
 
 const VR_EMBED = "https://embed.vidrift.in";
 const TMDB_API = "https://api.themoviedb.org/3";
@@ -116,6 +122,27 @@ function parseSubtitleList(html) {
         const list = JSON.parse(match[1]);
         return Array.isArray(list) ? list : [];
     } catch (e) { return []; }
+}
+
+// Relais déclarés par le lecteur, dans son ordre de préférence. « selfhost »
+// est traité à part (il est lu dans embedMeta, sans appel).
+const VR_RELAIS = ["vaplayer", "vidlove", "cinepro"];
+
+// Le chemin attendu par /api/source reprend l'identifiant, et pour une série
+// la saison et l'épisode.
+function sourcePath(ref) {
+    return ref.kind === 'tv'
+        ? `tv/${ref.id}/${ref.season}/${ref.episode}`
+        : `movie/${ref.id}`;
+}
+
+async function vrRelais(ref, token, provider) {
+    const query = `token=${encodeURIComponent(token)}&provider=${encodeURIComponent(provider)}`;
+    const url = `${VR_EMBED}/api/source/${sourcePath(ref)}?${query}`;
+    const headers = { "User-Agent": VR_UA, "Accept": "application/json", "Referer": `${VR_EMBED}/` };
+    const body = await readBody(await soraFetch(url, { method: 'GET', headers: headers }));
+    if (!body) return null;
+    try { return JSON.parse(body); } catch (e) { return null; }
 }
 
 // Un lien signé peut désigner un titre absent du CDN : on demande deux octets
@@ -333,6 +360,52 @@ async function extractStreamUrl(url) {
             }
         } else {
             failedLinks.push({ server_name: "VidRift Direct", url: mediaUrl, reason: `Aucun selfhostUrl (provider=${meta.provider})` });
+        }
+
+        // Les relais : ils couvrent les titres que VidRift n'auto-héberge pas,
+        // et ajoutent des qualités à ceux qu'il héberge.
+        if (meta.playbackToken) {
+            for (const provider of VR_RELAIS) {
+                const data = await vrRelais(ref, meta.playbackToken, provider);
+
+                if (!data || !Array.isArray(data.streams) || data.streams.length === 0) {
+                    failedLinks.push({ server_name: provider, url: `${VR_EMBED}/api/source/${sourcePath(ref)}`, reason: "Aucun flux renvoyé" });
+                    continue;
+                }
+
+                const etiquette = data.source || provider;
+                for (const stream of data.streams) {
+                    // « url » est systématiquement vide côté VidRift : c'est
+                    // « proxyUrl » qui porte le flux, parfois en relatif.
+                    let streamUrl = stream.proxyUrl || stream.url || "";
+                    if (!streamUrl) continue;
+                    if (streamUrl.charAt(0) === '/') streamUrl = `${VR_EMBED}${streamUrl}`;
+                    if (streams.some(s => s.streamUrl === streamUrl)) continue;
+
+                    const qualite = data.quality || stream.type || 'HLS';
+                    streams.push({
+                        title: `VidRift ${etiquette} ${stream.index + 1} (${qualite})`,
+                        streamUrl: streamUrl,
+                        headers: { "Referer": `${VR_EMBED}/`, "User-Agent": VR_UA }
+                    });
+                    console.log(`   -> ${provider}/${etiquette} #${stream.index + 1}`);
+                }
+
+                // Chaque relais porte sa propre liste de sous-titres.
+                if (Array.isArray(data.subtitles)) {
+                    for (const caption of data.subtitles) {
+                        const subUrl = caption.url || caption.src || caption.file || "";
+                        if (!subUrl) continue;
+                        if (allSubtitles.some(s => s.url === subUrl)) continue;
+                        allSubtitles.push({
+                            url: subUrl,
+                            label: caption.label || caption.language || caption.lang || provider,
+                            kind: "captions",
+                            headers: { "Referer": `${VR_EMBED}/` }
+                        });
+                    }
+                }
+            }
         }
 
         for (const caption of parseSubtitleList(html)) {

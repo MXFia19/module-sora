@@ -480,8 +480,19 @@ partie II, dans une variante nouvelle : ce n'est pas l'IP cette fois, c'est la p
 
 Le lecteur de VidRift est livré **non minifié et commenté** — il annonce lui-même sa
 cascade `['selfhost','vaplayer','vidlove','cinepro']` et son repli
-`GET /api/source/<type>?token=<playbackToken>&provider=<nom>`. Seul `selfhost` est
-implémenté ; les autres n'ont rien rendu aux essais.
+`GET /api/source/<chemin>?token=<playbackToken>&provider=<nom>`.
+
+**Piège sur ce chemin** : `sourceTypePath()` rend `movie/<id>` ou
+`tv/<id>/<saison>/<épisode>`, identifiant compris. Un premier essai sur `/api/source/movie`
+tout court a rendu 404, ce que j'ai d'abord pris pour un repli mort — c'était un chemin
+tronqué. Avec le bon chemin, `vaplayer` (source « earth ») et `vidlove` (source « star »)
+rendent chacun trois flux ; `cinepro` répond 502. Dans leur réponse, `url` est
+**systématiquement vide** : c'est `proxyUrl` qui porte le flux, absolu pour vaplayer
+(`relay.vidrift.in/proxy?url=`), relatif pour vidlove (`/api/proxy/hls?url=`).
+
+Les relais comptent : VidRift ne sert pas toujours le même titre en auto-hébergé d'une
+requête à l'autre. Inception est sorti en `selfhost` à un essai, en `vaplayer` à un autre.
+Sans les relais le module rendait un seul lien, parfois zéro ; avec eux, six.
 
 ---
 
