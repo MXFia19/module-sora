@@ -49,6 +49,17 @@ interface TmdbDetails {
 /** id IMDb (tt…) -> id TMDB. Stremio livre presque toujours du IMDb ; les
  *  sources, elles, sont keyées TMDB. C'est la seule vraie glu à ajouter au
  *  portage depuis Sora, qui partait d'une recherche par titre. */
+/** Appel TMDB brut, pour ce qui ne rentre pas dans les fonctions ci-dessous
+ *  (le catalogue de la page de diagnostic). Exporté plutôt que recopié : c'est
+ *  ici que vivent les deux formes de clé et l'en-tête Bearer du jeton v4. */
+export async function tmdbGet<T = any>(
+  path: string,
+  params: Record<string, string | number> = {},
+  key?: string,
+): Promise<T | null> {
+  return getJson<T>(api(path, params, key), { headers: authHeaders(key) });
+}
+
 export async function imdbToTmdb(imdbId: string, type: MediaType, key?: string): Promise<string | null> {
   return cached(`tmdb:find:${imdbId}:${type}`, async () => {
     const data = await getJson<any>(

@@ -12,6 +12,7 @@ import { decodeConfig, applyConfig, DEFAULT_CONFIG } from './userconfig';
 import type { UserConfig } from './userconfig';
 import { configurePage } from './configure';
 import { debugPage } from './debugpage';
+import { search, trending } from './catalog';
 import { livePage } from './livepage';
 import { runDiagnostic } from './debug';
 import { pushRequest, snapshot, subscribe, subscriberCount } from './livelog';
@@ -310,6 +311,21 @@ if (config.debugUi) {
       clearInterval(ping);
       unsubscribe();
     });
+  });
+
+  /** Catalogue de la page de diagnostic : une grille d'affiches plutôt qu'un
+   *  identifiant à taper de mémoire. */
+  app.get('/debug/catalog', async (req, res) => {
+    const q = String(req.query.q ?? '').trim();
+    try {
+      const items = q
+        ? await search(q)
+        : await trending(req.query.type === 'series' ? 'series' : 'movie');
+      res.json({ items });
+    } catch (e) {
+      log.error('catalogue en échec:', e);
+      res.json({ items: [], error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   app.get('/debug/run', async (req, res) => {

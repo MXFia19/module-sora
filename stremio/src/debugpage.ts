@@ -57,6 +57,20 @@ td.u{color:var(--dim);font-family:ui-monospace,monospace;font-size:.75rem;word-b
 .pill.y{background:#12261a;color:var(--ok)} .pill.n{background:#2a1315;color:var(--err)}
 .pill.p{background:#1c2333;color:#79c0ff}
 .pill.d{background:#20221c;color:#d29922}
+.tabs{display:flex;gap:.4rem;margin-bottom:.8rem;flex-wrap:wrap;align-items:center}
+.tab{padding:.35rem .8rem;border-radius:999px;border:1px solid var(--line);background:#21262d;
+ color:var(--dim);font:inherit;font-size:.82rem;cursor:pointer;font-weight:400}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tabs input{flex:1;min-width:10rem;font-size:.85rem;padding:.35rem .6rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(7.2rem,1fr));gap:.6rem}
+.tile{background:#0d1117;border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;
+ text-align:left;padding:0;color:inherit;font:inherit;font-weight:400;display:flex;flex-direction:column}
+.tile:hover{border-color:var(--accent)}
+.tile img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#161b22}
+.tile .ph{width:100%;aspect-ratio:2/3;display:grid;place-items:center;color:var(--skip);font-size:.7rem;background:#161b22}
+.tile .tt{padding:.35rem .45rem;font-size:.75rem;line-height:1.3;overflow:hidden;
+ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.tile .yr{padding:0 .45rem .35rem;font-size:.68rem;color:var(--dim)}
 pre{background:#0d1117;border:1px solid var(--line);border-radius:7px;padding:.6rem;margin:.7rem 0 0;
  overflow:auto;max-height:20rem;font-size:.76rem;line-height:1.45}
 pre .debug{color:var(--dim)} pre .warn{color:var(--warn)} pre .error{color:var(--err)}
@@ -100,6 +114,15 @@ pre .debug{color:var(--dim)} pre .warn{color:var(--warn)} pre .error{color:var(-
     <a data-t="series" data-i="tt0944947" data-s="1" data-e="1">Game of Thrones S1E1</a>
     <a data-t="series" data-i="tt2560140" data-s="1" data-e="1">L'Attaque des Titans S1E1</a>
   </p>
+</div>
+
+<div class="bar">
+  <div class="tabs">
+    <button class="tab on" id="t-movie" data-c="movie">Films tendance</button>
+    <button class="tab" id="t-series" data-c="series">Séries tendance</button>
+    <input type="text" id="q" placeholder="ou cherche un titre…">
+  </div>
+  <div class="grid" id="cat"></div>
 </div>
 
 <div id="out"></div>
@@ -147,7 +170,7 @@ function streamsHtml(streams, count) {
     return '<tr><td>' + esc(s.language) + '</td><td>' + esc(s.quality) + '</td>' +
       '<td>' + esc(s.server) +
         (s.proxied ? ' <span class="pill p">proxy</span>'
-          : s.relaxed ? ' <span class="pill d" title="le scraper demandait des headers ; PROBE_DIRECT a jugé l\'hôte capable de s\'en passer">direct (sondé)</span>'
+          : s.relaxed ? ' <span class="pill d" title="le scraper demandait des headers ; PROBE_DIRECT a jugé l\\'hôte capable de s\\'en passer">direct (sondé)</span>'
           : '') + '</td>' +
       '<td>' + esc(s.host) + '</td><td>' + verdict + '</td>' +
       '<td class="u">' + esc(s.url.slice(0, 110)) + '</td></tr>';
@@ -206,6 +229,68 @@ function render(r) {
   document.querySelectorAll('.card.s-vide, .card.s-erreur, .card.s-timeout')
     .forEach(c => c.classList.add('open'));
 }
+
+/* ------------------------------- catalogue ------------------------------- */
+/* Une grille d'affiches plutot qu'un identifiant a taper de memoire. Cliquer
+   une vignette remplit le formulaire et lance le test : c'est le geste qu'on
+   fait vingt fois en deboguant une source. */
+
+let onglet = 'movie';
+
+function tuiles(items) {
+  if (!items.length) return '<p class="note">Rien à afficher.</p>';
+  return items.map(i =>
+    '<button class="tile" data-i="' + esc(i.id) + '" data-t="' + esc(i.type) + '">' +
+    (i.poster
+      ? '<img loading="lazy" src="' + esc(i.poster) + '" alt="">'
+      : '<div class="ph">sans affiche</div>') +
+    '<div class="tt">' + esc(i.title) + '</div>' +
+    '<div class="yr">' + esc(i.year || '') +
+      (i.type === 'series' ? ' · série' : '') +
+      (i.rating ? ' · ' + i.rating : '') +
+    '</div></button>').join('');
+}
+
+async function catalogue(q) {
+  const cible = $('#cat');
+  cible.innerHTML = '<p class="note">Chargement…</p>';
+  try {
+    const p = new URLSearchParams(q ? { q } : { type: onglet });
+    const r = await (await fetch('/debug/catalog?' + p)).json();
+    cible.innerHTML = r.error
+      ? '<p class="note">Catalogue indisponible : ' + esc(r.error) + '</p>'
+      : tuiles(r.items || []);
+
+    cible.querySelectorAll('.tile').forEach(b => b.addEventListener('click', () => {
+      $('#id').value = b.dataset.i;
+      $('#type').value = b.dataset.t;
+      toggleType();
+      run();
+      // La page est longue une fois le verdict affiche : on y emmene l'oeil.
+      $('#out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+  } catch (e) {
+    cible.innerHTML = '<p class="note">Catalogue injoignable : ' + esc(e.message) + '</p>';
+  }
+}
+
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => {
+  onglet = b.dataset.c;
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
+  $('#q').value = '';
+  catalogue('');
+}));
+
+/* Recherche au fil de la frappe, mais pas a chaque touche : TMDB n'aime pas,
+   et l'utilisateur non plus quand la grille clignote. */
+let minuteur = null;
+$('#q').addEventListener('input', () => {
+  clearTimeout(minuteur);
+  const q = $('#q').value.trim();
+  minuteur = setTimeout(() => catalogue(q), 350);
+});
+
+catalogue('');
 
 async function run() {
   const p = new URLSearchParams({
