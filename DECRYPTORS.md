@@ -400,3 +400,147 @@ instead of an undifferentiated "nothing extracted".
 
 ---
 *Part II written 2026-09-13 — Stremio addon, 104 tests. Mechanisms, not line numbers: code moves.*
+
+---
+
+# Part III — Crypto-free sources (Sora modules, 2026-09-15)
+
+Three sources from the bookmark list. None of them encrypts anything: the value is in
+**mapping the API**, not in breaking a cipher. Hence the rule they confirm: *look for the
+API before looking for the crypto.*
+
+## 18. VidHawk — ticket chain, unsigned
+
+`vidhawk.buzz`, keyed by **AniList** id. Acts as the host behind several of the bookmarked
+anime sites (aniclipse among them).
+
+```
+GET /api/stream/race?episode=&audio=&server=&anilistId=
+    -> {winner, ticket, servers:[{id,label,ticket,ok,ms}], anilistId, malId, episode}
+GET /api/play?t=<ticket>
+    -> {tracks:[{id,label,src}], captions:{sub:[…]}, intro:{start,end}, outro:{…}}
+```
+
+The ticket is opaque (~1,950 characters) but **nothing signs it client-side**: relay it
+as is. Two servers (`flow`, `zuri`) x four audio tracks (`sub`, `dub`, `jpn`, `hin`) =
+8 streams per episode. The `.m3u8` come out of `proxy.vidhawk.buzz` and answer **without
+a Referer**.
+
+**Trap**: the `stream=1` parameter switches `/api/stream/race` to NDJSON over a held-open
+connection. That is what the site's player does, and it is unusable from Sora, which waits
+for the end of the body — a `fetch` on it never returns. Without `stream=1` the same route
+answers in one block in ~1 s. *Do not copy the browser's request without asking what it
+implies for a client that is not a browser.*
+
+| Module | Status |
+|---|---|
+| **vidhawk** | ✅ standalone — AniList catalogue (public GraphQL) |
+| **aniclipse** | ✅ reuses the same chain |
+
+---
+
+## 19. VidRift — everything in the clear in the embed page
+
+`embed.vidrift.in`, keyed by **TMDB** id, movies **and** TV. The host behind cinezo and
+other bookmarked catalogues.
+
+The page declares two plain variables just before `</body>`:
+
+```js
+var <subs>    = [{"code":"en","label":"English","url":"…/api/subtitles/movie/27205/English"}, …];
+var embedMeta = {"tmdbId":"27205","type":"movie","provider":"selfhost",
+                 "playbackToken":"<JWT>","selfhostUrl":"https://cdn.vidrift.net/movie_27205/vod.m3u8",
+                 "selfhostKind":"hls", …};
+```
+
+Two link shapes coexist:
+
+- `cdn.vidrift.net/movie_<id>/vod.m3u8` and `cdn.vidrift.net/tv_<id>/Season%20<S>/S01E01/vod.m3u8`
+  — fixed path, derivable from the TMDB id;
+- `reelvault.click/s/<base64>.<hmac>/vod.m3u8?v=2` — signed, perishable. The base64 decodes
+  to `<epoch>~<url-encoded path>~`.
+
+**Trap**: the second shape is sometimes signed for a title the CDN does not have — the
+server signs the path without checking it exists, and the link returns `404 Not found`.
+Hence the two-byte probe before returning a link. *A well-formed link is not a live link*
+(corollary of Part II rule 4: measure, don't assume).
+
+**Second trap**: VidRift answers `403 Embed this page in an iframe.` to requests it judges
+bare. `curl` gets through; Node's `fetch` is refused **with identical headers** — it is
+undici's TLS fingerprint that Cloudflare rejects, not the headers. The test harness was
+therefore rewired onto `curl`, which is closer to Sora's native HTTP client than undici is.
+*A sandbox 403 may say nothing about the source* (Part II rule 5, in a new variant: this
+time it is not the IP, it is the TLS stack).
+
+VidRift's player ships **unminified and commented** — it states its own cascade
+`['selfhost','vaplayer','vidlove','cinepro']` and its fallback
+`GET /api/source/<type>?token=<playbackToken>&provider=<name>`. Only `selfhost` is
+implemented; the others returned nothing in testing.
+
+---
+
+## 20. Aniclipse — catalogue only, hosts nothing
+
+`aniclipse.com`, AniList-keyed. Open API, no key:
+
+```
+GET /api/anime/search?q=<text>             -> {data:{Page:{media:[…]}}}  (AniList shape)
+GET /api/anime/episodes?anilistId=<id>     -> {episodes:[{number,title,thumbnail,aired,description}],
+                                               tvdbSeriesId, source, fillers}
+GET /api/watch/servers?anilistId=&episode= -> {sub:[…], dub:[…], fast:[…]}
+GET /api/watch/episode?…&server=&type=     -> {url:"<embed>", type:"embed", streams:[]}
+```
+
+`streams` is **always empty**: aniclipse serves no video bytes, it embeds `vidhawk.buzz`,
+`anilink.cc`, `vidbolt.pro` and `kari`. Its contribution lies elsewhere: for Frieren it
+gives **38 titled, illustrated episodes** against AniList's 28 numbered entries, plus the
+filler list.
+
+**Structural finding**: the bookmarked anime sites are only shop windows over a handful of
+AniList-keyed players. Breaking one player serves every site that embeds it — that is the
+right level to attack, not the site.
+
+---
+
+## 🧱 What held (Part III)
+
+- **anilink.cc** — every call to `/api/internal/streams/<anilistId>/<ep>` carries headers
+  computed by `createStreamRequestHeaders`, in a separate 312 KB chunk run through
+  obfuscator.io (self-defending, rotating string table, hex arithmetic). The challenge
+  itself is served in the clear in the HTML
+  (`{id, issuedAt, expiresAt, salt, algorithmVersion:3, identityHash, obfuscatedSeed, mac}`),
+  but the function deriving the headers from it is still to be rebuilt.
+- **vidbolt.pro** — backend `hianime.filmu.in`; `POST /token` returns a JWT whose payload
+  contains **the caller's IP** (`{"ip":"…","iat":…,"exp":…}`), so it is IP-bound like
+  FireStream (section 15). `/episodes?id=21` answers 32 KB with that token, but
+  `/hianime/megaplay?malId=…` returns `{"total":0,"streams":[]}` for **every** id tried
+  (20, 21, 1535, 16498, 113415, 140960, 11061): the scraper is dead upstream, it is not a
+  malformed call. Spotted in passing: `api.movy.lol`, TMDB-keyed with a key hardcoded in
+  the bundle, which returns an m3u8 for movies.
+- **anilight.pro** — the domain no longer serves the anime site but a Flexbe landing page.
+  Repurposed, not broken.
+- **cinezo / zorivo** — pure TMDB shells. They only embed third-party players
+  (`embed.vidrift.in`, `player.cinezo.live`, `player.vidlove.cc`, `vidbolt.xyz`,
+  `vidfast.vc`, `vidup.to`). VidRift, the only one in the clear, is done; the other five
+  are SPAs whose player sits in a lazy chunk.
+- **reedstreams.live, vexo.tv, anidap.se** — no DNS. **footstreams.me** resolves but does
+  not answer. **yarrlist.net, dulo.cx** — link directories, not sources.
+
+---
+
+## 📌 Rules learned (Part III)
+
+1. **Look for the API before looking for the crypto.** Three sources in a row needed no
+   decryption at all, just reading a route or a page variable.
+2. **Don't copy the browser's request without understanding it.** `stream=1` suited a
+   player that reads a stream as it arrives, and hung Sora indefinitely.
+3. **A well-formed link is not a live link.** VidRift signs paths its CDN does not have;
+   without the probe the module promised dead streams.
+4. **A 403 can come from the tool, not the target.** Same headers, same second: `curl` 200,
+   Node `fetch` 403. It is the TLS fingerprint. Corollary: test with a client whose stack
+   resembles the production target's.
+5. **Attack the player, not the site.** Shop windows rotate; the few players they embed
+   do not.
+
+---
+*Part III generated 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse`, all three verified live.*

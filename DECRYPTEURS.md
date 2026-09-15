@@ -406,3 +406,147 @@ au lieu d'un « rien extrait » indifférencié.
 
 ---
 *Partie II générée le 2026-09-13 — addon Stremio, 104 tests. Les mécanismes, pas les numéros de ligne : le code bouge.*
+
+---
+
+# Partie III — Sources sans crypto (modules Sora du 2026-09-15)
+
+Trois sources tirées de la liste de favoris. Aucune des trois ne chiffre quoi que ce
+soit : la valeur est dans la **cartographie de l'API**, pas dans un déchiffrement.
+D'où la règle qu'elles confirment : *chercher l'API avant de chercher la crypto*.
+
+## 18. VidHawk — chaîne de tickets, sans signature
+
+`vidhawk.buzz`, indexé par identifiant **AniList**. Sert d'hébergeur à plusieurs sites
+d'animés des favoris (aniclipse entre autres).
+
+```
+GET /api/stream/race?episode=&audio=&server=&anilistId=
+    -> {winner, ticket, servers:[{id,label,ticket,ok,ms}], anilistId, malId, episode}
+GET /api/play?t=<ticket>
+    -> {tracks:[{id,label,src}], captions:{sub:[…]}, intro:{start,end}, outro:{…}}
+```
+
+Le ticket est opaque (≈1 950 caractères) mais **rien ne le signe côté client** : on le
+relaie tel quel. Deux serveurs (`flow`, `zuri`) × quatre pistes audio (`sub`, `dub`,
+`jpn`, `hin`) = 8 flux par épisode. Les `.m3u8` sortent par `proxy.vidhawk.buzz` et
+répondent **sans Referer**.
+
+**Piège** : le paramètre `stream=1` fait basculer `/api/stream/race` en NDJSON sur une
+connexion tenue ouverte. C'est ce que fait le lecteur du site, et c'est inutilisable
+depuis Sora, qui attend la fin du corps — un `fetch` dessus ne rend jamais la main.
+Sans `stream=1`, la même route répond d'un bloc en ~1 s. *Ne pas recopier la requête du
+navigateur sans regarder ce qu'elle implique pour un client qui n'est pas un navigateur.*
+
+| Module | Statut |
+|---|---|
+| **vidhawk** | ✅ autonome — catalogue AniList (GraphQL public) |
+| **aniclipse** | ✅ réutilise la même chaîne |
+
+---
+
+## 19. VidRift — tout en clair dans la page d'embarquement
+
+`embed.vidrift.in`, indexé par identifiant **TMDB**, films **et** séries. Hébergeur
+derrière cinezo et d'autres catalogues des favoris.
+
+La page déclare deux variables en clair, juste avant la fermeture du `<body>` :
+
+```js
+var <subs>    = [{"code":"en","label":"English","url":"…/api/subtitles/movie/27205/English"}, …];
+var embedMeta = {"tmdbId":"27205","type":"movie","provider":"selfhost",
+                 "playbackToken":"<JWT>","selfhostUrl":"https://cdn.vidrift.net/movie_27205/vod.m3u8",
+                 "selfhostKind":"hls", …};
+```
+
+Deux formes de lien coexistent :
+
+- `cdn.vidrift.net/movie_<id>/vod.m3u8` et `cdn.vidrift.net/tv_<id>/Season%20<S>/S01E01/vod.m3u8`
+  — chemin fixe, dérivable de l'identifiant TMDB ;
+- `reelvault.click/s/<base64>.<hmac>/vod.m3u8?v=2` — signé, périssable. Le base64 décode
+  en `<epoch>~<chemin url-encodé>~`.
+
+**Piège** : la seconde forme est parfois signée pour un titre que le CDN n'a pas — le
+serveur signe le chemin sans vérifier qu'il existe, et le lien rend `404 Not found`. D'où
+la sonde de deux octets avant de rendre le lien. *Un lien bien formé n'est pas un lien
+vivant* (corollaire de la règle 4 de la partie II : mesurer, ne pas supposer).
+
+**Deuxième piège** : VidRift renvoie `403 Embed this page in an iframe.` aux requêtes
+qu'il juge nues. `curl` passe, le `fetch` de Node se fait refuser **avec les mêmes
+en-têtes** — c'est l'empreinte TLS d'undici que Cloudflare écarte, pas les en-têtes. Le
+harnais de test a donc été rebranché sur `curl`, plus proche du client HTTP natif de Sora
+qu'undici ne l'est. *Un 403 en bac à sable peut ne rien dire de la source* (règle 5 de la
+partie II, dans une variante nouvelle : ce n'est pas l'IP cette fois, c'est la pile TLS).
+
+Le lecteur de VidRift est livré **non minifié et commenté** — il annonce lui-même sa
+cascade `['selfhost','vaplayer','vidlove','cinepro']` et son repli
+`GET /api/source/<type>?token=<playbackToken>&provider=<nom>`. Seul `selfhost` est
+implémenté ; les autres n'ont rien rendu aux essais.
+
+---
+
+## 20. Aniclipse — catalogue seul, n'héberge rien
+
+`aniclipse.com`, indexé AniList. API ouverte, sans clé :
+
+```
+GET /api/anime/search?q=<texte>            -> {data:{Page:{media:[…]}}}  (format AniList)
+GET /api/anime/episodes?anilistId=<id>     -> {episodes:[{number,title,thumbnail,aired,description}],
+                                               tvdbSeriesId, source, fillers}
+GET /api/watch/servers?anilistId=&episode= -> {sub:[…], dub:[…], fast:[…]}
+GET /api/watch/episode?…&server=&type=     -> {url:"<embarquement>", type:"embed", streams:[]}
+```
+
+`streams` est **toujours vide** : aniclipse ne sert aucun octet de vidéo, il embarque
+`vidhawk.buzz`, `anilink.cc`, `vidbolt.pro` et `kari`. Son apport est ailleurs : pour
+Frieren il donne **38 épisodes titrés et illustrés**, contre 28 entrées numérotées chez
+AniList, plus les hors-série.
+
+**Trouvaille structurante** : les sites d'animés de la liste ne sont que des vitrines
+au-dessus d'une poignée de lecteurs keyés AniList. Casser un lecteur sert tous les sites
+qui l'embarquent — c'est le bon niveau d'attaque, pas le site.
+
+---
+
+## 🧱 Ce qui a résisté (partie III)
+
+- **anilink.cc** — chaque appel à `/api/internal/streams/<anilistId>/<ep>` porte des
+  en-têtes calculés par `createStreamRequestHeaders`, dans un chunk séparé de 312 ko passé
+  à obfuscator.io (auto-défense, table de chaînes tournante, arithmétique hexadécimale).
+  Le défi lui-même est servi en clair dans le HTML
+  (`{id, issuedAt, expiresAt, salt, algorithmVersion:3, identityHash, obfuscatedSeed, mac}`),
+  mais la fonction qui en dérive les en-têtes reste à reconstruire.
+- **vidbolt.pro** — backend `hianime.filmu.in`, `POST /token` rend un JWT dont la charge
+  utile contient **l'IP du demandeur** (`{"ip":"…","iat":…,"exp":…}`), donc lié à l'IP
+  comme FireStream (section 15). `/episodes?id=21` répond 32 ko avec ce jeton, mais
+  `/hianime/megaplay?malId=…` rend `{"total":0,"streams":[]}` pour **tous** les
+  identifiants essayés (20, 21, 1535, 16498, 113415, 140960, 11061) : le scraper est mort
+  en amont, ce n'est pas une erreur d'appel. Repérée au passage : `api.movy.lol`, keyée
+  TMDB avec une clé en dur dans le bundle, qui rend un m3u8 pour les films.
+- **anilight.pro** — le domaine ne sert plus le site d'animés mais une page vitrine
+  Flexbe. Site reconverti, pas cassé.
+- **cinezo / zorivo** — coquilles TMDB pures. Elles n'embarquent que des lecteurs tiers
+  (`embed.vidrift.in`, `player.cinezo.live`, `player.vidlove.cc`, `vidbolt.xyz`,
+  `vidfast.vc`, `vidup.to`). VidRift, le seul en clair, est fait ; les cinq autres sont
+  des SPA dont le lecteur est en chunk paresseux.
+- **reedstreams.live, vexo.tv, anidap.se** — plus de DNS. **footstreams.me** résout mais
+  ne répond pas. **yarrlist.net, dulo.cx** — annuaires de liens, pas des sources.
+
+---
+
+## 📌 Règles apprises (partie III)
+
+1. **Chercher l'API avant de chercher la crypto.** Trois sources d'affilée n'ont demandé
+   aucun déchiffrement, juste la lecture d'une route ou d'une variable de page.
+2. **Ne pas recopier la requête du navigateur sans la comprendre.** `stream=1` convenait
+   à un lecteur qui lit un flux au fil de l'eau, et faisait pendre Sora indéfiniment.
+3. **Un lien bien formé n'est pas un lien vivant.** VidRift signe des chemins que son CDN
+   n'a pas ; sans la sonde, le module promettait des flux morts.
+4. **Un 403 peut venir de l'outil, pas de la cible.** Même en-têtes, même seconde :
+   `curl` 200, `fetch` de Node 403. C'est l'empreinte TLS. Corollaire : tester avec un
+   client dont la pile ressemble à celle de la cible de production.
+5. **Attaquer le lecteur, pas le site.** Les vitrines tournent ; les quelques lecteurs
+   qu'elles embarquent, non.
+
+---
+*Partie III générée le 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse`, tous trois vérifiés en direct.*
