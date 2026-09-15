@@ -1,0 +1,23 @@
+{
+    "sourceName": "Aniclipse",
+    "iconUrl": "https://cdn.aniclipse.com/media/anime/cover/large/bx154587-qQTzQnEJJ3oB.jpg",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://aniclipse.com/",
+    "searchBaseUrl": "https://aniclipse.com/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/aniclipse/aniclipse.js",
+    "type": "anime",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "première version : catalogue et épisodes d'aniclipse (vrais titres, vignettes, hors-série), lecture résolue via la chaîne ouverte de vidhawk"
+}
