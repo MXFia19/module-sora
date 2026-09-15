@@ -13,7 +13,7 @@
     "baseUrl": "https://embed.vidrift.in/",
     "searchBaseUrl": "https://embed.vidrift.in/",
     "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/vidrift/vidrift.js",
-    "type": "movie",
+    "type": "movies/shows",
     "downloadSupport": true,
     "asyncJS": true,
     "softsub": true,

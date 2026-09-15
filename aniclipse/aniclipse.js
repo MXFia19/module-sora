@@ -59,14 +59,18 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
 // ==========================================
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
+    // The host expects every request to carry a User-Agent; fill one in when
+    // the caller did not set one (AniList and TMDB calls, notably).
+    const headers = options.headers || {};
+    if (!headers["User-Agent"]) headers["User-Agent"] = AC_UA;
     try {
         if (typeof fetchv2 !== 'undefined') {
-            return await fetchv2(url, options.headers ?? {}, options.method ?? 'GET', options.body ?? null);
+            return await fetchv2(url, headers, options.method ?? 'GET', options.body ?? null);
         } else {
-            return await fetch(url, options);
+            return await fetch(url, { ...options, headers: headers });
         }
     } catch (e) {
-        try { return await fetch(url, options); } catch (error) { return null; }
+        try { return await fetch(url, { ...options, headers: headers }); } catch (error) { return null; }
     }
 }
 
