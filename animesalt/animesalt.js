@@ -1,31 +1,30 @@
 // ==========================================
 // ⚙️ SORA MODULE — ANIMESALT
 // ==========================================
-// animesalt.cx est un WordPress (thème DooPlay). Rien n'est chiffré ; toute
-// la chaîne tient en HTML plus deux appels POST :
+// animesalt.cx is a WordPress site (DooPlay theme). Nothing is encrypted; the
+// whole chain fits in HTML plus two POSTs:
 //
-//   1. Recherche   GET  /?s=<texte>            -> <article> avec /series/<slug>/
-//   2. Saisons     POST /wp-admin/admin-ajax.php
-//                       action=action_select_season&season=<n>&post=<id>
-//                  -> le <li> de chaque épisode de la saison
-//   3. Épisode     GET  /episode/<slug>-<S>x<E>/
-//                  -> <iframe src="https://as-cdnNN.top/video/<hash>">
-//                     et un lecteur multilingue dont les liens sont en base64
-//   4. Flux        POST https://as-cdnNN.top/player/index.php?data=<hash>&do=getVideo
-//                       hash=<hash>&r=<referrer>
-//                  -> {"hls":true,"videoSource":"…/master.m3u8?md5=…&expires=…"}
+//   1. Search    GET  /?s=<text>              -> <article> with /series/<slug>/
+//   2. Seasons   POST /wp-admin/admin-ajax.php
+//                     action=action_select_season&season=<n>&post=<id>
+//                -> the <li> of every episode in that season
+//   3. Episode   GET  /episode/<slug>-<S>x<E>/
+//                -> <iframe src="https://as-cdnNN.top/video/<hash>">
+//                   plus a multi-language player whose links are base64
+//   4. Stream    POST https://as-cdnNN.top/player/index.php?data=<hash>&do=getVideo
+//                     hash=<hash>&r=<referrer>
+//                -> {"hls":true,"videoSource":"…/master.m3u8?md5=…&expires=…"}
 //
-// Le lien final est signé (`?md5=…&expires=…`) et **lié à l'adresse IP** du
-// client qui a appelé getVideo : le `secure_link` nginx prend `remote_addr`
-// dans son empreinte. Depuis un lecteur, c'est transparent — la même machine
-// fait les deux appels. Depuis un bac à sable à IP tournante, le flux rend
-// 403 une fois sur quinze, quand les deux requêtes retombent par chance sur
-// la même sortie : la chaîne jusqu'à `videoSource` est donc vérifiée, la
-// lecture finale ne l'est pas d'ici. Même cas de figure que FireStream
-// (section 15 de DECRYPTEURS.md).
+// The final link is signed (`?md5=…&expires=…`) and **bound to the IP** of the
+// client that called getVideo: nginx's `secure_link` takes `remote_addr` into
+// its hash. From a player this is transparent — the same machine makes both
+// calls. From a rotating-IP sandbox the stream returns 403 about one time in
+// fifteen, when both requests happen to land on the same egress: the chain up
+// to `videoSource` is therefore verified, the final playback is not verifiable
+// from there. Same situation as FireStream (section 15 of DECRYPTORS.md).
 //
-// Conséquence pratique : ne pas mettre le lien en cache et le consommer tout
-// de suite après getVideo.
+// Practical consequence: do not cache the link, and consume it immediately
+// after getVideo.
 
 const AS_BASE = "https://animesalt.cx";
 
@@ -50,12 +49,12 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
             await fetch(`${SUPABASE_URL}/rest/v1/app_logs`, { method: "POST", headers: headers, body: JSON.stringify(payload) });
         }
     } catch (e) {
-        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`);
+        console.log(`[Tracker] 🚨 Failed to send to Supabase: ${e.message}`);
     }
 }
 
 // ==========================================
-// 🌐 RÉSEAU
+// 🌐 NETWORK
 // ==========================================
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
@@ -114,19 +113,19 @@ function stripTags(html) {
 }
 
 // ==========================================
-// 🔍 RECHERCHE
+// 🔍 SEARCH
 // ==========================================
 
 async function searchResults(keyword) {
-    console.log(`[Search] 🔍 AnimeSalt — recherche de "${keyword}"`);
+    console.log(`[Search] 🔍 AnimeSalt — searching for "${keyword}"`);
     try {
         const html = await asGet(`${AS_BASE}/?s=${encodeURIComponent(keyword)}`, `${AS_BASE}/`);
 
         const results = [];
         const seen = new Set();
 
-        // Chaque résultat est un <article> portant son titre, son affiche et,
-        // en dernier, le lien plein-bloc vers la fiche.
+        // Each result is an <article> carrying its title, its poster and, last,
+        // the full-block link to the entry.
         const articles = html.match(/<article[^>]*class="post[^"]*"[\s\S]*?<\/article>/g) || [];
         for (const article of articles) {
             const hrefMatch = article.match(/href="(https:\/\/animesalt\.cx\/(?:series|movies)\/[^"]+)"/);
@@ -138,17 +137,17 @@ async function searchResults(keyword) {
             const titleMatch = article.match(/<h2[^>]*class="entry-title"[^>]*>([\s\S]*?)<\/h2>/);
             const title = titleMatch ? stripTags(titleMatch[1]) : href;
 
-            // L'affiche est en data-src (chargement paresseux) et souvent sans
-            // protocole.
+            // The poster sits in data-src (lazy loading) and often has no
+            // protocol.
             const imgMatch = article.match(/data-src="([^"]+)"/) || article.match(/<img[^>]+src="(https?:[^"]+)"/);
             let image = imgMatch ? imgMatch[1] : "";
             if (image.indexOf('//') === 0) image = `https:${image}`;
 
-            const kind = href.indexOf('/movies/') !== -1 ? 'Film' : 'Série';
+            const kind = href.indexOf('/movies/') !== -1 ? 'Movie' : 'Series';
             results.push({ title: `${title} · ${kind}`, image: image, href: href });
         }
 
-        console.log(`[Search] ✅ ${results.length} résultat(s)`);
+        console.log(`[Search] ✅ ${results.length} result(s)`);
         sendSupabaseLog("AnimeSalt", "SEARCH", {
             keyword: keyword,
             results_count: results.length,
@@ -162,7 +161,7 @@ async function searchResults(keyword) {
 }
 
 // ==========================================
-// 📖 DÉTAILS
+// 📖 DETAILS
 // ==========================================
 
 async function extractDetails(url) {
@@ -182,7 +181,7 @@ async function extractDetails(url) {
 
         const aliasParts = [];
         const ratingMatch = html.match(/<span[^>]*class="[^"]*dt_rating_vgs[^"]*"[^>]*>([^<]+)</);
-        if (ratingMatch) aliasParts.push(`Note : ${ratingMatch[1].trim()}`);
+        if (ratingMatch) aliasParts.push(`Rating: ${ratingMatch[1].trim()}`);
 
         const genres = [];
         const genreBlock = html.match(/<div[^>]*class="[^"]*sgeneros[^"]*"[^>]*>([\s\S]*?)<\/div>/);
@@ -197,21 +196,21 @@ async function extractDetails(url) {
         if (dateMatch) airdate = decodeEntities(dateMatch[1]);
 
         return JSON.stringify([{
-            description: description || "Pas de synopsis disponible.",
+            description: description || "No synopsis available.",
             aliases: aliasParts.join(' | '),
             airdate: airdate
         }]);
     } catch (error) {
         sendSupabaseLog("AnimeSalt", "ERROR", { media_url: url, error_message: String(error) });
-        return JSON.stringify([{ description: 'Erreur de chargement.', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: 'Loading error.', aliases: '', airdate: '' }]);
     }
 }
 
 // ==========================================
-// 📂 ÉPISODES
+// 📂 EPISODES
 // ==========================================
 
-// Les <li> renvoyés par la fiche et par l'AJAX de saison ont la même forme.
+// The <li> returned by the entry page and by the season AJAX share one shape.
 function parseEpisodeItems(html, seasonNumber) {
     const episodes = [];
     const items = html.match(/<li>[\s\S]*?<\/li>/g) || [];
@@ -220,8 +219,8 @@ function parseEpisodeItems(html, seasonNumber) {
         const hrefMatch = item.match(/href="(https:\/\/animesalt\.cx\/episode\/[^"]+)"/);
         if (!hrefMatch) continue;
 
-        // Le numéro d'épisode est dans <span class="num-epi">, et l'URL le
-        // confirme sous la forme -<S>x<E>/.
+        // The episode number sits in <span class="num-epi">, and the URL
+        // confirms it in the form -<S>x<E>/.
         const numMatch = item.match(/<span[^>]*class="num-epi"[^>]*>\s*(\d+)/);
         const urlMatch = hrefMatch[1].match(/-(\d+)x(\d+)\/?$/);
 
@@ -230,7 +229,7 @@ function parseEpisodeItems(html, seasonNumber) {
         if (!number) continue;
 
         const titleMatch = item.match(/<h2[^>]*class="entry-title"[^>]*>([\s\S]*?)<\/h2>/);
-        const title = titleMatch ? stripTags(titleMatch[1]) : `Épisode ${number}`;
+        const title = titleMatch ? stripTags(titleMatch[1]) : `Episode ${number}`;
 
         episodes.push({ href: hrefMatch[1], number: number, season: season, title: title });
     }
@@ -243,13 +242,13 @@ async function extractEpisodes(url) {
     try {
         const html = await asGet(url, `${AS_BASE}/`);
 
-        // Un film n'a pas de liste : il se lit sur sa propre page.
+        // A movie has no list: it plays from its own page.
         if (url.indexOf('/movies/') !== -1) {
-            return JSON.stringify([{ href: url, number: 1, season: 1, title: "Film" }]);
+            return JSON.stringify([{ href: url, number: 1, season: 1, title: "Movie" }]);
         }
 
-        // Les onglets de saison portent l'identifiant du post et le numéro de
-        // saison : data-post="1258" data-season="2".
+        // The season tabs carry the post id and the season number:
+        // data-post="1258" data-season="2".
         const postMatch = html.match(/data-post="(\d+)"/);
         const postId = postMatch ? postMatch[1] : null;
 
@@ -266,7 +265,7 @@ async function extractEpisodes(url) {
         const all = [];
         const seen = new Set();
 
-        // La saison affichée d'emblée est déjà dans la page.
+        // The season shown up front is already in the page.
         for (const ep of parseEpisodeItems(html, seasons[0])) {
             const key = `${ep.season}x${ep.number}`;
             if (seen.has(key)) continue;
@@ -274,7 +273,7 @@ async function extractEpisodes(url) {
             all.push(ep);
         }
 
-        // Les autres se demandent à l'AJAX du thème.
+        // The others are asked of the theme's AJAX endpoint.
         for (const season of seasons) {
             if (all.some(ep => ep.season === season)) continue;
             if (!postId) continue;
@@ -291,7 +290,7 @@ async function extractEpisodes(url) {
 
         all.sort((a, b) => (a.season - b.season) || (a.number - b.number));
 
-        console.log(`[Episodes] ✅ ${all.length} épisode(s) sur ${seasons.length} saison(s)`);
+        console.log(`[Episodes] ✅ ${all.length} episode(s) across ${seasons.length} season(s)`);
         return JSON.stringify(all);
     } catch (error) {
         sendSupabaseLog("AnimeSalt", "ERROR", { media_url: url, error_message: String(error) });
@@ -300,12 +299,12 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🎬 LECTURE
+// 🎬 PLAYBACK
 // ==========================================
 
-// Le lecteur multilingue de la page encode sa liste en base64 :
+// The page's multi-language player encodes its list in base64:
 //   player.php?data=W3sibGFuZ3VhZ2UiOiJIaW5kaSIsImxpbmsiOiJodHRwczpcL1wv…
-// soit [{"language":"Hindi","link":"https://short.icu/…"}, …].
+// that is, [{"language":"Hindi","link":"https://short.icu/…"}, …].
 function pureAtob(input) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
     const str = String(input).replace(/[^A-Za-z0-9+/=]/g, '').replace(/=+$/, '');
@@ -329,7 +328,7 @@ function parseMultiLang(html) {
     } catch (e) { return []; }
 }
 
-// L'iframe désigne l'hôte et le jeton : https://as-cdnNN.top/video/<hash>
+// The iframe names the host and the token: https://as-cdnNN.top/video/<hash>
 function parseCdnEmbeds(html) {
     const embeds = [];
     const re = /https:\/\/([a-z0-9-]+\.top)\/video\/([a-f0-9]{16,64})/g;
@@ -360,17 +359,17 @@ async function extractStreamUrl(url) {
         const html = await asGet(url, `${AS_BASE}/`);
 
         const embeds = parseCdnEmbeds(html);
-        console.log(`[Player] 🧩 ${embeds.length} embarquement(s) CDN détecté(s)`);
+        console.log(`[Player] 🧩 ${embeds.length} CDN embed(s) detected`);
 
         for (const embed of embeds) {
             const data = await resolveCdn(embed.host, embed.hash, `${AS_BASE}/`);
 
             if (!data) {
-                failedLinks.push({ server_name: embed.host, url: `https://${embed.host}/video/${embed.hash}`, reason: "getVideo n'a pas rendu de JSON" });
+                failedLinks.push({ server_name: embed.host, url: `https://${embed.host}/video/${embed.hash}`, reason: "getVideo returned no JSON" });
                 continue;
             }
 
-            // Flux unique (HLS) ou liste de sources selon le titre.
+            // A single stream (HLS) or a list of sources, depending on the title.
             const candidates = [];
             if (data.videoSource) candidates.push({ url: data.videoSource, label: data.hls ? 'HLS' : 'Direct' });
             if (Array.isArray(data.videoSources)) {
@@ -380,7 +379,7 @@ async function extractStreamUrl(url) {
             }
 
             if (candidates.length === 0) {
-                failedLinks.push({ server_name: embed.host, url: `https://${embed.host}/video/${embed.hash}`, reason: "Aucune source dans la réponse" });
+                failedLinks.push({ server_name: embed.host, url: `https://${embed.host}/video/${embed.hash}`, reason: "No source in the response" });
                 continue;
             }
 
@@ -395,21 +394,21 @@ async function extractStreamUrl(url) {
             }
         }
 
-        // Les pistes multilingues passent par un raccourcisseur : on ne peut
-        // pas les rendre telles quelles, mais on les signale plutôt que de
-        // faire comme si elles n'existaient pas.
+        // The multi-language tracks go through a URL shortener: they cannot be
+        // returned as they are, but they are reported rather than pretended
+        // out of existence.
         const langs = parseMultiLang(html);
         if (langs.length) {
-            console.log(`[Player] 🌐 ${langs.length} piste(s) multilingue(s) derrière un raccourcisseur, non résolues : ${langs.map(l => l.language).join(', ')}`);
+            console.log(`[Player] 🌐 ${langs.length} multi-language track(s) behind a shortener, unresolved: ${langs.map(l => l.language).join(', ')}`);
             failedLinks.push({
                 server_name: "multi-lang-plyr",
                 url: langs.map(l => l.link).join(' '),
-                reason: `Liens derrière short.icu (${langs.map(l => l.language).join('/')})`
+                reason: `Links behind short.icu (${langs.map(l => l.language).join('/')})`
             });
         }
 
         console.log(`-----------------------------------------------------`);
-        console.log(`[Player] 📊 Bilan : ${streams.length} lien(s).`);
+        console.log(`[Player] 📊 Summary: ${streams.length} link(s).`);
 
         sendSupabaseLog("AnimeSalt", "PLAYER", {
             media_url: url,

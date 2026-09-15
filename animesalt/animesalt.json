@@ -19,5 +19,5 @@
     "softsub": false,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "première version : recherche et saisons via le thème DooPlay (admin-ajax), flux résolu par le POST getVideo du CDN as-cdnNN.top"
+    "changelog": "first release: search and seasons through the DooPlay theme (admin-ajax), stream resolved by the as-cdnNN.top CDN getVideo POST"
 }

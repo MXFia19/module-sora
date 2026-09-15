@@ -7,7 +7,7 @@
         "url": "https://github.com/MXFia19"
     },
     "version": "1.1.0",
-    "language": "Français",
+    "language": "English",
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://embed.vidrift.in/",
@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "ajout des relais vaplayer et vidlove via /api/source/<chemin>?token=&provider= : six flux au lieu d'un, et une couverture des titres que VidRift n'auto-héberge pas"
+    "changelog": "added the vaplayer and vidlove relays via /api/source/<path>?token=&provider=: six streams instead of one, and coverage for the titles VidRift does not self-host"
 }

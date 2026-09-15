@@ -1,39 +1,38 @@
 // ==========================================
 // ⚙️ SORA MODULE — VIDRIFT
 // ==========================================
-// VidRift (embed.vidrift.in) est l'hébergeur qui alimente cinezo et
-// plusieurs autres catalogues de films des favoris. Il s'indexe par
-// identifiant TMDB, films comme séries.
+// VidRift (embed.vidrift.in) is the host feeding cinezo and several other
+// bookmarked movie catalogues. It is keyed by TMDB id, movies and TV alike.
 //
-// Sa page d'embarquement porte tout en clair, dans une variable de script :
+// Its embed page carries everything in the clear, in a script variable:
 //   var embedMeta = {tmdbId, type, season, episode, provider,
 //                    playbackToken, selfhostUrl, selfhostKind, …};
 //   var <subs> = [{code, label, url}, …];
-// Aucun chiffrement, aucune signature à reproduire : il suffit de lire la page.
+// No encryption, no signature to reproduce: just read the page.
 //
-// Deux formes de lien selon le titre :
-//   - cdn.vidrift.net/movie_<id>/vod.m3u8            (chemin fixe)
-//   - reelvault.click/s/<base64>.<hmac>/vod.m3u8     (signé, périssable)
-// La seconde forme est parfois signée pour un titre absent du CDN : on sonde
-// donc le lien avant de le rendre, plutôt que de promettre un flux mort.
+// Two link shapes depending on the title:
+//   - cdn.vidrift.net/movie_<id>/vod.m3u8            (fixed path)
+//   - reelvault.click/s/<base64>.<hmac>/vod.m3u8     (signed, perishable)
+// The second shape is sometimes signed for a title the CDN does not have, so
+// the link is probed before being returned rather than promising a dead stream.
 //
-// Quand l'auto-hébergement manque (ou en plus de lui), le lecteur bascule sur
-// une cascade de relais, qu'il déclare lui-même dans son code non minifié :
-//   GET /api/source/<movie/<id>|tv/<id>/<s>/<e>>?token=<playbackToken>&provider=<nom>
+// When self-hosting is missing (or alongside it) the player falls back to a
+// cascade of relays, which it declares itself in its unminified code:
+//   GET /api/source/<movie/<id>|tv/<id>/<s>/<e>>?token=<playbackToken>&provider=<name>
 //   -> {success, source, quality, streams:[{index, url, proxyUrl, type}], subtitles}
-// « url » y est vide : tout passe par « proxyUrl », parfois relatif.
+// "url" there is empty: everything goes through "proxyUrl", sometimes relative.
 
 const VR_EMBED = "https://embed.vidrift.in";
 const TMDB_API = "https://api.themoviedb.org/3";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
 
-// Clé TMDB publique, celle déjà utilisée par le module bingebox de ce dépôt.
+// Public TMDB key, the one already used by this repository's bingebox module.
 const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
 
 const VR_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-// VidRift renvoie « Embed this page in an iframe. » (403) aux requêtes qu'il
-// juge nues : on se présente toujours comme un embarquement.
+// VidRift answers "Embed this page in an iframe." (403) to requests it judges
+// bare, so we always present ourselves as an embed.
 const VR_PARENT = "https://cinezo.org/";
 
 // ==========================================
@@ -55,12 +54,12 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
             await fetch(`${SUPABASE_URL}/rest/v1/app_logs`, { method: "POST", headers: headers, body: JSON.stringify(payload) });
         }
     } catch (e) {
-        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`);
+        console.log(`[Tracker] 🚨 Failed to send to Supabase: ${e.message}`);
     }
 }
 
 // ==========================================
-// 🌐 RÉSEAU
+// 🌐 NETWORK
 // ==========================================
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
@@ -102,7 +101,7 @@ async function vrEmbedPage(path) {
 }
 
 // ==========================================
-// 🧩 LECTURE DE LA PAGE D'EMBARQUEMENT
+// 🧩 READING THE EMBED PAGE
 // ==========================================
 
 function parseEmbedMeta(html) {
@@ -112,8 +111,8 @@ function parseEmbedMeta(html) {
     try { return JSON.parse(match[1]); } catch (e) { return null; }
 }
 
-// La liste des sous-titres est déclarée juste avant embedMeta, sous un nom de
-// variable qui change au gré des builds : on la repère à sa forme.
+// The subtitle list is declared just before embedMeta, under a variable name
+// that changes from build to build, so match it by shape rather than by name.
 function parseSubtitleList(html) {
     if (!html) return [];
     const match = html.match(/var\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=\s*(\[\s*\{\s*"code"[\s\S]*?\}\s*\]);/);
@@ -124,19 +123,19 @@ function parseSubtitleList(html) {
     } catch (e) { return []; }
 }
 
-// Relais déclarés par le lecteur, dans son ordre de préférence. « selfhost »
-// est traité à part (il est lu dans embedMeta, sans appel).
-const VR_RELAIS = ["vaplayer", "vidlove", "cinepro"];
+// Relays declared by the player, in its order of preference. "selfhost" is
+// handled separately (it is read from embedMeta, with no extra call).
+const VR_RELAYS = ["vaplayer", "vidlove", "cinepro"];
 
-// Le chemin attendu par /api/source reprend l'identifiant, et pour une série
-// la saison et l'épisode.
+// The path /api/source expects carries the id, and for a series the season and
+// the episode.
 function sourcePath(ref) {
     return ref.kind === 'tv'
         ? `tv/${ref.id}/${ref.season}/${ref.episode}`
         : `movie/${ref.id}`;
 }
 
-async function vrRelais(ref, token, provider) {
+async function vrRelay(ref, token, provider) {
     const query = `token=${encodeURIComponent(token)}&provider=${encodeURIComponent(provider)}`;
     const url = `${VR_EMBED}/api/source/${sourcePath(ref)}?${query}`;
     const headers = { "User-Agent": VR_UA, "Accept": "application/json", "Referer": `${VR_EMBED}/` };
@@ -145,8 +144,8 @@ async function vrRelais(ref, token, provider) {
     try { return JSON.parse(body); } catch (e) { return null; }
 }
 
-// Un lien signé peut désigner un titre absent du CDN : on demande deux octets
-// avant de le proposer.
+// A signed link can point at a title the CDN does not have, so ask for two
+// bytes before offering it.
 async function linkIsAlive(url) {
     try {
         const response = await soraFetch(url, {
@@ -156,8 +155,8 @@ async function linkIsAlive(url) {
         if (!response) return false;
         if (typeof response.status === 'number' && response.status >= 400) return false;
         const body = await readBody(response);
-        // Le CDN répond « Not found » en texte brut, avec un 404 que tous les
-        // clients ne remontent pas.
+        // The CDN answers "Not found" as plain text, with a 404 that not every
+        // client surfaces.
         if (!body) return false;
         if (body.indexOf('Not found') !== -1 && body.indexOf('#EXTM3U') === -1) return false;
         return true;
@@ -165,13 +164,13 @@ async function linkIsAlive(url) {
 }
 
 // ==========================================
-// 🔍 RECHERCHE
+// 🔍 SEARCH
 // ==========================================
 
 async function searchResults(keyword) {
-    console.log(`[Search] 🔍 VidRift — recherche de "${keyword}"`);
+    console.log(`[Search] 🔍 VidRift — searching for "${keyword}"`);
     try {
-        const data = await tmdbGet(`/search/multi?query=${encodeURIComponent(keyword)}&include_adult=false&language=fr-FR`);
+        const data = await tmdbGet(`/search/multi?query=${encodeURIComponent(keyword)}&include_adult=false&language=en-US`);
         const items = data && Array.isArray(data.results) ? data.results : [];
 
         const results = [];
@@ -185,7 +184,7 @@ async function searchResults(keyword) {
 
             const date = item.release_date || item.first_air_date || "";
             const year = date ? date.slice(0, 4) : "";
-            const badge = kind === 'tv' ? 'Série' : 'Film';
+            const badge = kind === 'tv' ? 'TV' : 'Movie';
 
             results.push({
                 title: year ? `${name} (${year}) · ${badge}` : `${name} · ${badge}`,
@@ -194,7 +193,7 @@ async function searchResults(keyword) {
             });
         }
 
-        console.log(`[Search] ✅ ${results.length} résultat(s)`);
+        console.log(`[Search] ✅ ${results.length} result(s)`);
         sendSupabaseLog("VidRift", "SEARCH", {
             keyword: keyword,
             results_count: results.length,
@@ -208,7 +207,7 @@ async function searchResults(keyword) {
 }
 
 // ==========================================
-// 📖 DÉTAILS
+// 📖 DETAILS
 // ==========================================
 
 function parseHref(url) {
@@ -223,18 +222,18 @@ async function extractDetails(url) {
     sendSupabaseLog("VidRift", "DETAILS", { media_url: `${VR_EMBED}/embed/${ref.kind}/${ref.id}` });
 
     try {
-        const data = await tmdbGet(`/${ref.kind}/${ref.id}?language=fr-FR`);
+        const data = await tmdbGet(`/${ref.kind}/${ref.id}?language=en-US`);
         if (!data || !data.id) {
-            return JSON.stringify([{ description: 'Fiche introuvable sur TMDB.', aliases: '', airdate: '' }]);
+            return JSON.stringify([{ description: 'Entry not found on TMDB.', aliases: '', airdate: '' }]);
         }
 
-        const description = (data.overview || "").trim() || "Pas de synopsis disponible.";
+        const description = (data.overview || "").trim() || "No synopsis available.";
 
         const aliasParts = [];
-        if (data.vote_average) aliasParts.push(`Note : ${Number(data.vote_average).toFixed(1)}/10`);
+        if (data.vote_average) aliasParts.push(`Rating: ${Number(data.vote_average).toFixed(1)}/10`);
         if (Array.isArray(data.genres) && data.genres.length) aliasParts.push(data.genres.map(g => g.name).join(', '));
         if (data.runtime) aliasParts.push(`${data.runtime} min`);
-        if (data.number_of_seasons) aliasParts.push(`${data.number_of_seasons} saison(s)`);
+        if (data.number_of_seasons) aliasParts.push(`${data.number_of_seasons} season(s)`);
 
         const airdate = data.release_date || data.first_air_date || "";
 
@@ -245,12 +244,12 @@ async function extractDetails(url) {
         }]);
     } catch (error) {
         sendSupabaseLog("VidRift", "ERROR", { media_url: url, error_message: String(error) });
-        return JSON.stringify([{ description: 'Erreur de chargement.', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: 'Loading error.', aliases: '', airdate: '' }]);
     }
 }
 
 // ==========================================
-// 📂 ÉPISODES
+// 📂 EPISODES
 // ==========================================
 
 async function extractEpisodes(url) {
@@ -258,26 +257,26 @@ async function extractEpisodes(url) {
     console.log(`[Episodes] 📂 VidRift — ${ref.kind} ${ref.id}`);
 
     try {
-        // Un film n'a qu'une entrée : Sora attend quand même une liste.
+        // A movie has a single entry; Sora still expects a list.
         if (ref.kind === 'movie') {
             return JSON.stringify([{
                 href: `vidrift-play://movie/${ref.id}`,
                 number: 1,
                 season: 1,
-                title: "Film"
+                title: "Movie"
             }]);
         }
 
-        const show = await tmdbGet(`/tv/${ref.id}?language=fr-FR`);
+        const show = await tmdbGet(`/tv/${ref.id}?language=en-US`);
         const seasons = show && Array.isArray(show.seasons) ? show.seasons : [];
 
         const episodes = [];
         for (const season of seasons) {
             const seasonNumber = season.season_number;
-            // La saison 0 regroupe les hors-séries, que VidRift n'héberge pas.
+            // Season 0 collects the specials, which VidRift does not host.
             if (typeof seasonNumber !== 'number' || seasonNumber < 1) continue;
 
-            const detail = await tmdbGet(`/tv/${ref.id}/season/${seasonNumber}?language=fr-FR`);
+            const detail = await tmdbGet(`/tv/${ref.id}/season/${seasonNumber}?language=en-US`);
             const list = detail && Array.isArray(detail.episodes) ? detail.episodes : [];
 
             for (const episode of list) {
@@ -287,12 +286,12 @@ async function extractEpisodes(url) {
                     href: `vidrift-play://tv/${ref.id}/${seasonNumber}/${n}`,
                     number: n,
                     season: seasonNumber,
-                    title: episode.name || `Épisode ${n}`
+                    title: episode.name || `Episode ${n}`
                 });
             }
         }
 
-        console.log(`[Episodes] ✅ ${episodes.length} épisode(s) sur ${seasons.length} saison(s)`);
+        console.log(`[Episodes] ✅ ${episodes.length} episode(s) across ${seasons.length} season(s)`);
         return JSON.stringify(episodes);
     } catch (error) {
         sendSupabaseLog("VidRift", "ERROR", { media_url: url, error_message: String(error) });
@@ -301,7 +300,7 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🎬 LECTURE
+// 🎬 PLAYBACK
 // ==========================================
 
 async function extractStreamUrl(url) {
@@ -325,8 +324,8 @@ async function extractStreamUrl(url) {
 
         if (!html || html.indexOf('embedMeta') === -1) {
             const reason = html && html.indexOf('iframe') !== -1
-                ? "VidRift exige un embarquement (403)"
-                : "Page vide ou inattendue";
+                ? "VidRift requires an embed context (403)"
+                : "Empty or unexpected page";
             console.log(`[Player] ⚠️ ${reason}`);
             sendSupabaseLog("VidRift", "UNSUPPORTED_HOSTS", {
                 media_url: mediaUrl, season_number: String(ref.season || "1"), ep_number: String(ref.episode || "1"),
@@ -337,11 +336,11 @@ async function extractStreamUrl(url) {
 
         const meta = parseEmbedMeta(html);
         if (!meta) {
-            console.log(`[Player] ⚠️ embedMeta illisible.`);
+            console.log(`[Player] ⚠️ embedMeta unreadable.`);
             return JSON.stringify({ type: "none" });
         }
 
-        console.log(`[Player] 🧩 provider=${meta.provider} selfhostKind=${meta.selfhostKind || 'aucun'}`);
+        console.log(`[Player] 🧩 provider=${meta.provider} selfhostKind=${meta.selfhostKind || 'none'}`);
 
         if (meta.selfhostUrl) {
             const alive = await linkIsAlive(meta.selfhostUrl);
@@ -352,46 +351,46 @@ async function extractStreamUrl(url) {
                     streamUrl: meta.selfhostUrl,
                     headers: { "Referer": `${VR_EMBED}/`, "User-Agent": VR_UA }
                 });
-                console.log(`   -> Direct : ${meta.selfhostUrl.slice(0, 80)}…`);
+                console.log(`   -> Direct: ${meta.selfhostUrl.slice(0, 80)}…`);
             } else {
-                // VidRift signe parfois un chemin pour un titre qu'il n'a pas.
-                console.log(`   -> Lien signé mort, écarté.`);
-                failedLinks.push({ server_name: "VidRift Direct", url: meta.selfhostUrl, reason: "Lien signé mais introuvable côté CDN" });
+                // VidRift sometimes signs a path for a title it does not have.
+                console.log(`   -> Signed link is dead, discarded.`);
+                failedLinks.push({ server_name: "VidRift Direct", url: meta.selfhostUrl, reason: "Signed link but missing on the CDN" });
             }
         } else {
-            failedLinks.push({ server_name: "VidRift Direct", url: mediaUrl, reason: `Aucun selfhostUrl (provider=${meta.provider})` });
+            failedLinks.push({ server_name: "VidRift Direct", url: mediaUrl, reason: `No selfhostUrl (provider=${meta.provider})` });
         }
 
-        // Les relais : ils couvrent les titres que VidRift n'auto-héberge pas,
-        // et ajoutent des qualités à ceux qu'il héberge.
+        // The relays: they cover the titles VidRift does not self-host, and add
+        // qualities to the ones it does.
         if (meta.playbackToken) {
-            for (const provider of VR_RELAIS) {
-                const data = await vrRelais(ref, meta.playbackToken, provider);
+            for (const provider of VR_RELAYS) {
+                const data = await vrRelay(ref, meta.playbackToken, provider);
 
                 if (!data || !Array.isArray(data.streams) || data.streams.length === 0) {
-                    failedLinks.push({ server_name: provider, url: `${VR_EMBED}/api/source/${sourcePath(ref)}`, reason: "Aucun flux renvoyé" });
+                    failedLinks.push({ server_name: provider, url: `${VR_EMBED}/api/source/${sourcePath(ref)}`, reason: "No stream returned" });
                     continue;
                 }
 
-                const etiquette = data.source || provider;
+                const label = data.source || provider;
                 for (const stream of data.streams) {
-                    // « url » est systématiquement vide côté VidRift : c'est
-                    // « proxyUrl » qui porte le flux, parfois en relatif.
+                    // "url" is systematically empty on VidRift's side: it is
+                    // "proxyUrl" that carries the stream, sometimes relative.
                     let streamUrl = stream.proxyUrl || stream.url || "";
                     if (!streamUrl) continue;
                     if (streamUrl.charAt(0) === '/') streamUrl = `${VR_EMBED}${streamUrl}`;
                     if (streams.some(s => s.streamUrl === streamUrl)) continue;
 
-                    const qualite = data.quality || stream.type || 'HLS';
+                    const quality = data.quality || stream.type || 'HLS';
                     streams.push({
-                        title: `VidRift ${etiquette} ${stream.index + 1} (${qualite})`,
+                        title: `VidRift ${label} ${stream.index + 1} (${quality})`,
                         streamUrl: streamUrl,
                         headers: { "Referer": `${VR_EMBED}/`, "User-Agent": VR_UA }
                     });
-                    console.log(`   -> ${provider}/${etiquette} #${stream.index + 1}`);
+                    console.log(`   -> ${provider}/${label} #${stream.index + 1}`);
                 }
 
-                // Chaque relais porte sa propre liste de sous-titres.
+                // Each relay carries its own subtitle list.
                 if (Array.isArray(data.subtitles)) {
                     for (const caption of data.subtitles) {
                         const subUrl = caption.url || caption.src || caption.file || "";
@@ -421,16 +420,14 @@ async function extractStreamUrl(url) {
             });
 
             const code = String(caption.code || "").toLowerCase();
-            if (bestSubtitle === "" || code === 'fr') {
-                if (bestSubtitle === "" || code === 'fr') {
-                    bestSubtitle = subUrl;
-                    bestSubtitleHeaders = { "Referer": `${VR_EMBED}/` };
-                }
+            if (bestSubtitle === "" || code === 'en') {
+                bestSubtitle = subUrl;
+                bestSubtitleHeaders = { "Referer": `${VR_EMBED}/` };
             }
         }
 
         console.log(`-----------------------------------------------------`);
-        console.log(`[Player] 📊 Bilan : ${streams.length} lien(s), ${allSubtitles.length} sous-titre(s).`);
+        console.log(`[Player] 📊 Summary: ${streams.length} link(s), ${allSubtitles.length} subtitle track(s).`);
 
         sendSupabaseLog("VidRift", "PLAYER", {
             media_url: mediaUrl,

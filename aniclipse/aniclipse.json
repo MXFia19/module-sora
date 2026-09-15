@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "première version : catalogue et épisodes d'aniclipse (vrais titres, vignettes, hors-série), lecture résolue via la chaîne ouverte de vidhawk"
+    "changelog": "first release: aniclipse catalogue and episodes (real titles, thumbnails, fillers), playback resolved through vidhawk's open chain"
 }

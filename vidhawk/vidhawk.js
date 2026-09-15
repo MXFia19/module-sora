@@ -1,22 +1,22 @@
 // ==========================================
 // ⚙️ SORA MODULE — VIDHAWK
 // ==========================================
-// VidHawk (vidhawk.buzz) indexe ses animés par identifiant AniList.
-// Le catalogue vient donc directement de l'API publique AniList, et les
-// liens de lecture de la chaîne interne de VidHawk :
-//   1. /api/stream/race?...&stream=1   -> NDJSON, une ligne par serveur, chacune portant un "ticket"
-//   2. /api/play?t=<ticket>            -> pistes audio (sub/dub/jpn/hin), sous-titres, intro/outro
-// Aucun jeton signé, aucun chiffrement : les tickets sont opaques mais se
-// contentent d'être relayés tels quels.
+// VidHawk (vidhawk.buzz) indexes its anime by AniList id. The catalogue
+// therefore comes straight from AniList's public API, and playback from
+// VidHawk's own internal chain:
+//   1. /api/stream/race?...   -> {winner, ticket, servers:[{id,label,ticket}]}
+//   2. /api/play?t=<ticket>   -> audio tracks (sub/dub/jpn/hin), captions, intro/outro
+// No signed token, no encryption: the tickets are opaque but are simply
+// relayed as they come.
 
 const VH_BASE = "https://vidhawk.buzz";
 const ANILIST_API = "https://graphql.anilist.co";
 
-// Serveurs annoncés par le lecteur. "race" les interroge tous d'un coup ;
-// "resolve" sert de repli serveur par serveur.
+// Servers the site's player advertises. "race" queries them all at once;
+// "resolve" is the per-server fallback.
 const VH_SERVERS = ["flow", "zuri"];
 
-// Ordre de préférence d'affichage des pistes audio.
+// Display order for the audio tracks.
 const VH_AUDIO_ORDER = ["sub", "dub", "jpn", "hin"];
 
 const VH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -40,12 +40,12 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
             await fetch(`${SUPABASE_URL}/rest/v1/app_logs`, { method: "POST", headers: headers, body: JSON.stringify(payload) });
         }
     } catch (e) {
-        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`);
+        console.log(`[Tracker] 🚨 Failed to send to Supabase: ${e.message}`);
     }
 }
 
 // ==========================================
-// 🌐 RÉSEAU
+// 🌐 NETWORK
 // ==========================================
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
@@ -103,7 +103,7 @@ function cleanText(html) {
 }
 
 // ==========================================
-// 🔍 RECHERCHE
+// 🔍 SEARCH
 // ==========================================
 
 const SEARCH_QUERY = `query ($q: String) {
@@ -119,7 +119,7 @@ const SEARCH_QUERY = `query ($q: String) {
 }`;
 
 async function searchResults(keyword) {
-    console.log(`[Search] 🔍 VidHawk — recherche de "${keyword}"`);
+    console.log(`[Search] 🔍 VidHawk — searching for "${keyword}"`);
     try {
         const data = await anilistQuery(SEARCH_QUERY, { q: keyword });
         const media = data && data.Page && Array.isArray(data.Page.media) ? data.Page.media : [];
@@ -136,7 +136,7 @@ async function searchResults(keyword) {
             });
         }
 
-        console.log(`[Search] ✅ ${results.length} résultat(s)`);
+        console.log(`[Search] ✅ ${results.length} result(s)`);
         sendSupabaseLog("VidHawk", "SEARCH", {
             keyword: keyword,
             results_count: results.length,
@@ -150,7 +150,7 @@ async function searchResults(keyword) {
 }
 
 // ==========================================
-// 📖 DÉTAILS
+// 📖 DETAILS
 // ==========================================
 
 const DETAILS_QUERY = `query ($id: Int) {
@@ -171,24 +171,24 @@ const DETAILS_QUERY = `query ($id: Int) {
 
 async function extractDetails(url) {
     const anilistId = url.replace('vidhawk://', '');
-    console.log(`[Details] 📖 VidHawk — fiche AniList ${anilistId}`);
+    console.log(`[Details] 📖 VidHawk — AniList entry ${anilistId}`);
     sendSupabaseLog("VidHawk", "DETAILS", { media_url: `${VH_BASE}/embed/ani/${anilistId}/1/sub` });
 
     try {
         const data = await anilistQuery(DETAILS_QUERY, { id: parseInt(anilistId, 10) });
         const media = data && data.Media ? data.Media : null;
         if (!media) {
-            return JSON.stringify([{ description: 'Fiche introuvable sur AniList.', aliases: '', airdate: '' }]);
+            return JSON.stringify([{ description: 'Entry not found on AniList.', aliases: '', airdate: '' }]);
         }
 
-        const description = cleanText(media.description) || "Pas de synopsis disponible.";
+        const description = cleanText(media.description) || "No synopsis available.";
 
         const aliasParts = [];
-        if (media.averageScore) aliasParts.push(`Score : ${media.averageScore}/100`);
+        if (media.averageScore) aliasParts.push(`Score: ${media.averageScore}/100`);
         if (Array.isArray(media.genres) && media.genres.length) aliasParts.push(media.genres.join(', '));
         if (Array.isArray(media.synonyms) && media.synonyms.length) aliasParts.push(media.synonyms.slice(0, 3).join(' · '));
 
-        let airdate = media.seasonYear ? `Année : ${media.seasonYear}` : "";
+        let airdate = media.seasonYear ? `Year: ${media.seasonYear}` : "";
         const start = media.startDate;
         if (start && start.year && start.month && start.day) {
             const mm = String(start.month).padStart(2, '0');
@@ -204,25 +204,25 @@ async function extractDetails(url) {
         }]);
     } catch (error) {
         sendSupabaseLog("VidHawk", "ERROR", { media_url: `vidhawk://${anilistId}`, error_message: String(error) });
-        return JSON.stringify([{ description: 'Erreur de chargement.', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: 'Loading error.', aliases: '', airdate: '' }]);
     }
 }
 
 // ==========================================
-// 📂 ÉPISODES
+// 📂 EPISODES
 // ==========================================
 
 async function extractEpisodes(url) {
     const anilistId = url.replace('vidhawk://', '');
-    console.log(`[Episodes] 📂 VidHawk — épisodes de ${anilistId}`);
+    console.log(`[Episodes] 📂 VidHawk — episodes of ${anilistId}`);
 
     try {
         const data = await anilistQuery(DETAILS_QUERY, { id: parseInt(anilistId, 10) });
         const media = data && data.Media ? data.Media : null;
         if (!media) return JSON.stringify([]);
 
-        // Une série en cours n'annonce pas "episodes" ; on se rabat sur le
-        // prochain épisode programmé, moins un.
+        // An ongoing series does not advertise its episode count; fall back to
+        // the next scheduled episode, minus one.
         let total = 0;
         if (typeof media.episodes === 'number' && media.episodes > 0) {
             total = media.episodes;
@@ -237,11 +237,11 @@ async function extractEpisodes(url) {
                 href: `vidhawk-play://${anilistId}/${n}`,
                 number: n,
                 season: 1,
-                title: `Épisode ${n}`
+                title: `Episode ${n}`
             });
         }
 
-        console.log(`[Episodes] ✅ ${episodes.length} épisode(s)`);
+        console.log(`[Episodes] ✅ ${episodes.length} episode(s)`);
         return JSON.stringify(episodes);
     } catch (error) {
         sendSupabaseLog("VidHawk", "ERROR", { media_url: `vidhawk://${anilistId}`, error_message: String(error) });
@@ -250,20 +250,20 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🎬 LECTURE
+// 🎬 PLAYBACK
 // ==========================================
 
-// Sans "stream=1", /api/stream/race répond d'un bloc en ~1 s :
+// Without "stream=1", /api/stream/race answers in one block in ~1 s:
 //   {winner, ticket, servers:[{id,label,ticket,ok,ms}], anilistId, malId, episode}
-// Avec "stream=1" il tient la connexion ouverte et débite du NDJSON
-// ({"type":"row","row":{…}}) — inutilisable depuis Sora, qui attend la fin du
-// corps. On interroge donc la variante bloc, et on tolère quand même le NDJSON
-// au cas où le serveur y reviendrait.
+// With "stream=1" it holds the connection open and drips NDJSON
+// ({"type":"row","row":{…}}) — unusable from Sora, which waits for the end of
+// the body. So we query the block variant, while still tolerating NDJSON in
+// case the server reverts to it.
 function parseRaceRows(body) {
     const rows = [];
     if (!body) return rows;
 
-    // Variante bloc : un seul objet JSON avec un tableau "servers".
+    // Block variant: a single JSON object with a "servers" array.
     try {
         const whole = JSON.parse(body);
         if (whole && Array.isArray(whole.servers)) {
@@ -275,7 +275,7 @@ function parseRaceRows(body) {
             }
             return rows;
         }
-    } catch (e) { /* pas un objet unique : on tente le NDJSON */ }
+    } catch (e) { /* not a single object: try NDJSON */ }
 
     for (const line of String(body).split('\n')) {
         const trimmed = line.trim();
@@ -297,9 +297,9 @@ async function raceTickets(anilistId, epNumber, referer) {
 
     const rows = parseRaceRows(body);
 
-    // 403 + {"blocked":true} = l'hôte parent n'est pas autorisé à embarquer VidHawk.
+    // 403 + {"blocked":true} = the parent host is not allowed to embed VidHawk.
     if (rows.length === 0 && body && body.indexOf('"blocked"') !== -1) {
-        console.log(`[Player] 🚫 VidHawk refuse l'embarquement depuis cet hôte.`);
+        console.log(`[Player] 🚫 VidHawk refuses to be embedded from this host.`);
     }
     return rows;
 }
@@ -327,7 +327,7 @@ async function extractStreamUrl(url) {
     const epNumber = parts.length > 1 ? parts[1] : '1';
     const referer = `${VH_BASE}/embed/ani/${anilistId}/${epNumber}/sub`;
 
-    console.log(`[Player] 🎬 VidHawk — AniList ${anilistId}, épisode ${epNumber}`);
+    console.log(`[Player] 🎬 VidHawk — AniList ${anilistId}, episode ${epNumber}`);
 
     const streams = [];
     const allSubtitles = [];
@@ -337,16 +337,16 @@ async function extractStreamUrl(url) {
 
     try {
         const rows = await raceTickets(anilistId, epNumber, referer);
-        console.log(`[Player] 🏁 race : ${rows.length} serveur(s)`);
+        console.log(`[Player] 🏁 race: ${rows.length} server(s)`);
 
-        // Repli serveur par serveur si la course n'a rien donné.
+        // Per-server fallback if the race came back empty.
         if (rows.length === 0) {
             for (const server of VH_SERVERS) {
                 const row = await resolveTicket(anilistId, epNumber, server, referer);
                 if (row) rows.push(row);
-                else failedLinks.push({ server_name: server, url: `${VH_BASE}/api/stream/resolve`, reason: "Aucun ticket renvoyé" });
+                else failedLinks.push({ server_name: server, url: `${VH_BASE}/api/stream/resolve`, reason: "No ticket returned" });
             }
-            console.log(`[Player] 🔁 resolve : ${rows.length} serveur(s)`);
+            console.log(`[Player] 🔁 resolve: ${rows.length} server(s)`);
         }
 
         const seenTickets = new Set();
@@ -367,7 +367,7 @@ async function extractStreamUrl(url) {
             }
 
             if (!payload || !Array.isArray(payload.tracks) || payload.tracks.length === 0) {
-                failedLinks.push({ server_name: serverLabel, url: `${VH_BASE}/api/play`, reason: "Aucune piste dans la réponse" });
+                failedLinks.push({ server_name: serverLabel, url: `${VH_BASE}/api/play`, reason: "No track in the response" });
                 continue;
             }
 
@@ -384,10 +384,10 @@ async function extractStreamUrl(url) {
                     streamUrl: src,
                     headers: { "Referer": `${VH_BASE}/`, "User-Agent": VH_UA }
                 });
-                console.log(`   -> ${serverLabel} / ${audioLabel} : ${src.slice(0, 80)}…`);
+                console.log(`   -> ${serverLabel} / ${audioLabel}: ${src.slice(0, 80)}…`);
             }
 
-            // Les sous-titres sont regroupés par piste audio dans "captions".
+            // Captions are grouped per audio track under "captions".
             const captions = payload.captions || {};
             for (const audioKey of Object.keys(captions)) {
                 const list = captions[audioKey];
@@ -417,7 +417,7 @@ async function extractStreamUrl(url) {
         }
 
         console.log(`-----------------------------------------------------`);
-        console.log(`[Player] 📊 Bilan : ${streams.length} lien(s), ${allSubtitles.length} sous-titre(s).`);
+        console.log(`[Player] 📊 Summary: ${streams.length} link(s), ${allSubtitles.length} subtitle track(s).`);
 
         sendSupabaseLog("VidHawk", "PLAYER", {
             media_url: referer,

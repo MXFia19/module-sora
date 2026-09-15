@@ -1,28 +1,27 @@
 // ==========================================
 // ⚙️ SORA MODULE — ANICLIPSE
 // ==========================================
-// aniclipse.com n'héberge aucune vidéo : c'est un catalogue, indexé par
-// identifiant AniList, qui embarque des lecteurs tiers.
+// aniclipse.com hosts no video at all: it is a catalogue, keyed by AniList id,
+// that embeds third-party players.
 //
-//   GET /api/anime/search?q=<texte>
+//   GET /api/anime/search?q=<text>
 //       -> {data:{Page:{pageInfo, media:[{id, title, coverImage, …}]}}}
 //   GET /api/anime/episodes?anilistId=<id>
 //       -> {episodes:[{number, title, thumbnail, aired, description}],
 //           tvdbSeriesId, source, fillers}
 //   GET /api/watch/servers?anilistId=<id>&episode=<n>
-//       -> {sub:[…], dub:[…], fast:[…]}  — quels lecteurs couvrent l'épisode
+//       -> {sub:[…], dub:[…], fast:[…]}  — which players cover the episode
 //   GET /api/watch/episode?anilistId=&episode=&server=&type=
 //       -> {url:"https://vidhawk.buzz/embed/ani/…", type:"embed", streams:[]}
 //
-// « streams » est toujours vide : tout passe par un embarquement. On résout
-// donc vidhawk nous-mêmes — sa chaîne interne est ouverte (voir le module
-// vidhawk de ce dépôt) :
-//   /api/stream/race?…  -> {servers:[{id,label,ticket}]}
-//   /api/play?t=<ticket> -> pistes audio + sous-titres
+// "streams" is always empty: everything goes through an embed. So we resolve
+// vidhawk ourselves — its internal chain is open (see this repository's vidhawk
+// module):
+//   /api/stream/race?…   -> {servers:[{id,label,ticket}]}
+//   /api/play?t=<ticket> -> audio tracks + captions
 //
-// L'intérêt d'aniclipse par rapport à vidhawk seul : les vrais titres
-// d'épisodes, leurs vignettes, leurs dates de diffusion et la liste des
-// hors-série (« fillers »), qu'AniList ne donne pas.
+// What aniclipse adds over vidhawk alone: the real episode titles, their
+// thumbnails, their air dates and the filler list, none of which AniList gives.
 
 const AC_BASE = "https://aniclipse.com";
 const ANILIST_API = "https://graphql.anilist.co";
@@ -51,12 +50,12 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
             await fetch(`${SUPABASE_URL}/rest/v1/app_logs`, { method: "POST", headers: headers, body: JSON.stringify(payload) });
         }
     } catch (e) {
-        console.log(`[Tracker] 🚨 Erreur d'envoi vers Supabase : ${e.message}`);
+        console.log(`[Tracker] 🚨 Failed to send to Supabase: ${e.message}`);
     }
 }
 
 // ==========================================
-// 🌐 RÉSEAU
+// 🌐 NETWORK
 // ==========================================
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
@@ -114,11 +113,11 @@ function cleanText(html) {
 }
 
 // ==========================================
-// 🔍 RECHERCHE
+// 🔍 SEARCH
 // ==========================================
 
 async function searchResults(keyword) {
-    console.log(`[Search] 🔍 Aniclipse — recherche de "${keyword}"`);
+    console.log(`[Search] 🔍 Aniclipse — searching for "${keyword}"`);
     try {
         const data = await acGet(`/api/anime/search?q=${encodeURIComponent(keyword)}`);
         const media = data && data.data && data.data.Page && Array.isArray(data.data.Page.media)
@@ -141,7 +140,7 @@ async function searchResults(keyword) {
             });
         }
 
-        console.log(`[Search] ✅ ${results.length} résultat(s)`);
+        console.log(`[Search] ✅ ${results.length} result(s)`);
         sendSupabaseLog("Aniclipse", "SEARCH", {
             keyword: keyword,
             results_count: results.length,
@@ -155,12 +154,11 @@ async function searchResults(keyword) {
 }
 
 // ==========================================
-// 📖 DÉTAILS
+// 📖 DETAILS
 // ==========================================
 
-// Aniclipse n'expose pas de fiche par identifiant : son /api/anime/search
-// n'accepte qu'un texte. On lit donc la fiche chez AniList, la même source
-// que celle dont aniclipse recopie le format.
+// Aniclipse exposes no per-id entry: its /api/anime/search only takes text. So
+// the entry is read from AniList, the very source whose shape aniclipse copies.
 const DETAILS_QUERY = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id
@@ -183,15 +181,15 @@ async function extractDetails(url) {
         const data = await anilistQuery(DETAILS_QUERY, { id: parseInt(anilistId, 10) });
         const media = data && data.Media ? data.Media : null;
         if (!media) {
-            return JSON.stringify([{ description: 'Fiche introuvable.', aliases: '', airdate: '' }]);
+            return JSON.stringify([{ description: 'Entry not found.', aliases: '', airdate: '' }]);
         }
 
         const aliasParts = [];
-        if (media.averageScore) aliasParts.push(`Score : ${media.averageScore}/100`);
+        if (media.averageScore) aliasParts.push(`Score: ${media.averageScore}/100`);
         if (Array.isArray(media.genres) && media.genres.length) aliasParts.push(media.genres.join(', '));
         if (Array.isArray(media.synonyms) && media.synonyms.length) aliasParts.push(media.synonyms.slice(0, 3).join(' · '));
 
-        let airdate = media.seasonYear ? `Année : ${media.seasonYear}` : "";
+        let airdate = media.seasonYear ? `Year: ${media.seasonYear}` : "";
         const start = media.startDate;
         if (start && start.year && start.month && start.day) {
             airdate = `${start.year}-${String(start.month).padStart(2, '0')}-${String(start.day).padStart(2, '0')}`;
@@ -199,30 +197,30 @@ async function extractDetails(url) {
         if (media.status) airdate = airdate ? `${airdate} · ${media.status}` : media.status;
 
         return JSON.stringify([{
-            description: cleanText(media.description) || "Pas de synopsis disponible.",
+            description: cleanText(media.description) || "No synopsis available.",
             aliases: aliasParts.join(' | '),
             airdate: airdate
         }]);
     } catch (error) {
         sendSupabaseLog("Aniclipse", "ERROR", { media_url: url, error_message: String(error) });
-        return JSON.stringify([{ description: 'Erreur de chargement.', aliases: '', airdate: '' }]);
+        return JSON.stringify([{ description: 'Loading error.', aliases: '', airdate: '' }]);
     }
 }
 
 // ==========================================
-// 📂 ÉPISODES
+// 📂 EPISODES
 // ==========================================
 
 async function extractEpisodes(url) {
     const anilistId = url.replace('aniclipse://', '');
-    console.log(`[Episodes] 📂 Aniclipse — épisodes de ${anilistId}`);
+    console.log(`[Episodes] 📂 Aniclipse — episodes of ${anilistId}`);
 
     try {
         const data = await acGet(`/api/anime/episodes?anilistId=${encodeURIComponent(anilistId)}`);
         const list = data && Array.isArray(data.episodes) ? data.episodes : [];
 
-        // « fillers » liste les numéros hors-série ; on les signale sans les
-        // retirer, le choix revient au spectateur.
+        // "fillers" lists the filler episode numbers; flag them rather than
+        // remove them — the choice belongs to the viewer.
         const fillers = new Set();
         if (Array.isArray(data && data.fillers)) {
             for (const f of data.fillers) {
@@ -238,8 +236,8 @@ async function extractEpisodes(url) {
             if (typeof n !== 'number' || seen.has(n)) continue;
             seen.add(n);
 
-            let title = item.title || `Épisode ${n}`;
-            if (fillers.has(n)) title = `${title} (hors-série)`;
+            let title = item.title || `Episode ${n}`;
+            if (fillers.has(n)) title = `${title} (filler)`;
 
             episodes.push({
                 href: `aniclipse-play://${anilistId}/${n}`,
@@ -250,7 +248,7 @@ async function extractEpisodes(url) {
         }
 
         episodes.sort((a, b) => a.number - b.number);
-        console.log(`[Episodes] ✅ ${episodes.length} épisode(s) (source : ${(data && data.source) || 'inconnue'})`);
+        console.log(`[Episodes] ✅ ${episodes.length} episode(s) (source: ${(data && data.source) || 'unknown'})`);
         return JSON.stringify(episodes);
     } catch (error) {
         sendSupabaseLog("Aniclipse", "ERROR", { media_url: url, error_message: String(error) });
@@ -259,13 +257,13 @@ async function extractEpisodes(url) {
 }
 
 // ==========================================
-// 🎬 LECTURE — résolution de vidhawk
+// 🎬 PLAYBACK — resolving vidhawk
 // ==========================================
 
-// Sans « stream=1 », /api/stream/race répond d'un bloc :
+// Without "stream=1", /api/stream/race answers in one block:
 //   {winner, ticket, servers:[{id,label,ticket,ok,ms}], …}
-// Avec, il tient la connexion ouverte et débite du NDJSON, ce que Sora ne
-// peut pas consommer. On interroge la variante bloc, en tolérant le NDJSON.
+// With it, it holds the connection open and drips NDJSON, which Sora cannot
+// consume. Query the block variant, while tolerating NDJSON.
 function parseRaceRows(body) {
     const rows = [];
     if (!body) return rows;
@@ -281,7 +279,7 @@ function parseRaceRows(body) {
             }
             return rows;
         }
-    } catch (e) { /* on tente le NDJSON */ }
+    } catch (e) { /* try NDJSON */ }
 
     for (const line of String(body).split('\n')) {
         const trimmed = line.trim();
@@ -317,7 +315,7 @@ async function extractStreamUrl(url) {
     const mediaUrl = `${AC_BASE}/watch/${anilistId}?ep=${epNumber}`;
     const vhReferer = `${VH_BASE}/embed/ani/${anilistId}/${epNumber}/sub`;
 
-    console.log(`[Player] 🎬 Aniclipse — AniList ${anilistId}, épisode ${epNumber}`);
+    console.log(`[Player] 🎬 Aniclipse — AniList ${anilistId}, episode ${epNumber}`);
 
     const streams = [];
     const allSubtitles = [];
@@ -326,28 +324,28 @@ async function extractStreamUrl(url) {
     let bestSubtitleHeaders = {};
 
     try {
-        // Quels lecteurs aniclipse annonce-t-il pour cet épisode ?
+        // Which players does aniclipse advertise for this episode?
         const servers = await acGet(`/api/watch/servers?anilistId=${encodeURIComponent(anilistId)}&episode=${encodeURIComponent(epNumber)}`);
         const subList = servers && Array.isArray(servers.sub) ? servers.sub : [];
         const dubList = servers && Array.isArray(servers.dub) ? servers.dub : [];
-        const annonces = Array.from(new Set(subList.concat(dubList)));
-        console.log(`[Player] 🗺️ Lecteurs annoncés : ${annonces.join(', ') || 'aucun'}`);
+        const advertised = Array.from(new Set(subList.concat(dubList)));
+        console.log(`[Player] 🗺️ Players advertised: ${advertised.join(', ') || 'none'}`);
 
-        if (annonces.length && annonces.indexOf('vidhawk') === -1) {
-            // Les autres lecteurs (anilink, vidbolt, kari) protègent leur
-            // résolution : anilink par un défi signé dans un bundle obfusqué,
-            // vidbolt par un jeton lié à l'adresse IP. On ne les prétend pas
-            // supportés.
-            console.log(`[Player] ⚠️ vidhawk absent ; les autres lecteurs ne sont pas résolus par ce module.`);
+        if (advertised.length && advertised.indexOf('vidhawk') === -1) {
+            // The other players (anilink, vidbolt, kari) protect their
+            // resolution: anilink with a challenge signed inside an obfuscated
+            // bundle, vidbolt with an IP-bound token. Do not pretend they are
+            // supported.
+            console.log(`[Player] ⚠️ vidhawk absent; the other players are not resolved by this module.`);
             failedLinks.push({
-                server_name: annonces.join('/'),
+                server_name: advertised.join('/'),
                 url: mediaUrl,
-                reason: "Lecteurs non résolus (défi signé ou jeton lié à l'IP)"
+                reason: "Players not resolved (signed challenge or IP-bound token)"
             });
         }
 
         const rows = await vidhawkTickets(anilistId, epNumber, vhReferer);
-        console.log(`[Player] 🏁 vidhawk : ${rows.length} serveur(s)`);
+        console.log(`[Player] 🏁 vidhawk: ${rows.length} server(s)`);
 
         const seenTickets = new Set();
         const seenStreams = new Set();
@@ -360,7 +358,7 @@ async function extractStreamUrl(url) {
             const payload = await vidhawkPlay(row.ticket, vhReferer);
 
             if (!payload || !Array.isArray(payload.tracks) || payload.tracks.length === 0) {
-                failedLinks.push({ server_name: serverLabel, url: `${VH_BASE}/api/play`, reason: "Aucune piste dans la réponse" });
+                failedLinks.push({ server_name: serverLabel, url: `${VH_BASE}/api/play`, reason: "No track in the response" });
                 continue;
             }
 
@@ -408,7 +406,7 @@ async function extractStreamUrl(url) {
         }
 
         console.log(`-----------------------------------------------------`);
-        console.log(`[Player] 📊 Bilan : ${streams.length} lien(s), ${allSubtitles.length} sous-titre(s).`);
+        console.log(`[Player] 📊 Summary: ${streams.length} link(s), ${allSubtitles.length} subtitle track(s).`);
 
         sendSupabaseLog("Aniclipse", "PLAYER", {
             media_url: mediaUrl,

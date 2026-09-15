@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "première version : catalogue AniList, lecture via /api/stream/race puis /api/play (pistes sub, dub, japonais, hindi + sous-titres)"
+    "changelog": "first release: AniList catalogue, playback via /api/stream/race then /api/play (sub, dub, Japanese and Hindi tracks + captions)"
 }
