@@ -13,6 +13,7 @@ import type { UserConfig } from './userconfig';
 import { configurePage } from './configure';
 import { debugPage } from './debugpage';
 import { search, trending } from './catalog';
+import * as history from './history';
 import { livePage } from './livepage';
 import { runDiagnostic } from './debug';
 import { pushRequest, snapshot, subscribe, subscriberCount } from './livelog';
@@ -328,6 +329,18 @@ if (config.debugUi) {
     }
   });
 
+  /** Historique des diagnostics : la liste, puis un rapport complet à la
+   *  demande. Le rapport pèse trop pour être renvoyé avec la liste. */
+  app.get('/debug/history', (_req, res) => res.json({ runs: history.list() }));
+
+  app.get('/debug/history/:id', (req, res) => {
+    const entry = history.find(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'Exécution inconnue ou expirée.' });
+    res.json({ ...entry.report, historyId: entry.id, at: entry.at });
+  });
+
+  app.post('/debug/history/clear', (_req, res) => res.json({ cleared: history.clear() }));
+
   app.get('/debug/run', async (req, res) => {
     const type = req.query.type === 'series' ? 'series' : 'movie';
     const id = String(req.query.id ?? '').trim();
@@ -342,10 +355,15 @@ if (config.debugUi) {
     }
 
     try {
-      res.json(await runDiagnostic(
-        type, id, num(req.query.season), num(req.query.episode),
-        req.query.check !== '0',
-      ));
+      const season = num(req.query.season);
+      const episode = num(req.query.episode);
+      const report = await runDiagnostic(type, id, season, episode, req.query.check !== '0');
+
+      // Mémorisé avant d'être rendu : les logs d'une exécution ne sont pas
+      // reproductibles — relancer plus tard interroge des sources qui ont
+      // changé entre-temps.
+      const entry = history.remember(type, id, season, episode, report);
+      res.json({ ...report, historyId: entry.id, at: entry.at });
     } catch (e) {
       log.error('diagnostic en échec:', e);
       res.json({

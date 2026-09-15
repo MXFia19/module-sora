@@ -57,6 +57,14 @@ td.u{color:var(--dim);font-family:ui-monospace,monospace;font-size:.75rem;word-b
 .pill.y{background:#12261a;color:var(--ok)} .pill.n{background:#2a1315;color:var(--err)}
 .pill.p{background:#1c2333;color:#79c0ff}
 .pill.d{background:#20221c;color:#d29922}
+.runs{display:flex;flex-direction:column;gap:.25rem;max-height:14rem;overflow:auto}
+.run{display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;border-radius:7px;border:1px solid transparent;
+ background:#0d1117;cursor:pointer;text-align:left;color:inherit;font:inherit;font-weight:400;width:100%}
+.run:hover{border-color:var(--line)}
+.run.on{border-color:var(--accent)}
+.run .when{color:var(--dim);font-size:.75rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.run .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.85rem}
+.run .num{font-size:.72rem;color:var(--dim);white-space:nowrap}
 .tabs{display:flex;gap:.4rem;margin-bottom:.8rem;flex-wrap:wrap;align-items:center}
 .tab{padding:.35rem .8rem;border-radius:999px;border:1px solid var(--line);background:#21262d;
  color:var(--dim);font:inherit;font-size:.82rem;cursor:pointer;font-weight:400}
@@ -125,6 +133,16 @@ pre .debug{color:var(--dim)} pre .warn{color:var(--warn)} pre .error{color:var(-
   <div class="grid" id="cat"></div>
 </div>
 
+<div class="bar">
+  <div class="row" style="align-items:center;margin-bottom:.6rem">
+    <b style="flex:1;font-size:.92rem">Recherches précédentes</b>
+    <button class="ghost" id="hclear" style="padding:.3rem .7rem;font-size:.8rem">Oublier</button>
+    <button class="ghost" id="cclear" title="Oblige les sources à tout re-chercher à la prochaine requête"
+      style="padding:.3rem .7rem;font-size:.8rem">Vider le cache <span class="badge" id="centries">?</span></button>
+  </div>
+  <div class="runs" id="runs"></div>
+</div>
+
 <div id="out"></div>
 </main>
 <script>
@@ -147,12 +165,23 @@ document.querySelectorAll('.ex a').forEach(a => a.addEventListener('click', () =
   run();
 }));
 
+/* Heure absolue ET décalage : l'absolue situe la ligne quand on revient sur une
+   exécution une heure plus tard, le décalage montre où le temps est parti. */
+const heure = ms => {
+  const d = new Date(ms);
+  return d.toLocaleTimeString('fr-FR', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+};
+
+const dateHeure = ms => new Date(ms).toLocaleString('fr-FR',
+  { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
 function logsHtml(lines) {
   if (!lines.length) return '<p class="note">Aucun log.</p>';
   const t0 = lines[0].at;
   return '<pre>' + lines.map(l =>
     '<span class="' + l.level + '">' +
-    String(l.at - t0).padStart(5) + 'ms  ' + esc(l.scope) + '  ' + esc(l.message) +
+    heure(l.at) + '  ' + ('+' + (l.at - t0) + 'ms').padStart(8) + '  ' +
+    esc(l.scope) + '  ' + esc(l.message) +
     '</span>').join('\\n') + '</pre>';
 }
 
@@ -193,7 +222,7 @@ function render(r) {
   let html = '<div class="media"><b>' + esc(m.title) + '</b>' +
     (m.year ? ' <span class="badge">' + m.year + '</span>' : '') +
     (m.anime ? ' <span class="badge">anime</span>' : '') +
-    '<div class="meta">tmdb ' + m.tmdbId +
+    '<div class="meta">' + (r.at ? dateHeure(r.at) + ' · ' : '') + 'tmdb ' + m.tmdbId +
     (m.season ? ' · s' + m.season + 'e' + m.episode : '') +
     (m.absoluteEpisode ? ' · épisode absolu ' + m.absoluteEpisode : '') +
     ' · ' + r.totalMs + 'ms' +
@@ -305,13 +334,85 @@ async function run() {
     ' <span class="note">quelques secondes, chaque source est testée séparément</span></div>';
   try {
     const res = await fetch('/debug/run?' + p);
-    render(await res.json());
+    const rapport = await res.json();
+    courante = rapport.historyId || null;
+    render(rapport);
+    historique();
+    compteurCache();
   } catch (e) {
     $('#out').innerHTML = '<div class="err">Le serveur n\\'a pas répondu : ' + esc(e.message) + '</div>';
   } finally {
     $('#go').disabled = false;
   }
 }
+
+/* ------------------------------- historique ------------------------------- */
+/* Les logs d'une exécution ne sont pas reproductibles : relancer plus tard
+   interroge des sources qui ont changé entre-temps. On garde donc les vingt
+   dernières côté serveur, et on peut y revenir sans rien relancer. */
+
+let courante = null;
+
+async function historique() {
+  try {
+    const r = await (await fetch('/debug/history')).json();
+    const runs = r.runs || [];
+    $('#runs').innerHTML = runs.length
+      ? runs.map(x =>
+          '<button class="run' + (x.id === courante ? ' on' : '') + '" data-h="' + esc(x.id) + '">' +
+          '<span class="when">' + dateHeure(x.at) + '</span>' +
+          '<span class="lbl">' + esc(x.label) +
+            (x.season ? ' <span class="badge">s' + x.season + 'e' + x.episode + '</span>' : '') +
+            (x.error ? ' <span class="pill n">échec</span>' : '') +
+          '</span>' +
+          '<span class="num">' + x.streams + ' flux · ' + x.ok + '/' + x.sources + ' sources · ' + x.totalMs + 'ms</span>' +
+          '</button>').join('')
+      : '<p class="note" style="margin:0">Aucune recherche pour l\\'instant.</p>';
+
+    $('#runs').querySelectorAll('.run').forEach(b => b.addEventListener('click', async () => {
+      const res = await fetch('/debug/history/' + encodeURIComponent(b.dataset.h));
+      const rapport = await res.json();
+      if (rapport.error && !rapport.media) { $('#out').innerHTML = '<div class="err">' + esc(rapport.error) + '</div>'; return; }
+      courante = b.dataset.h;
+      render(rapport);
+      historique();
+      $('#out').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+  } catch (e) {
+    $('#runs').innerHTML = '<p class="note" style="margin:0">Historique injoignable : ' + esc(e.message) + '</p>';
+  }
+}
+
+$('#hclear').addEventListener('click', async () => {
+  await fetch('/debug/history/clear', { method: 'POST' });
+  courante = null;
+  historique();
+});
+
+/* Le cache du serveur, pas celui du navigateur : le vider oblige les sources à
+   tout re-chercher à la requête suivante. C'est ce qu'on veut après avoir
+   corrigé un extracteur — sinon on relit l'ancien résultat sans le savoir. */
+async function compteurCache() {
+  try {
+    const j = await (await fetch('/health')).json();
+    $('#centries').textContent = j.cache.entries;
+  } catch (e) { /* le compteur n'est qu'indicatif */ }
+}
+
+$('#cclear').addEventListener('click', async () => {
+  const b = $('#cclear');
+  b.disabled = true;
+  try {
+    const r = await (await fetch('/admin/cache/clear', { method: 'POST' })).json();
+    b.innerHTML = r.cleared + ' entrées vidées';
+    setTimeout(() => { b.innerHTML = 'Vider le cache <span class="badge" id="centries">?</span>'; compteurCache(); }, 2000);
+  } finally {
+    b.disabled = false;
+  }
+});
+
+compteurCache();
+historique();
 
 $('#go').addEventListener('click', run);
 $('#id').addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
