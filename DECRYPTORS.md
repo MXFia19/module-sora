@@ -554,6 +554,43 @@ unresolved. They are reported in diagnostics rather than silently dropped.
 
 ---
 
+## 22. Anikura — house ids, open playback
+
+`anikura.club`, Next.js App Router. Its ids are **its own**: One Piece is `1642` there, not
+AniList's `21`. Its records do carry `ani_id` and `mal_id`, but the playback route is keyed
+by the internal id — conflating the two leads nowhere.
+
+```
+GET /search?q=<text>        -> <a class="poster-link" href="/anime/<id>/<slug>">
+GET /anime/<id>/<slug>      -> synopsis in <meta name="description">,
+                               episodes rendered in the clear as "Episode N"
+GET /api/watch/streams?id=&ep=&lang=<sub|dub>   (header x-anikura-player: 1)
+                            -> {streams:[{id,label,language,kind,url}], audioRelease, language}
+```
+
+**Two false leads, both settled by counter-example rather than by intuition:**
+
+`/browse` accepts a `?q=` parameter **the server ignores**. I first read a Frieren record
+inside the RSC payload of `/browse?q=frieren` and concluded the search worked. It was there
+for *every* query: "naruto" and a deliberately nonsensical query return the same 47-record
+payload, Frieren included. Only `/search?q=` actually searches. *A datum present in a
+response does not prove it is there because of the request.*
+
+The site has accounts and a membership (`/api/auth/me`, `/api/membership/me`), and the
+player code handles a `401` with a `trial` flag, so a paywall looked settled. Measured:
+`/api/watch/streams` answers **200 with real streams and no credentials at all**. The module
+still handles the `unauthorized` case rather than betting it will never arrive.
+
+Links come in two shapes, absolute
+(`anikura-stream-edge.anikura.workers.dev/api/stream/proxy?url=`) and site-relative
+(`/api/stream/proxy?url=`); the relative ones are prefixed.
+
+| Module | Status |
+|---|---|
+| **anikura** | ✅ verified live — Frieren: 28 episodes, 4 streams (3 sub + 1 dub), 1080p |
+
+---
+
 ## 🧱 What held (Part III)
 
 - **anilink.cc** — every call to `/api/internal/streams/<anilistId>/<ep>` carries headers
@@ -600,4 +637,4 @@ unresolved. They are reported in diagnostics rather than silently dropped.
    only the player config; the useful token sat in the clear in the episode page's iframe.
 
 ---
-*Part III generated 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse` (verified live, playback included) and `animesalt` (verified up to the signed link).*
+*Part III — modules `vidhawk`, `vidrift`, `aniclipse`, `anikura` (verified live, playback included) and `animesalt` (verified up to the signed link). Last updated 2026-09-16.*

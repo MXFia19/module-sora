@@ -562,6 +562,44 @@ silence.
 
 ---
 
+## 22. Anikura — identifiants maison, lecture ouverte
+
+`anikura.club`, Next.js App Router. Ses identifiants sont **les siens** : One Piece y est
+`1642`, pas `21` comme chez AniList. Ses fiches portent bien `ani_id` et `mal_id`, mais la
+route de lecture est keyée par l'identifiant interne — les confondre ne mène nulle part.
+
+```
+GET /search?q=<texte>       -> <a class="poster-link" href="/anime/<id>/<slug>">
+GET /anime/<id>/<slug>      -> synopsis dans <meta name="description">,
+                               épisodes rendus en clair sous la forme « Episode N »
+GET /api/watch/streams?id=&ep=&lang=<sub|dub>   (en-tête x-anikura-player: 1)
+                            -> {streams:[{id,label,language,kind,url}], audioRelease, language}
+```
+
+**Deux fausses pistes, toutes deux tranchées par contre-épreuve plutôt que par intuition :**
+
+`/browse` accepte un paramètre `?q=` **que le serveur ignore**. J'ai d'abord lu une fiche
+Frieren dans la charge RSC de `/browse?q=frieren` et conclu que la recherche marchait. Elle
+y était pour *toutes* les requêtes : « naruto » et une requête volontairement absurde
+rendent la même charge de 47 fiches, Frieren comprise. Seul `/search?q=` cherche
+réellement. *Une donnée présente dans une réponse ne prouve pas qu'elle y est à cause de
+la requête.*
+
+Le site a des comptes et un abonnement (`/api/auth/me`, `/api/membership/me`), et le code
+du lecteur gère un `401` avec un drapeau `trial` : le péage semblait acquis. Mesuré :
+`/api/watch/streams` répond **200 avec de vrais flux, sans aucune authentification**. Le
+module gère quand même le cas `unauthorized`, plutôt que de parier qu'il n'arrivera jamais.
+
+Les liens sortent sous deux formes, absolue
+(`anikura-stream-edge.anikura.workers.dev/api/stream/proxy?url=`) et relative au site
+(`/api/stream/proxy?url=`) ; les relatives sont préfixées.
+
+| Module | Statut |
+|---|---|
+| **anikura** | ✅ vérifié en direct — Frieren : 28 épisodes, 4 flux (3 sub + 1 dub), 1080p |
+
+---
+
 ## 🧱 Ce qui a résisté (partie III)
 
 - **anilink.cc** — chaque appel à `/api/internal/streams/<anilistId>/<ep>` porte des
@@ -609,4 +647,4 @@ silence.
    était en clair dans l'iframe de la page d'épisode.
 
 ---
-*Partie III générée le 2026-09-15 — modules `vidhawk`, `vidrift`, `aniclipse` (vérifiés en direct, lecture comprise) et `animesalt` (vérifié jusqu'au lien signé).*
+*Partie III — modules `vidhawk`, `vidrift`, `aniclipse`, `anikura` (vérifiés en direct, lecture comprise) et `animesalt` (vérifié jusqu'au lien signé). Dernière mise à jour : 2026-09-16.*
