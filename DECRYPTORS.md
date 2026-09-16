@@ -593,12 +593,39 @@ Links come in two shapes, absolute
 
 ## 🧱 What held (Part III)
 
-- **anilink.cc** — every call to `/api/internal/streams/<anilistId>/<ep>` carries headers
-  computed by `createStreamRequestHeaders`, in a separate 312 KB chunk run through
-  obfuscator.io (self-defending, rotating string table, hex arithmetic). The challenge
-  itself is served in the clear in the HTML
-  (`{id, issuedAt, expiresAt, salt, algorithmVersion:3, identityHash, obfuscatedSeed, mac}`),
-  but the function deriving the headers from it is still to be rebuilt.
+- **anilink.cc** — *dedicated attempt on 2026-09-16, three angles, all closed.*
+
+  Every call to `/api/internal/streams/<anilistId>/<ep>?variant=` carries headers computed
+  by `createStreamRequestHeaders`, in chunk `1ufypicdm1rf-.js` (312 KB, headed
+  `/* anilink-stream-protection-obfuscated */`).
+
+  **1. Static string-table decode — failed.** The accessors are obfuscator.io's
+  (`_0x10e4(idx, key)` RC4, `_0x9d7d(idx)` base64, offset `299` recovered), but the
+  encoding is not the standard RC4→base64: decoding **all 3,330 entries against all 2,491
+  candidate keys in the file** — 8.3 million attempts, exhaustiveness making the rotation
+  moot — yields exactly 4 three-letter strings. The decoder is a self-modifying variant.
+  Indices and keys are also built dynamically: only 5 call sites resolve statically.
+
+  **2. What the analysis did establish.** The bundle uses no `crypto.subtle` at all, but 17
+  `navigator`, 21 `window`, 10 `document`. The readable fragments show the payload:
+  `browser:{userAgent, userAgentData, language, languages, platform}` and an
+  `inspectorHints` built from `window` dimensions (devtools detection). **That is a browser
+  fingerprint, not merely obfuscator self-defense.** Sora forbids `window`, `navigator` and
+  `document`, so even fully deobfuscated the function would have to be fed a forged
+  fingerprint.
+
+  **3. Server probes — deliberately silent.** With no headers, and with the challenge
+  fields replayed: `401 {"code":"stream-source-unavailable","stage":"protection"}`, never
+  naming the expected header. No way around it either: `/api/streams/…` returns 404,
+  `/api/internal/streams/<id>/<ep>` without `variant` returns 400 (parameter validation, so
+  the route is reached before being gated), and the SSR page carries
+  `initialStreamData: null` and zero `.m3u8`. Only `/api/internal/providers` is open, and
+  it lists server names only.
+
+  **Verdict.** What remains is hand-deobfuscating a self-defending 312 KB bundle with a
+  non-standard string encoding, to arrive at an algorithm demanding a browser fingerprint
+  Sora cannot honestly produce — and which a single site rebuild invalidates. Dropped
+  knowingly, not for want of trying.
 - **vidbolt.pro** — backend `hianime.filmu.in`; `POST /token` returns a JWT whose payload
   contains **the caller's IP** (`{"ip":"…","iat":…,"exp":…}`), so it is IP-bound like
   FireStream (section 15). `/episodes?id=21` answers 32 KB with that token, but

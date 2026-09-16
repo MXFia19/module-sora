@@ -602,12 +602,41 @@ Les liens sortent sous deux formes, absolue
 
 ## 🧱 Ce qui a résisté (partie III)
 
-- **anilink.cc** — chaque appel à `/api/internal/streams/<anilistId>/<ep>` porte des
-  en-têtes calculés par `createStreamRequestHeaders`, dans un chunk séparé de 312 ko passé
-  à obfuscator.io (auto-défense, table de chaînes tournante, arithmétique hexadécimale).
-  Le défi lui-même est servi en clair dans le HTML
-  (`{id, issuedAt, expiresAt, salt, algorithmVersion:3, identityHash, obfuscatedSeed, mac}`),
-  mais la fonction qui en dérive les en-têtes reste à reconstruire.
+- **anilink.cc** — *tentative dédiée menée le 2026-09-16, trois angles, tous fermés.*
+
+  Chaque appel à `/api/internal/streams/<anilistId>/<ep>?variant=` porte des en-têtes
+  calculés par `createStreamRequestHeaders`, dans le chunk `1ufypicdm1rf-.js` (312 ko,
+  en-tête `/* anilink-stream-protection-obfuscated */`).
+
+  **1. Décodage statique de la table de chaînes — échoué.** Les accesseurs sont bien ceux
+  d'obfuscator.io (`_0x10e4(idx, clé)` RC4, `_0x9d7d(idx)` base64, offset `299` retrouvé),
+  mais le codage n'est pas le RC4→base64 standard : en décodant **les 3 330 entrées avec
+  les 2 491 clés candidates du fichier** — 8,3 millions d'essais, rotation rendue sans
+  objet par l'exhaustivité — il ne ressort que 4 chaînes de trois lettres. Le décodeur est
+  une variante auto-modifiante. Les index et les clés sont en outre construits
+  dynamiquement : seuls 5 sites d'appel se résolvent statiquement.
+
+  **2. Ce que l'analyse a quand même établi.** Le bundle n'utilise aucun `crypto.subtle`,
+  mais 17 `navigator`, 21 `window`, 10 `document`. Les fragments lisibles montrent la
+  charge utile : `browser:{userAgent, userAgentData, language, languages, platform}` et un
+  `inspectorHints` bâti sur les dimensions `window` (détection de devtools). **C'est une
+  empreinte navigateur, pas seulement de l'auto-défense d'obfuscateur.** Or Sora interdit
+  `window`, `navigator` et `document` : même entièrement déobfusquée, la fonction devrait
+  être nourrie d'une empreinte forgée.
+
+  **3. Sondes serveur — muettes par conception.** Sans en-tête, avec les champs du défi
+  rejoués : `401 {"code":"stream-source-unavailable","stage":"protection"}`, sans jamais
+  nommer l'en-tête attendu. Aucun contournement : `/api/streams/…` rend 404,
+  `/api/internal/streams/<id>/<ep>` sans `variant` rend 400 (validation des paramètres,
+  donc la route est bien atteinte avant d'être barrée), la page SSR porte
+  `initialStreamData: null` et zéro `.m3u8`. Seul `/api/internal/providers` est ouvert, et
+  il ne liste que des noms de serveurs.
+
+  **Verdict.** Le reste du chemin, c'est la déobfuscation manuelle d'un bundle
+  auto-défendu de 312 ko au codage de chaînes non standard, pour aboutir à un algorithme
+  qui réclame une empreinte navigateur que Sora ne peut pas produire honnêtement — et
+  qu'une seule reconstruction du site suffit à invalider. Abandonné sciemment, pas faute
+  d'avoir essayé.
 - **vidbolt.pro** — backend `hianime.filmu.in`, `POST /token` rend un JWT dont la charge
   utile contient **l'IP du demandeur** (`{"ip":"…","iat":…,"exp":…}`), donc lié à l'IP
   comme FireStream (section 15). `/episodes?id=21` répond 32 ko avec ce jeton, mais
