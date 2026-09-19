@@ -2,7 +2,7 @@
 // ⚙️ SORA MODULE — KURONO
 // ==========================================
 // kurono.nl is a Next.js anime site whose API is entirely open. Its notable
-// feature is soft subtitles: up to 28 tracks per title, French included.
+// feature is soft subtitles: up to 28 tracks per title, English first.
 //
 //   1. Catalogue  GET /sitemap.xml
 //                 -> every /series/<slug> (1929) and /movies/<slug> (716).
@@ -15,11 +15,14 @@
 //   4. Playback   GET /api/stream-resolve?slug=&ep=&anikotoSlug=&title=
 //                 -> {m3u8, subtitles:[{label,lang,url}], intro, outro, sourceId}
 //
-// Subtitles hang off the source: `legacy` carries the soft tracks, `anibd`
-// returns none because it is hard-subbed. So the module queries the default
-// source first (that is the one with the subtitles) and then asks again with
-// &exclude=legacy purely to add a second stream. Getting that backwards would
-// silently lose every subtitle.
+// Subtitles hang off which source answers: `legacy` carries the soft tracks,
+// `anibd` returns none because it is hard-subbed. And which source answers
+// turns on the anikotoSlug — for Look Back the bare slug gets `legacy` with 28
+// tracks, while the suffixed `look-back-dxt0w` the episodes API hands out gets
+// `anibd` with none. Neither form wins everywhere, so extractStreamUrl asks
+// with both and merges, plus a third call excluding `legacy` to add a stream.
+// Using only the suffixed form yields a module that looks fine and silently
+// has no subtitles at all.
 //
 // m3u8 and subtitle urls come back relative, pointing at the site's own
 // proxy (/api/anime-stream?proxy=<upstream>), so they are prefixed with the
@@ -30,8 +33,8 @@ const KU_BASE = "https://kurono.nl";
 const KU_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 // Preferred subtitle language for the single `subtitles` field Sora shows by
-// default; everything else still ships in allSubtitles.
-const KU_PREFERRED_SUBS = ["french", "english"];
+// default, in order; everything else still ships in allSubtitles.
+const KU_PREFERRED_SUBS = ["english", "french"];
 
 // ==========================================
 // 🗄️ SUPABASE TRACKER
@@ -250,7 +253,14 @@ async function resolveSource(slug, anikotoSlug, ep, title, exclude) {
     let path = `/api/stream-resolve?slug=${encodeURIComponent(slug)}&ep=${encodeURIComponent(ep)}`
         + `&anikotoSlug=${encodeURIComponent(anikotoSlug)}&title=${encodeURIComponent(title)}`;
     if (exclude) path += `&exclude=${encodeURIComponent(exclude)}`;
-    return await kuGetJson(path, `${KU_BASE}/series/${slug}`);
+
+    // One retry: a single dropped call here costs every subtitle track, since
+    // only one of the two slug forms returns the soft-subbed source. Seen once
+    // in testing — a run came back with no subtitles at all, and the same
+    // query succeeded on the next two attempts.
+    let data = await kuGetJson(path, `${KU_BASE}/series/${slug}`);
+    if (!data) data = await kuGetJson(path, `${KU_BASE}/series/${slug}`);
+    return data;
 }
 
 function subtitleRank(lang) {

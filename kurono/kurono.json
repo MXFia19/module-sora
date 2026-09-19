@@ -7,7 +7,7 @@
         "url": "https://github.com/MXFia19"
     },
     "version": "1.0.0",
-    "language": "Multi",
+    "language": "English",
     "streamType": "HLS",
     "quality": "1080p",
     "baseUrl": "https://kurono.nl/",
@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "first release: sitemap as the catalogue, episodes from /api/anikoto-episodes, playback and soft subtitles from /api/stream-resolve (up to 28 tracks, French included)"
+    "changelog": "first release: sitemap as the catalogue, episodes from /api/anikoto-episodes, playback and soft subtitles from /api/stream-resolve (up to 28 tracks, English selected by default)"
 }
