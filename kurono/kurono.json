@@ -1,0 +1,23 @@
+{
+    "sourceName": "Kurono",
+    "iconUrl": "https://kurono.nl/api/poster?slug=bleach",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "Multi",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://kurono.nl/",
+    "searchBaseUrl": "https://kurono.nl/browse",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/kurono/kurono.js",
+    "type": "anime",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: sitemap as the catalogue, episodes from /api/anikoto-episodes, playback and soft subtitles from /api/stream-resolve (up to 28 tracks, French included)"
+}
