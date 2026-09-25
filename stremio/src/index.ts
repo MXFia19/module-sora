@@ -13,6 +13,7 @@ import type { UserConfig } from './userconfig';
 import { configurePage } from './configure';
 import { debugPage } from './debugpage';
 import { search, trending } from './catalog';
+import { catalog as buildCatalog, meta as buildMeta } from './meta';
 import * as history from './history';
 import { livePage } from './livepage';
 import { runDiagnostic } from './debug';
@@ -40,7 +41,7 @@ function manifest(c: UserConfig) {
   const configured = c !== DEFAULT_CONFIG;
   return {
     id: 'community.mxfia19.sora',
-    version: '0.2.0',
+    version: '0.3.0',
     name: 'Sora',
     description: [
       'Agrégateur de flux — portage Stremio des modules Sora',
@@ -48,9 +49,18 @@ function manifest(c: UserConfig) {
       configured ? `Mode ${c.mode}, langues ${c.languages.join(' > ')}.` : '',
     ].filter(Boolean).join(' '),
     logo: 'https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg',
-    resources: ['stream'],
+    // 'catalog' et 'meta' rendent l'addon autonome : ses catalogues peuplent
+    // les bibliothèques (dans Stremio comme dans une façade Jellyfin telle
+    // qu'AIOStreams), 'meta' fournit fiches et épisodes, 'stream' les flux.
+    // Sans eux, l'addon ne servait que des flux et dépendait de Cinemeta.
+    resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'] as MediaType[],
-    catalogs: [] as unknown[],
+    // Deux catalogues typés, chacun avec une recherche. `extra` déclare la
+    // recherche optionnelle ; Stremio appelle alors /catalog/.../search=....json
+    catalogs: [
+      { type: 'movie', id: 'sora-movie', name: 'Sora — Films', extra: [{ name: 'search', isRequired: false }] },
+      { type: 'series', id: 'sora-series', name: 'Sora — Séries', extra: [{ name: 'search', isRequired: false }] },
+    ],
     /** Ce que l'addon sait traiter : IMDb (ce que donne Cinemeta) et TMDB. */
     idPrefixes: ['tt', 'tmdb:'],
     // `configurable` fait apparaître le bouton « Configurer » dans Stremio,
@@ -81,6 +91,57 @@ app.get('/', (_req, res) => {
 ${config.debugUi ? '<p><a href="/debug">Diagnostic des sources →</a> · <a href="/debug/live">Console en direct →</a></p>' : ''}
 <p>Ou, avec les réglages par défaut : <code>${publicBase()}/manifest.json</code></p>`);
 });
+
+/** Catalogue. Stremio appelle /catalog/movie/sora-movie.json, et pour la
+ *  recherche /catalog/movie/sora-movie/search=inception.json. Le segment
+ *  `extra` porte la requête, sous la forme `search=<texte>`. */
+app.get('/catalog/:type/:id.json', (req, res) => handleCatalog(req, res));
+app.get('/catalog/:type/:id/:extra.json', (req, res) => handleCatalog(req, res));
+app.get('/c/:config/catalog/:type/:id.json', (req, res) => handleCatalog(req, res));
+app.get('/c/:config/catalog/:type/:id/:extra.json', (req, res) => handleCatalog(req, res));
+
+async function handleCatalog(req: Request, res: Response): Promise<void> {
+  const type = req.params.type as MediaType;
+  if (type !== 'movie' && type !== 'series') {
+    res.json({ metas: [] });
+    return;
+  }
+  // `extra` arrive tel quel ('search=inception' ou 'skip=100&search=...') ;
+  // on n'en lit que la recherche, seul paramètre que le catalogue gère.
+  let query: string | undefined;
+  const extra = req.params.extra ? decodeURIComponent(req.params.extra) : '';
+  const m = extra.match(/(?:^|&)search=([^&]*)/);
+  if (m) query = decodeURIComponent(m[1] ?? '');
+  else if (typeof req.query.search === 'string') query = req.query.search;
+
+  try {
+    const metas = await buildCatalog(type, query);
+    res.json({ metas });
+  } catch (e) {
+    log.error('catalogue en échec:', e);
+    res.json({ metas: [] });
+  }
+}
+
+/** Fiche + épisodes. Stremio appelle /meta/series/tmdb:1396.json. */
+app.get('/meta/:type/:id.json', (req, res) => handleMeta(req, res));
+app.get('/c/:config/meta/:type/:id.json', (req, res) => handleMeta(req, res));
+
+async function handleMeta(req: Request, res: Response): Promise<void> {
+  const type = req.params.type as MediaType;
+  const rawId = decodeURIComponent(req.params.id ?? '');
+  if (type !== 'movie' && type !== 'series') {
+    res.json({ meta: null });
+    return;
+  }
+  try {
+    const meta = await buildMeta(type, rawId);
+    res.json({ meta });
+  } catch (e) {
+    log.error('meta en échec:', e);
+    res.json({ meta: null });
+  }
+}
 
 /** Le seul endpoint qui compte. Stremio appelle
  *  /stream/movie/tt0816692.json ou /stream/series/tt0944947:1:1.json */
