@@ -46,19 +46,33 @@ function sign(data: string): string {
   return b64url(crypto.createHmac('sha256', secret()).update(data).digest());
 }
 
+/** Emballe une URL + ses headers en un couple (data signé) réutilisable par
+ *  toutes les formes de lien proxifié. */
+function pack(url: string, headers?: Record<string, string>): { data: string; sig: string } {
+  const payload: Payload = { u: url, e: Date.now() + config.proxyTtlMs };
+  if (headers && Object.keys(headers).length > 0) payload.h = headers;
+  const data = b64url(Buffer.from(JSON.stringify(payload), 'utf-8'));
+  return { data, sig: sign(data) };
+}
+
 /** Les URLs proxifiées sont signées, pas chiffrées. Sans signature, l'addon
  *  deviendrait un proxy HTTP ouvert que n'importe qui pourrait faire relayer
  *  vers n'importe quelle cible. Le HMAC lie l'URL et les headers à cette
  *  instance, et l'expiration borne la fuite d'un lien partagé. */
 export function proxify(url: string, headers?: Record<string, string>): string {
-  const payload: Payload = { u: url, e: Date.now() + config.proxyTtlMs };
-  if (headers && Object.keys(headers).length > 0) payload.h = headers;
-
-  const data = b64url(Buffer.from(JSON.stringify(payload), 'utf-8'));
-  const sig = sign(data);
+  const { data, sig } = pack(url, headers);
   // L'extension finale aide les players à deviner le type avant la réponse.
   const ext = /\.m3u8(\?|$)/i.test(url) ? '.m3u8' : /\.mp4(\?|$)/i.test(url) ? '.mp4' : '';
   return `${publicBase()}/proxy/s${ext}?d=${data}&t=${sig}`;
+}
+
+/** Lien vers une playlist de sous-titres synthétique (voir `rewriteHls`). Le
+ *  chemin ne commence PAS par `/proxy/s` : il ne doit pas tomber sur le
+ *  handler de flux, qui re-fetcherait le .vtt au lieu de fabriquer la
+ *  playlist. */
+function proxifySubPlaylist(url: string, headers?: Record<string, string>): string {
+  const { data, sig } = pack(url, headers);
+  return `${publicBase()}/proxy/vtt.m3u8?d=${data}&t=${sig}`;
 }
 
 function verify(data: string, sig: string): Payload | null {
@@ -115,12 +129,63 @@ export function rewriteHls(body: string, baseUrl: string, headers?: Record<strin
     if (!trimmed) return line;
 
     if (trimmed.startsWith('#')) {
+      // Piste de sous-titres pointant un .vtt BRUT : une piste
+      // #EXT-X-MEDIA:TYPE=SUBTITLES doit désigner une *playlist* .m3u8 listant
+      // des segments WebVTT, pas le .vtt directement. Certaines sources
+      // (finepulfe via purstream) y mettent le .vtt : libav le lit alors comme
+      // une playlist, échoue (« Invalid data found »), et fait tomber TOUT le
+      // master avec lui — vidéo pourtant valide, lecture impossible (0 piste).
+      // On enveloppe donc le .vtt dans une playlist synthétique valide
+      // (`/proxy/vtt.m3u8`), ce qui répare la lecture sans perdre le
+      // sous-titre. Seul WebVTT est concerné : HLS n'accepte que lui ; un .srt
+      // en piste HLS est de toute façon invalide, on le laisse tel quel.
+      if (/^#EXT-X-MEDIA:/i.test(trimmed) && /TYPE=SUBTITLES/i.test(trimmed)) {
+        return line.replace(/URI="([^"]+)"/g, (_m, u: string) => {
+          const abs = absolute(u, baseUrl);
+          return /\.vtt(\?|$)/i.test(abs)
+            ? `URI="${proxifySubPlaylist(abs, headers)}"`
+            : `URI="${proxify(abs, headers)}"`;
+        });
+      }
       // URI="..." : clés de chiffrement (EXT-X-KEY), pistes audio/sous-titres
       // (EXT-X-MEDIA), segment d'init fMP4 (EXT-X-MAP).
       return line.replace(/URI="([^"]+)"/g, (_m, u: string) => `URI="${wrap(u)}"`);
     }
     return wrap(trimmed);
   }).join('\n');
+}
+
+/** Playlist de sous-titres synthétique enveloppant un unique WebVTT (voir
+ *  `rewriteHls`). Segment unique en VOD : le .vtt entier vaut segment. La durée
+ *  est volontairement large — les cues WebVTT portent leurs propres
+ *  horodatages, la durée du segment n'est qu'une borne, et trop courte elle
+ *  masquerait les sous-titres tardifs. */
+export function handleSubPlaylist(req: Request, res: Response): void {
+  const data = String(req.query.d ?? '');
+  const sig = String(req.query.t ?? '');
+  const payload = data && sig ? verify(data, sig) : null;
+  if (!payload) {
+    res.status(403).type('text/plain').send('lien proxy invalide ou expiré');
+    return;
+  }
+
+  const D = 86400; // 24 h : plus longue que n'importe quel épisode ou film.
+  const playlist = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    `#EXT-X-TARGETDURATION:${D}`,
+    '#EXT-X-MEDIA-SEQUENCE:0',
+    '#EXT-X-PLAYLIST-TYPE:VOD',
+    `#EXTINF:${D}.000,`,
+    proxify(payload.u, payload.h),   // le .vtt, relayé tel quel par le proxy.
+    '#EXT-X-ENDLIST',
+    '',
+  ].join('\n');
+
+  res.status(200)
+    .set('content-type', 'application/vnd.apple.mpegurl')
+    .set('cache-control', 'no-cache')
+    .send(playlist);
 }
 
 /** Handler Express du proxy. */

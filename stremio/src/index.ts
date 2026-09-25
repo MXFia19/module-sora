@@ -4,7 +4,7 @@ import { config, publicBase } from './config';
 import { logger } from './log';
 import { cached, cacheSet, cacheClear, cacheStats } from './cache';
 import { buildRequest } from './tmdb';
-import { handleProxy } from './proxy';
+import { handleProxy, handleSubPlaylist } from './proxy';
 import { enabledScrapers, allScrapers } from './scrapers';
 import { dedupe, sortStreams, toStremio } from './display';
 import { relaxHeaders } from './direct';
@@ -333,6 +333,12 @@ function withTimeout<T>(p: Promise<T[]>, ms: number): Promise<T[]> {
       setTimeout(() => reject(new Error(`budget de ${ms}ms dépassé`)), ms)),
   ]);
 }
+
+// Playlist de sous-titres synthétique : enveloppe un .vtt brut mal déclaré en
+// piste HLS. Déclarée AVANT /proxy/s* (et sur un chemin qui ne commence pas
+// par « s ») pour ne pas être captée par le handler de flux. Pas de garde de
+// concurrence : elle ne relaie aucune vidéo, elle fabrique quelques lignes.
+app.get('/proxy/vtt.m3u8', handleSubPlaylist);
 
 // Le suffixe est libre (/proxy/s, /proxy/s.m3u8, /proxy/s.mp4) : il ne sert
 // qu'à renseigner les players qui devinent le type depuis l'extension.

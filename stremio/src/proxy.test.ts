@@ -55,6 +55,42 @@ test('rewriteHls fait repasser variantes, segments et clés par le proxy', () =>
   assert.deepEqual(payloadOf(lines[5]!).h, { Referer: 'https://host.test/' });
 });
 
+test('rewriteHls enveloppe une piste de sous-titres .vtt brute en playlist', () => {
+  // Régression finepulfe/purstream : le master déclare la piste de sous-titres
+  // directement sur le .vtt, ce que libav lit comme une playlist et rejette,
+  // faisant tomber tout le master. L'URI doit repartir vers /proxy/vtt.m3u8
+  // (playlist synthétique), pas vers /proxy/s (le .vtt brut).
+  const master = [
+    '#EXTM3U',
+    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="FR",URI="subs_fre_forced.vtt"',
+    '#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720,SUBTITLES="subs"',
+    '720p/playlist.m3u8',
+    '',
+  ].join('\n');
+
+  const out = rewriteHls(master, 'https://cdn.test/tv/1-a/S01/E01/master.m3u8', { Referer: 'https://host.test/' });
+  const lines = out.split('\n');
+
+  const subUri = lines[1]!.match(/URI="([^"]+)"/)![1]!;
+  assert.match(new URL(subUri).pathname, /\/proxy\/vtt\.m3u8$/, 'la piste .vtt doit passer par la playlist synthétique');
+  assert.equal(payloadOf(subUri).u, 'https://cdn.test/tv/1-a/S01/E01/subs_fre_forced.vtt');
+  // La variante vidéo, elle, reste un flux proxifié normal.
+  assert.match(new URL(lines[3]!).pathname, /\/proxy\/s\.m3u8$/);
+});
+
+test('rewriteHls laisse une piste sous-titres déjà en .m3u8 telle quelle', () => {
+  // Une source bien formée (URI vers une playlist) ne doit pas être enveloppée
+  // une deuxième fois.
+  const master = [
+    '#EXTM3U',
+    '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="EN",URI="subs/en.m3u8"',
+    '',
+  ].join('\n');
+  const out = rewriteHls(master, 'https://cdn.test/hls/master.m3u8');
+  const subUri = out.split('\n')[1]!.match(/URI="([^"]+)"/)![1]!;
+  assert.match(new URL(subUri).pathname, /\/proxy\/s\.m3u8$/, 'une playlist .m3u8 reste un flux proxifié normal');
+});
+
 test('rewriteHls laisse les lignes vides intactes', () => {
   const out = rewriteHls('#EXTM3U\n\n#EXT-X-ENDLIST\n', 'https://cdn.test/m.m3u8');
   assert.equal(out, '#EXTM3U\n\n#EXT-X-ENDLIST\n');
