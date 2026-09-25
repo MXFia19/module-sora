@@ -171,7 +171,9 @@ function addRequest(r) {
   if (zero) el.classList.add('open');
 
   $('#reqs').prepend(el);
-  while ($('#reqs').children.length > 40) $('#reqs').lastElementChild.remove();
+  // Plafond aligné sur la profondeur conservée côté serveur (REQ_CAPACITY),
+  // pour montrer tout l'historique des requêtes et pas seulement les dernières.
+  while ($('#reqs').children.length > 2000) $('#reqs').lastElementChild.remove();
 }
 
 /* ---------- journal ---------- */

@@ -42,9 +42,16 @@ export interface LiveRequest {
 
 export type LiveEvent = LiveLog | LiveRequest;
 
-const CAPACITY = 800;
+// Deux files distinctes plutôt qu'une seule mêlée : sur un serveur, les logs
+// noient les requêtes (des centaines de logs pour une requête), et une file
+// commune de 800 finissait par ne plus contenir que quelques requêtes. En les
+// séparant, l'historique des requêtes survit au flot des logs, et on peut lui
+// donner une profondeur bien plus grande sans garder autant de logs.
+const LOG_CAPACITY = 800;
+const REQ_CAPACITY = 2000;
 
-const buffer: LiveEvent[] = [];
+const logs: LiveLog[] = [];
+const requests: LiveRequest[] = [];
 const subscribers = new Set<(e: LiveEvent) => void>();
 let seq = 0;
 
@@ -124,24 +131,30 @@ export function restore(): number {
   }
 
   let repris = 0;
-  for (const ligne of lignes.slice(-CAPACITY)) {
+  // Les requêtes étant rares parmi les logs, il faut relire beaucoup plus de
+  // lignes que la capacité d'une seule file pour reconstituer les deux.
+  for (const ligne of lignes.slice(-(LOG_CAPACITY + REQ_CAPACITY))) {
     try {
       const e = JSON.parse(ligne) as LiveEvent;
-      if (!e || (e.kind !== 'log' && e.kind !== 'request')) continue;
-      buffer.push(e);
+      if (!e) continue;
+      if (e.kind === 'log') logs.push(e);
+      else if (e.kind === 'request') requests.push(e);
+      else continue;
       if (e.seq > seq) seq = e.seq;
       repris++;
     } catch { /* ligne tronquée par une coupure : on la laisse */ }
   }
-  if (buffer.length > CAPACITY) buffer.splice(0, buffer.length - CAPACITY);
+  if (logs.length > LOG_CAPACITY) logs.splice(0, logs.length - LOG_CAPACITY);
+  if (requests.length > REQ_CAPACITY) requests.splice(0, requests.length - REQ_CAPACITY);
   return repris;
 }
 
 /** Vide le journal, en mémoire ET sur disque : « Effacer » qui laisserait le
  *  fichier intact ferait revenir tout l'historique au redémarrage suivant. */
 export function purge(): number {
-  const n = buffer.length;
-  buffer.length = 0;
+  const n = logs.length + requests.length;
+  logs.length = 0;
+  requests.length = 0;
   enAttente = [];
   const cible = fichier();
   if (cible) { try { fs.rmSync(cible, { force: true }); } catch { /* ignoré */ } }
@@ -149,8 +162,13 @@ export function purge(): number {
 }
 
 function push(e: LiveEvent): void {
-  buffer.push(e);
-  if (buffer.length > CAPACITY) buffer.shift();
+  if (e.kind === 'log') {
+    logs.push(e);
+    if (logs.length > LOG_CAPACITY) logs.shift();
+  } else {
+    requests.push(e);
+    if (requests.length > REQ_CAPACITY) requests.shift();
+  }
   planifier(e);
   for (const fn of subscribers) {
     // Un abonné qui jette — connexion morte — ne doit pas interrompre les
@@ -172,7 +190,9 @@ export function pushRequest(r: Omit<LiveRequest, 'kind' | 'seq' | 'at'>): void {
 }
 
 export function snapshot(): LiveEvent[] {
-  return [...buffer];
+  // Les deux files fusionnées et remises dans l'ordre chronologique : `seq`
+  // est un compteur unique partagé, donc le tri par seq restitue l'ordre réel.
+  return [...logs, ...requests].sort((a, b) => a.seq - b.seq);
 }
 
 export function subscribe(fn: (e: LiveEvent) => void): () => void {
