@@ -1,0 +1,20 @@
+# Auto-déploiement de l'addon Sora — déclenché par sora-deploy.timer.
+# Type=oneshot : le service fait une passe puis s'arrête ; c'est le timer qui
+# le relance. Édite les deux %CHEMIN% ci-dessous avant d'installer, ou passe
+# par les instructions du README (elles les remplissent pour toi).
+[Unit]
+Description=Deploie l'addon Sora si la branche a avance
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Utilisateur qui a le droit de parler à Docker (membre du groupe docker).
+User=%UTILISATEUR%
+WorkingDirectory=%CHEMIN_STREMIO%
+ExecStart=/usr/bin/env bash %CHEMIN_STREMIO%/deploy.sh
+# Réglages optionnels : décommente et ajuste au besoin.
+# Environment=BRANCH=main
+# Environment=COMPOSE_FILE=docker-compose.tunnel.yml
+TimeoutStartSec=600

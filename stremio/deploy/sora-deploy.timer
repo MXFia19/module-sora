@@ -1,0 +1,16 @@
+# Cadence de l'auto-déploiement. Toutes les 2 minutes : un tick sans
+# changement ne fait qu'un « git fetch », c'est négligeable, et ça borne le
+# délai entre un push et sa mise en ligne à deux minutes.
+[Unit]
+Description=Verifie GitHub et deploie l'addon Sora periodiquement
+
+[Timer]
+# Premier tick 1 min apres le demarrage de la machine, puis toutes les 2 min.
+OnBootSec=1min
+OnUnitActiveSec=2min
+# Rattrape un tick manque (machine eteinte au moment prevu).
+Persistent=true
+Unit=sora-deploy.service
+
+[Install]
+WantedBy=timers.target
