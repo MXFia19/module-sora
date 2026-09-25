@@ -113,13 +113,26 @@ export function toStremio(s: RawStream): StremioStream {
   const url = needsProxy ? proxify(s.url, s.headers) : s.url;
 
   const source = s.source ?? s.server;
-  const badges = [s.language, s.server !== source ? s.server : null]
-    .filter(Boolean)
-    .join(' • ');
+  // L'hébergeur réel (« Lulustream », « VOE »...) : c'est LUI qui distingue
+  // deux flux d'une même source. Sans lui dans le nom, une source qui rend
+  // quinze hébergeurs différents produit quinze entrées d'apparence identique
+  // (« Sora Movix / HD » à l'identique), et tout ce qui déduplique en aval —
+  // le déduplicateur d'AIOStreams, la vue « versions » de Jellyfin — les fond
+  // en une poignée. On met donc l'hébergeur dans le nom, et on ne le répète
+  // pas quand il EST la source.
+  const host = s.server && s.server !== source ? s.server : '';
+
+  // 2e ligne du nom : hébergeur + langue + qualité. Les trois ensemble, car
+  // un même hébergeur sert souvent la VF ET la VOSTFR à la même qualité (« VOE
+  // (cpasmal) » ci-dessus) : sans la langue, ces deux-là redeviendraient
+  // identiques et se refondraient en aval.
+  const detail = [host, s.language, s.quality].filter(Boolean).join(' • ');
 
   return {
-    name: `Sora ${source}\n${s.quality}`,
-    title: `${badges}${sizeLabel(s.size)}${needsProxy ? '\n(via proxy)' : ''}`,
+    // 1re ligne : marque + source (l'agrégateur). 2e ligne : le détail complet,
+    // ce qui rend chaque flux visuellement et surtout *textuellement* distinct.
+    name: `Sora ${source}\n${detail}`,
+    title: `${sizeLabel(s.size).replace(/^ • /, '') || s.language}${needsProxy ? '\n(via proxy)' : ''}`,
     url,
     subtitles: (s.subtitles ?? []).map((sub, i) => ({
       id: `${source}-${sub.lang}-${i}`,
@@ -128,9 +141,12 @@ export function toStremio(s: RawStream): StremioStream {
       lang: sub.lang,
     })),
     behaviorHints: {
-      // Regrouper par source : Stremio enchaîne alors les épisodes sur la
-      // même source sans redemander à l'utilisateur.
-      bingeGroup: `sora-${source}-${s.quality}`,
+      // Grouper par hébergeur + langue (et non plus par source) :
+      // l'enchaînement d'épisodes reste sur le même hébergeur dans la même
+      // langue d'un épisode à l'autre, mais deux flux distincts ne partagent
+      // plus jamais le même groupe — ce qui les faisait traiter comme un seul
+      // flux en aval.
+      bingeGroup: `sora-${host || source}-${s.language}`,
       notWebReady: !needsProxy,
     },
   };
