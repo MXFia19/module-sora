@@ -449,7 +449,14 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.post('/admin/cache/clear', (_req, res) => {
+app.post('/admin/cache/clear', (req, res) => {
+  // Vide le cache des sources. Anodin en soi, mais c'est un POST qui mute
+  // l'état : sur une instance publique on exige un jeton. En local, sans
+  // ADMIN_TOKEN défini, la route reste ouverte pour ne rien casser.
+  if (config.adminToken && req.get('X-Admin-Token') !== config.adminToken) {
+    res.status(403).json({ error: 'jeton d\'administration requis ou invalide' });
+    return;
+  }
   res.json({ cleared: cacheClear() });
 });
 

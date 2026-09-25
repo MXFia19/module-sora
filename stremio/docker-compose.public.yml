@@ -9,6 +9,10 @@ services:
   sora-stremio:
     build: .
     image: sora-stremio:latest
+    # Même nom que dans docker-compose.yml : le script d'auto-déploiement
+    # détecte le fichier compose via ce conteneur, et le nom doit rester
+    # stable quand on bascule du mode local au mode public.
+    container_name: sora-stremio
     restart: unless-stopped
     env_file:
       - .env
@@ -18,12 +22,17 @@ services:
       # Caddy est le seul intermédiaire : req.ip doit être l'IP réelle du
       # client, sinon la limite par IP s'applique à tout le monde en bloc.
       TRUST_PROXY: 1
+      # Journal de /debug/live, conservé d'un redémarrage à l'autre (comme en
+      # mode local). Va de pair avec le volume sora_journal ci-dessous.
+      LIVE_LOG_FILE: /data/journal.ndjson
       # Valeurs de départ prudentes pour une instance ouverte, à ajuster selon
       # l'uplink de la machine (voir « Héberger publiquement » dans le README).
       RATE_LIMIT_STREAM_PER_MIN: ${RATE_LIMIT_STREAM_PER_MIN:-20}
       PROXY_MAX_CONCURRENT: ${PROXY_MAX_CONCURRENT:-15}
     expose:
       - "7000"
+    volumes:
+      - sora_journal:/data
     security_opt:
       - no-new-privileges:true
 
@@ -45,3 +54,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  sora_journal:

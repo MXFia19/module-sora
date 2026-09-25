@@ -39,6 +39,11 @@ export const config = {
 
   /** Clé TMDB — le seul secret réellement requis. */
   get tmdbApiKey(): string { return str('TMDB_API_KEY', ''); },
+
+  /** Jeton d'administration. S'il est défini, /admin/cache/clear l'exige dans
+   *  l'en-tête X-Admin-Token. Vide = route ouverte (pratique en local). À
+   *  définir dès qu'on expose l'addon sur Internet. */
+  get adminToken(): string { return str('ADMIN_TOKEN', ''); },
   get tmdbLanguage(): string { return str('TMDB_LANGUAGE', 'fr-FR'); },
 
   /** Scrapers actifs. Vide = tous ceux enregistrés. */
