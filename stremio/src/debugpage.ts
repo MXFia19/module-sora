@@ -403,7 +403,7 @@ $('#cclear').addEventListener('click', async () => {
   const b = $('#cclear');
   b.disabled = true;
   try {
-    const r = await (await fetch('/admin/cache/clear', { method: 'POST' })).json();
+    const r = await (await fetch('/debug/cache/clear', { method: 'POST' })).json();
     b.innerHTML = r.cleared + ' entrées vidées';
     setTimeout(() => { b.innerHTML = 'Vider le cache <span class="badge" id="centries">?</span>'; compteurCache(); }, 2000);
   } finally {

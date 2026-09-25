@@ -396,6 +396,12 @@ if (config.debugUi) {
    *  reviendrait au redémarrage suivant. */
   app.post('/debug/live/clear', (_req, res) => res.json({ cleared: purge() }));
 
+  // Vider le cache des sources depuis la page de diagnostic. Même modèle que
+  // les deux autres boutons de purge : gardé par DEBUG_UI, sans jeton. La route
+  // publique /admin/cache/clear, elle, exige ADMIN_TOKEN — mais la page ne peut
+  // pas l'envoyer sans exposer le secret, donc le bouton passe par ici.
+  app.post('/debug/cache/clear', (_req, res) => res.json({ cleared: cacheClear() }));
+
   app.get('/debug/history', (_req, res) => res.json({ runs: history.list() }));
 
   app.get('/debug/history/:id', (req, res) => {

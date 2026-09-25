@@ -304,7 +304,7 @@ $('#cache').addEventListener('click', async () => {
   const b = $('#cache');
   b.disabled = true;
   try {
-    const r = await fetch('/admin/cache/clear', { method: 'POST' });
+    const r = await fetch('/debug/cache/clear', { method: 'POST' });
     const j = await r.json();
     toast(j.cleared + ' entrée(s) vidée(s) — la prochaine requête re-cherchera tout');
   } catch (e) {
