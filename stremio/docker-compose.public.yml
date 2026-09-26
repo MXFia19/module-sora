@@ -44,14 +44,48 @@ services:
       - "443:443"
     environment:
       ADDON_DOMAIN: ${ADDON_DOMAIN:?définir ADDON_DOMAIN}
+      # Domaine d'AIOStreams (auto-hébergé, optionnel — voir le service
+      # `aiostreams` plus bas). Défaut *.localhost : Caddy sert alors un vhost
+      # à certificat local (aucun appel ACME public), inoffensif tant qu'on n'a
+      # pas activé AIOStreams. Le vrai domaine se met dans .env.
+      AIOSTREAMS_DOMAIN: ${AIOSTREAMS_DOMAIN:-aiostreams.localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data      # certificats : à conserver, sinon Let's Encrypt
       - caddy_config:/config  # finit par limiter les demandes répétées
     depends_on:
       - sora-stremio
+    # Pas de depends_on aiostreams : ce service est derrière un profile, et une
+    # dépendance vers un service non activé ferait échouer le déploiement de
+    # base. Caddy démarre seul ; il renvoie 502 sur le vhost AIOStreams tant que
+    # le conteneur n'est pas là, ce qui n'arrive que si on a activé le profile.
+
+  # ─── AIOStreams auto-hébergé (optionnel) ──────────────────────────────────
+  # Désactivé par défaut. Pour l'activer, dans .env :
+  #     COMPOSE_PROFILES=aiostreams
+  #     AIOSTREAMS_DOMAIN=mxfia19aio.duckdns.org
+  # et créer .env.aiostreams (voir .env.aiostreams.example) avec au minimum
+  # SECRET_KEY et BASE_URL. Passe alors par le MÊME Caddy (HTTPS) que l'addon.
+  aiostreams:
+    image: ghcr.io/viren070/aiostreams:latest
+    container_name: aiostreams
+    restart: unless-stopped
+    profiles: ["aiostreams"]
+    # Fichier d'env SÉPARÉ : AIOStreams est du code tiers, il n'a rien à faire
+    # avec les secrets de l'addon (TMDB_API_KEY, PROXY_SECRET, ADMIN_TOKEN...).
+    # `required: false` : son absence ne casse pas le déploiement de base.
+    env_file:
+      - path: .env.aiostreams
+        required: false
+    expose:
+      - "3000"
+    volumes:
+      - aiostreams_data:/app/data   # base SQLite : configs et addons persistés
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   caddy_data:
   caddy_config:
   sora_journal:
+  aiostreams_data:

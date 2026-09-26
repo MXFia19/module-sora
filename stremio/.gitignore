@@ -1,5 +1,10 @@
 node_modules/
 dist/
+# Tous les fichiers d'environnement réels (secrets), mais on garde les modèles
+# .env.example / .env.aiostreams.example versionnés.
 .env
+.env.*
+!.env.example
+!.env.aiostreams.example
 *.log
 dist-static/

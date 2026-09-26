@@ -28,3 +28,27 @@
 		format console
 	}
 }
+
+# AIOStreams auto-hébergé (optionnel). Sert le second sous-domaine s'il est
+# défini ; par défaut {$AIOSTREAMS_DOMAIN} vaut *.localhost et Caddy le sert
+# avec un certificat local, sans jamais rien demander à Let's Encrypt — donc
+# ce bloc ne gêne pas quand AIOStreams n'est pas activé.
+{$AIOSTREAMS_DOMAIN} {
+	encode gzip
+
+	# AIOStreams relaie des flux (proxy debrid, MediaFlow...) : mêmes précautions
+	# que pour l'addon — pas de tampon, délais larges, sinon Caddy coupe une
+	# lecture en cours.
+	reverse_proxy aiostreams:3000 {
+		flush_interval -1
+		transport http {
+			response_header_timeout 60s
+			read_timeout 0
+		}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
