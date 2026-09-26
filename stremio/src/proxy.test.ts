@@ -27,6 +27,18 @@ test('proxify marque l’extension pour que le player devine le type', () => {
   assert.match(proxify('https://cdn.test/v/segment'), /\/proxy\/s\?/);
 });
 
+test('proxify conserve l’extension des segments HLS (allowed_segment_extensions)', () => {
+  // ffmpeg refuse un segment dont l'URL ne finit pas par une extension connue.
+  // Un lien /proxy/s sans extension faisait rejeter tous les segments .ts et
+  // rendait toute lecture HLS impossible ; l'extension réelle doit survivre.
+  assert.match(proxify('https://cdn.test/hls/seg-1-v1-a1.ts'), /\/proxy\/s\.ts\?/);
+  assert.match(proxify('https://cdn.test/hls/seg-1.m4s'), /\/proxy\/s\.m4s\?/);
+  assert.match(proxify('https://cdn.test/hls/index-v1-a1.m3u8'), /\/proxy\/s\.m3u8\?/);
+  assert.match(proxify('https://cdn.test/subs/track.vtt'), /\/proxy\/s\.vtt\?/);
+  // Un point dans la query ne doit pas être pris pour une extension.
+  assert.match(proxify('https://cdn.test/hls/seg-1.ts?t=a.b.c&e=1'), /\/proxy\/s\.ts\?/);
+});
+
 test('rewriteHls fait repasser variantes, segments et clés par le proxy', () => {
   const manifest = [
     '#EXTM3U',

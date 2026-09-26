@@ -55,15 +55,34 @@ function pack(url: string, headers?: Record<string, string>): { data: string; si
   return { data, sig: sign(data) };
 }
 
+/** Extension de fichier du chemin amont, restituée dans le lien proxifié.
+ *
+ *  Ce n'est PAS qu'un confort d'affichage : ffmpeg/libav (Infuse, Strand,
+ *  VLC...) refuse un segment HLS dont l'URL ne finit pas par une extension
+ *  connue — « URL ... is not in allowed_segment_extensions ». Nos liens
+ *  `/proxy/s` sans extension faisaient donc rejeter CHAQUE segment .ts d'une
+ *  playlist, la variante devenait illisible (« parse_playlist error / Empty
+ *  segment ») et toute lecture HLS échouait (0 piste) — seuls les MP4 directs
+ *  passaient. En conservant l'extension réelle (.ts, .m4s, .vtt, .m3u8...),
+ *  le lecteur reconnaît le segment et le charge.
+ *
+ *  On ne lit que le CHEMIN (jamais la query, qui contient souvent des `.` dans
+ *  les jetons) et on borne à des extensions plausibles pour ne pas fabriquer
+ *  une fausse extension à partir d'un point quelconque du chemin. */
+function extOf(url: string): string {
+  let path = url;
+  try { path = new URL(url).pathname; } catch { path = url.split(/[?#]/)[0] || url; }
+  const m = path.match(/\.([A-Za-z0-9]{1,5})$/);
+  return m?.[1] ? `.${m[1].toLowerCase()}` : '';
+}
+
 /** Les URLs proxifiées sont signées, pas chiffrées. Sans signature, l'addon
  *  deviendrait un proxy HTTP ouvert que n'importe qui pourrait faire relayer
  *  vers n'importe quelle cible. Le HMAC lie l'URL et les headers à cette
  *  instance, et l'expiration borne la fuite d'un lien partagé. */
 export function proxify(url: string, headers?: Record<string, string>): string {
   const { data, sig } = pack(url, headers);
-  // L'extension finale aide les players à deviner le type avant la réponse.
-  const ext = /\.m3u8(\?|$)/i.test(url) ? '.m3u8' : /\.mp4(\?|$)/i.test(url) ? '.mp4' : '';
-  return `${publicBase()}/proxy/s${ext}?d=${data}&t=${sig}`;
+  return `${publicBase()}/proxy/s${extOf(url)}?d=${data}&t=${sig}`;
 }
 
 /** Lien vers une playlist de sous-titres synthétique (voir `rewriteHls`). Le
