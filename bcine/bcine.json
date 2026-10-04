@@ -6,7 +6,7 @@
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.0",
+    "version": "1.1.0",
     "language": "English",
     "streamType": "HLS",
     "quality": "1080p",
@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "first release: TMDB catalogue, streams from bCine's own embed backend (vidcorn.cfd /api/token + /api/sources for the Necro, Look, Abyss, South and Acme servers, relayed by /api/v)"
+    "changelog": "player moved from vidcorn.cfd (down) to vidstuck.xyz: Atlas + Ursa HLS servers, links decrypted locally (CryptoJS AES in pure JS), 15+ subtitle tracks as WebVTT"
 }

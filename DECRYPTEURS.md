@@ -677,3 +677,49 @@ Les liens sortent sous deux formes, absolue
 
 ---
 *Partie III — modules `vidhawk`, `vidrift`, `aniclipse`, `anikura` (vérifiés en direct, lecture comprise) et `animesalt` (vérifié jusqu'au lien signé). Dernière mise à jour : 2026-09-16.*
+
+# Partie IV — Lecteur vidstuck.xyz (module `bcine`, 2026-10-04)
+
+## 23. vidstuck.xyz (famille ZXCStream) — CryptoJS AES à phrase secrète
+
+bCine (`cineyz.com`) a abandonné son lecteur `vidcorn.cfd` (502 Cloudflare sur toutes les
+routes, page d'accueil comprise) pour `vidstuck.xyz`, un lecteur Next.js de la famille
+ZXCStream (sa liste blanche de référents cite `zxcstream.icu`, `bcine.ru`, `7movies.ac`…).
+Tout passe par `/backend/`, avec des noms de champs volontairement illisibles :
+
+```
+POST /backend/fuckyou   {<tmdbId>, <type>, <server>, [<season>, <episode>]}  -> {ts, token}
+GET  /backend/servers/<server>?<tmdbId>&<server>&<type>&<ts>&<token>&<title>&<year>&<date>
+                               [&<season>&<episode>&<latestDate>][&<imdbId>]
+     -> {links:[{type:"hls"|"mp4"|"dash", link:"U2FsdGVkX1…"}], subtitles, dubs}
+GET  /backend/subtitle?…   (même danse, serveur "subtitle") -> {captions:[{file:.srt, display}]}
+GET  /backend/subtitle/prox?url=<srt>   -> le même sous-titre en WebVTT
+```
+
+Les noms de champs (`a7f39c821d604e5b9c71f36e1547b` = tmdbId, etc.) sont des constantes du
+bundle ; `title`/`year`/`date` sont ceux de TMDB (`release_date`, ou `first_air_date` pour
+une série). Un jeton par serveur et par requête.
+
+**Le déchiffrement.** Chaque `link` est un `CryptoJS.AES.decrypt(link, phrase)` avec une
+phrase secrète en dur (`7f4c9e2a…a7b832c`). Format OpenSSL : `"Salted__"` + sel de 8 octets
++ chiffré ; clé et IV par **EVP_BytesToKey** (MD5, un tour, 48 octets → clé 32 + IV 16),
+AES-256-CBC, PKCS#7. En pur JS : MD5 écrit pour l'occasion, AES-CBC repris d'`anichan`
+(vérifiés contre `crypto` de Node : MD5 600/600, déchiffrement CryptoJS 300/300).
+
+**Cinq serveurs, deux utiles sur iOS.** Orion et Centaurus ne rendent que du DASH (`.mpd`),
+illisible par AVPlayer. Atlas et Ursa (`meow`) rendent du HLS dont les segments sont du TS
+(octet `0x47`) servis sous des `content-type` d'image ou de police. Andromeda rend du MP4
+pour les épisodes, mais son relais `api1.zxcstream.xyz` répond **522 au bout de ~20 s** ;
+Sora n'ayant pas de minuteur pour couper court, il est écarté tant qu'il ne revient pas.
+
+**Limite de débit.** Le backend renvoie 429 (page Cloudflare) quand une même IP enchaîne
+des dizaines d'appels — ce qui arrive en test, pas pour un utilisateur qui lance un titre.
+Les métadonnées sont donc lues sur TMDB directement plutôt que sur `/backend/tmdb/details`,
+pour économiser un appel au backend.
+
+| Module | Statut |
+|---|---|
+| **bcine** | ✅ vérifié en direct — Inception, Oppenheimer (films) et Breaking Bad S1E1 : 3 flux HLS, 15-16 pistes de sous-titres, ~1 s |
+
+---
+*Partie IV — module `bcine` (lecteur vidstuck.xyz). Dernière mise à jour : 2026-10-04.*

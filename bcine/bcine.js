@@ -1,25 +1,31 @@
 // ==========================================
 // ⚙️ SORA MODULE — BCINE
 // ==========================================
-// bCine (bciney.to, which now lands on cineyz.com) is a TMDB-keyed catalogue
-// whose player is its own embed, vidcorn.cfd. The catalogue therefore comes
-// straight from TMDB; playback from the embed's backend, plain JSON:
+// bCine (bciney.to, which now lands on cineyz.com) is a TMDB-keyed catalogue.
+// Its player used to be vidcorn.cfd, which went down (Cloudflare 502 on every
+// path); cineyz.com now embeds vidstuck.xyz, a ZXCStream-family player. The
+// catalogue still comes straight from TMDB; playback from vidstuck's backend:
 //
-//   GET  https://vidcorn.cfd/api/token
-//     -> {"token":"v5.<hex>.<unix>.<hex>","expiresAt":…,"ttl":300}
-//   POST https://vidcorn.cfd/api/sources?provider=<necro|look|abyss|south|acme>
-//        x-bcine-key: <token>
-//        {"type":"movie"|"tv","id":"<tmdb>","provider":…,["season":n,"episode":n],["dubId":…]}
-//     -> {servers:[{name,quality,type,url:"/api/v?d=…&sig=…&headers=…"}],
-//         tracks:[{lan,lanName,url}], dubs:[{id,language}], currentDubId}
+//   POST /backend/fuckyou      {<P.tmdbId>, <P.type>, <P.server>, [<P.season>, <P.episode>]}
+//     -> {ts, token}           (one token per server, obfuscated field names)
+//   GET  /backend/servers/<server>?<P.*>=…   (+ title, year, release date, imdb id
+//        from /backend/tmdb/details/<type>/<id>, as the player sends them)
+//     -> {links:[{type:"hls"|"mp4"|"dash", link:<CryptoJS AES>}], subtitles, dubs}
+//   link = CryptoJS.AES.decrypt(link, BC_LINK_KEY): OpenSSL "Salted__" format,
+//   key/IV via EVP_BytesToKey (MD5), AES-256-CBC — done in pure JS below.
+//   GET  /backend/subtitle?…   (same token dance, server "subtitle")
+//     -> {captions:[{id, file:<.srt>, display}]}; /backend/subtitle/prox?url=
+//        serves each one as WebVTT.
 //
-// Every stream comes back already wrapped in the embed's own relay
-// (/api/v?d=…), which carries the upstream headers itself: nothing to decrypt
-// or sign on our side. The five servers are the ones the player lists:
-// Necro (main), Look (LookMovie), Abyss (Soap2Day), South, Acme (Hindi and
-// English audio, one "dub" per request).
+// Five servers: Orion and Centaurus answer DASH (.mpd) only, which AVPlayer
+// cannot play, so they are not queried. Atlas and Ursa ("meow") give HLS whose
+// segments are TS behind image/font content types. Andromeda gives MP4 for
+// episodes (DASH for films), but its MP4 relay (api1.zxcstream.xyz) answers
+// Cloudflare 522 only after ~20 s, and Sora has no timer to cut that wait
+// short: it is left out until that relay comes back (add it to BC_PROVIDERS).
+// Links are checked before being offered.
 
-const BC_EMBED = "https://vidcorn.cfd";
+const BC_EMBED = "https://vidstuck.xyz";
 const BC_SITE = "https://cineyz.com";
 const TMDB_API = "https://api.themoviedb.org/3";
 const TMDB_IMG = "https://image.tmdb.org/t/p/w500";
@@ -29,13 +35,29 @@ const TMDB_API_KEY = "f5b2cdde0b678e87f5c68b61b43c688c";
 
 const BC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-// Servers in the player's own order (key -> display name).
+// Passphrase the player hands to CryptoJS.AES.decrypt for every link.
+const BC_LINK_KEY = "7f4c9e2a81d63b05c4f7a9e8126d3b50e1a8c7f23d9465ab0c6e9f1d4a7b832c";
+
+// The player's obfuscated query/body field names.
+const BC_P = {
+    tmdbId: "a7f39c821d604e5b9c71f36e1547b",
+    type: "c285f91ab306d28147a35632e816b",
+    server: "6b491e7253ad84d392e7561a9384c",
+    season: "d8427b59ce30684a2f957c3613e85b",
+    episode: "91c6e4a728503d1f785c92346b713d",
+    ts: "61d9a5274c8e3b29afd6384c291e6",
+    token: "c492f7a183d6502b1e7436c538a716d",
+    title: "5e28c9147a306d1e829f3674b392a1",
+    year: "b731e6c94f08269d725f8341c306e",
+    date: "e164932c50216a39e5814b3027",
+    latestDate: "e16932c543416ad739e5814b3027",
+    imdbId: "f35a8c19d674b3265e871c4933a725f"
+};
+
+// Servers that can return something AVPlayer plays (key -> display name).
 const BC_PROVIDERS = [
-    { key: "necro", name: "Necro" },
-    { key: "look", name: "Look" },
-    { key: "abyss", name: "Abyss" },
-    { key: "south", name: "South" },
-    { key: "acme", name: "Acme" }
+    { key: "atlas", name: "Atlas" },
+    { key: "meow", name: "Ursa" }
 ];
 
 // ==========================================
@@ -97,41 +119,84 @@ async function tmdbGet(path) {
     try { return JSON.parse(body); } catch (e) { return null; }
 }
 
-// The embed page a browser would be on: the API checks it as Referer.
+// The embed page a browser would be on: the backend sees it as Referer.
 function embedPage(ref) {
     return ref.kind === 'tv'
         ? `${BC_EMBED}/embed/tv/${ref.id}/${ref.season}/${ref.episode}`
         : `${BC_EMBED}/embed/movie/${ref.id}`;
 }
 
-async function bcToken(ref) {
-    const headers = { "User-Agent": BC_UA, "Accept": "application/json", "Referer": embedPage(ref) };
-    const body = await readBody(await soraFetch(`${BC_EMBED}/api/token`, { method: 'GET', headers: headers }));
-    try {
-        const data = JSON.parse(body);
-        return data && data.token ? String(data.token) : "";
-    } catch (e) { return ""; }
-}
-
-async function bcSources(ref, token, provider, dubId) {
-    const payload = { type: ref.kind, id: String(ref.id), provider: provider };
-    if (dubId) payload.dubId = dubId;
-    if (ref.kind === 'tv') {
-        payload.season = parseInt(ref.season || "1", 10);
-        payload.episode = parseInt(ref.episode || "1", 10);
-    }
+function apiHeaders(ref, json) {
     const headers = {
         "User-Agent": BC_UA,
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "x-bcine-key": token,
+        "Accept": "application/json, text/plain, */*",
         "Referer": embedPage(ref),
         "Origin": BC_EMBED
     };
-    const url = `${BC_EMBED}/api/sources?provider=${encodeURIComponent(provider)}`;
-    const body = await readBody(await soraFetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) }));
-    if (!body || body.charAt(0) !== '{') return null;
+    if (json) headers["Content-Type"] = "application/json";
+    return headers;
+}
+
+async function apiJson(url, options) {
+    const body = await readBody(await soraFetch(url, options));
+    if (!body || (body.charAt(0) !== '{' && body.charAt(0) !== '[')) return null;
     try { return JSON.parse(body); } catch (e) { return null; }
+}
+
+// Title / release date / imdb id, as the player sends them. Its own TMDB proxy
+// (/backend/tmdb/details) answers the same values ("title" and "release_date"
+// filled from name / first_air_date for shows), but it shares the backend's
+// rate limit, so they are read from TMDB directly.
+async function bcMeta(ref) {
+    const data = await tmdbGet(`/${ref.kind}/${ref.id}?language=en-US&append_to_response=external_ids`);
+    const meta = { title: "", date: "", latestDate: "", imdbId: "" };
+    if (data) {
+        meta.title = data.title || data.name || "";
+        meta.date = data.release_date || data.first_air_date || "";
+        meta.latestDate = data.last_air_date || "";
+        meta.imdbId = data.imdb_id || (data.external_ids && data.external_ids.imdb_id) || "";
+    }
+    return meta;
+}
+
+// One signed request: a fresh token for <server>, then the GET it unlocks.
+async function bcSigned(ref, meta, server, path) {
+    const tokenBody = {};
+    tokenBody[BC_P.tmdbId] = String(ref.id);
+    tokenBody[BC_P.type] = ref.kind;
+    tokenBody[BC_P.server] = server;
+    if (ref.kind === 'tv') {
+        tokenBody[BC_P.season] = parseInt(ref.season || "1", 10);
+        tokenBody[BC_P.episode] = parseInt(ref.episode || "1", 10);
+    }
+    const token = await apiJson(`${BC_EMBED}/backend/fuckyou`,
+        { method: 'POST', headers: apiHeaders(ref, true), body: JSON.stringify(tokenBody) });
+    if (!token || !token.token) return null;
+
+    const year = meta.date ? meta.date.slice(0, 4) : "";
+    const params = [
+        [BC_P.tmdbId, String(ref.id)],
+        [BC_P.server, server],
+        [BC_P.type, ref.kind],
+        [BC_P.ts, String(token.ts)],
+        [BC_P.token, String(token.token)],
+        [BC_P.title, meta.title],
+        [BC_P.year, year],
+        [BC_P.date, String(meta.date || "undefined")]
+    ];
+    if (ref.kind === 'tv') {
+        params.push([BC_P.season, String(ref.season || "1")]);
+        params.push([BC_P.episode, String(ref.episode || "1")]);
+        if (meta.latestDate) params.push([BC_P.latestDate, meta.latestDate]);
+    }
+    if (meta.imdbId) params.push([BC_P.imdbId, meta.imdbId]);
+    const query = params.map(p => `${p[0]}=${formComponent(p[1])}`).join('&');
+    return apiJson(`${BC_EMBED}${path}?${query}`, { method: 'GET', headers: apiHeaders(ref, false) });
+}
+
+// URLSearchParams-style encoding (spaces as "+"), as the player builds it.
+function formComponent(value) {
+    return encodeURIComponent(String(value)).replace(/%20/g, '+');
 }
 
 function absolute(url) {
@@ -142,7 +207,227 @@ function absolute(url) {
 }
 
 function streamHeaders() {
-    return { "Referer": `${BC_EMBED}/`, "User-Agent": BC_UA };
+    return { "Referer": `${BC_EMBED}/`, "Origin": BC_EMBED, "User-Agent": BC_UA };
+}
+
+// ==========================================
+// 🧮 PURE-JS CRYPTO (base64, UTF-8, MD5, AES-CBC) — no atob/crypto in Sora
+// ==========================================
+// base64/UTF-8/AES come from this repository's anichan module (checked
+// against Node's crypto, AES-CBC 600/600 across 128/192/256-bit keys); MD5
+// and the CryptoJS wrapper were checked the same way (MD5 600/600, CryptoJS
+// AES 300/300).
+
+// ---- byte helpers (no atob/btoa/TextEncoder in the runtime) ----
+const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function base64ToBytes(text) {
+    const clean = String(text || "").replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/]/g, '');
+    const out = new Uint8Array(Math.floor(clean.length * 3 / 4));
+    let buffer = 0, bits = 0, n = 0;
+    for (let i = 0; i < clean.length; i++) {
+        buffer = (buffer << 6) | B64_CHARS.indexOf(clean.charAt(i));
+        bits += 6;
+        if (bits >= 8) { bits -= 8; out[n++] = (buffer >> bits) & 0xff; }
+    }
+    return out.subarray(0, n);
+}
+
+function bytesToBase64(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length; i += 3) {
+        const a = bytes[i], b = i + 1 < bytes.length ? bytes[i + 1] : 0, c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+        const triple = (a << 16) | (b << 8) | c;
+        out += B64_CHARS[(triple >> 18) & 63] + B64_CHARS[(triple >> 12) & 63];
+        out += i + 1 < bytes.length ? B64_CHARS[(triple >> 6) & 63] : "=";
+        out += i + 2 < bytes.length ? B64_CHARS[triple & 63] : "=";
+    }
+    return out;
+}
+
+function utf8Encode(text) {
+    const out = [];
+    const s = String(text);
+    for (let i = 0; i < s.length; i++) {
+        let code = s.charCodeAt(i);
+        if (code >= 0xd800 && code <= 0xdbff && i + 1 < s.length) {
+            const low = s.charCodeAt(i + 1);
+            if (low >= 0xdc00 && low <= 0xdfff) { code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00); i++; }
+        }
+        if (code < 0x80) out.push(code);
+        else if (code < 0x800) out.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+        else if (code < 0x10000) out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+        else out.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 63), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+    }
+    return new Uint8Array(out);
+}
+
+function utf8Decode(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length;) {
+        const b = bytes[i];
+        let code, extra;
+        if (b < 0x80) { code = b; extra = 0; }
+        else if (b >= 0xf0) { code = b & 0x07; extra = 3; }
+        else if (b >= 0xe0) { code = b & 0x0f; extra = 2; }
+        else if (b >= 0xc0) { code = b & 0x1f; extra = 1; }
+        else { code = 0xfffd; extra = 0; }
+        i++;
+        for (let k = 0; k < extra && i < bytes.length; k++, i++) code = (code << 6) | (bytes[i] & 63);
+        if (code > 0xffff) {
+            code -= 0x10000;
+            out += String.fromCharCode(0xd800 + (code >> 10), 0xdc00 + (code & 0x3ff));
+        } else {
+            out += String.fromCharCode(code);
+        }
+    }
+    return out;
+}
+// ---- pure JS AES (128/192/256): block encrypt/decrypt, CTR (for GCM) and CBC ----
+const AES_SBOX = new Uint8Array(256);
+const AES_INV_SBOX = new Uint8Array(256);
+function buildAesTables() {
+    let p = 1, q = 1;
+    do {
+        p = (p ^ ((p << 1) & 0xff) ^ ((p & 0x80) ? 0x1b : 0)) & 0xff;
+        q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;
+        if (q & 0x80) q ^= 0x09;
+        const x = q ^ ((q << 1) | (q >> 7)) ^ ((q << 2) | (q >> 6)) ^ ((q << 3) | (q >> 5)) ^ ((q << 4) | (q >> 4));
+        AES_SBOX[p] = (x ^ 0x63) & 0xff;
+    } while (p !== 1);
+    AES_SBOX[0] = 0x63;
+    for (let i = 0; i < 256; i++) AES_INV_SBOX[AES_SBOX[i]] = i;
+}
+buildAesTables();
+function aesXtime(a) { return ((a << 1) ^ ((a & 0x80) ? 0x1b : 0)) & 0xff; }
+function aesMul(a, b) {
+    let r = 0;
+    while (b) { if (b & 1) r ^= a; a = aesXtime(a); b >>= 1; }
+    return r;
+}
+
+// Round keys as a flat byte array (16 * (rounds + 1)).
+function aesExpandKey(key) {
+    const nk = key.length / 4, rounds = nk + 6, total = 4 * (rounds + 1);
+    const w = new Uint8Array(total * 4);
+    w.set(key, 0);
+    let rcon = 1;
+    for (let i = nk; i < total; i++) {
+        let t0 = w[(i - 1) * 4], t1 = w[(i - 1) * 4 + 1], t2 = w[(i - 1) * 4 + 2], t3 = w[(i - 1) * 4 + 3];
+        if (i % nk === 0) {
+            const tmp = t0;
+            t0 = AES_SBOX[t1] ^ rcon; t1 = AES_SBOX[t2]; t2 = AES_SBOX[t3]; t3 = AES_SBOX[tmp];
+            rcon = aesXtime(rcon);
+        } else if (nk > 6 && i % nk === 4) {
+            t0 = AES_SBOX[t0]; t1 = AES_SBOX[t1]; t2 = AES_SBOX[t2]; t3 = AES_SBOX[t3];
+        }
+        w[i * 4] = w[(i - nk) * 4] ^ t0; w[i * 4 + 1] = w[(i - nk) * 4 + 1] ^ t1;
+        w[i * 4 + 2] = w[(i - nk) * 4 + 2] ^ t2; w[i * 4 + 3] = w[(i - nk) * 4 + 3] ^ t3;
+    }
+    return { w: w, rounds: rounds };
+}
+function aesDecryptBlock(ks, input) {
+    const s = new Uint8Array(16), w = ks.w, rounds = ks.rounds;
+    const last = rounds * 16;
+    for (let i = 0; i < 16; i++) s[i] = input[i] ^ w[last + i];
+    const t = new Uint8Array(16);
+    for (let round = rounds - 1; round >= 0; round--) {
+        // InvShiftRows + InvSubBytes
+        for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) t[((c + r) % 4) * 4 + r] = AES_INV_SBOX[s[c * 4 + r]];
+        const off = round * 16;
+        for (let i = 0; i < 16; i++) t[i] ^= w[off + i];
+        if (round !== 0) {
+            for (let c = 0; c < 4; c++) {
+                const a0 = t[c * 4], a1 = t[c * 4 + 1], a2 = t[c * 4 + 2], a3 = t[c * 4 + 3];
+                s[c * 4] = aesMul(a0, 14) ^ aesMul(a1, 11) ^ aesMul(a2, 13) ^ aesMul(a3, 9);
+                s[c * 4 + 1] = aesMul(a0, 9) ^ aesMul(a1, 14) ^ aesMul(a2, 11) ^ aesMul(a3, 13);
+                s[c * 4 + 2] = aesMul(a0, 13) ^ aesMul(a1, 9) ^ aesMul(a2, 14) ^ aesMul(a3, 11);
+                s[c * 4 + 3] = aesMul(a0, 11) ^ aesMul(a1, 13) ^ aesMul(a2, 9) ^ aesMul(a3, 14);
+            }
+        } else {
+            s.set(t);
+        }
+    }
+    return s;
+}
+// AES-CBC decryption with PKCS#7 padding removal.
+function aesCbcDecrypt(key, iv, data) {
+    const ks = aesExpandKey(key);
+    const out = new Uint8Array(data.length);
+    let prev = iv;
+    for (let off = 0; off + 16 <= data.length; off += 16) {
+        const block = data.subarray(off, off + 16);
+        const plain = aesDecryptBlock(ks, block);
+        for (let i = 0; i < 16; i++) out[off + i] = plain[i] ^ prev[i];
+        prev = block;
+    }
+    const pad = out[out.length - 1];
+    return pad > 0 && pad <= 16 ? out.subarray(0, out.length - pad) : out;
+}
+// ---- pure JS MD5 over byte arrays (for CryptoJS's OpenSSL key derivation) ----
+const MD5_S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+const MD5_K = [];
+for (let i = 0; i < 64; i++) MD5_K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
+
+function md5Bytes(bytes) {
+    const len = bytes.length;
+    const total = (((len + 8) >> 6) + 1) * 64;
+    const msg = new Uint8Array(total);
+    msg.set(bytes, 0);
+    msg[len] = 0x80;
+    const bitLen = len * 8;
+    for (let i = 0; i < 4; i++) msg[total - 8 + i] = (bitLen >>> (8 * i)) & 0xff;
+    msg[total - 4] = Math.floor(len / 0x20000000) & 0xff;
+
+    let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+    const m = new Array(16);
+    for (let off = 0; off < total; off += 64) {
+        for (let i = 0; i < 16; i++) {
+            const p = off + i * 4;
+            m[i] = (msg[p] | (msg[p + 1] << 8) | (msg[p + 2] << 16) | (msg[p + 3] << 24)) >>> 0;
+        }
+        let a = a0, b = b0, c = c0, d = d0;
+        for (let i = 0; i < 64; i++) {
+            let f, g;
+            if (i < 16) { f = (b & c) | (~b & d); g = i; }
+            else if (i < 32) { f = (d & b) | (~d & c); g = (5 * i + 1) % 16; }
+            else if (i < 48) { f = b ^ c ^ d; g = (3 * i + 5) % 16; }
+            else { f = c ^ (b | ~d); g = (7 * i) % 16; }
+            const tmp = d;
+            d = c;
+            c = b;
+            const x = (a + f + MD5_K[i] + m[g]) >>> 0;
+            b = (b + ((x << MD5_S[i]) | (x >>> (32 - MD5_S[i])))) >>> 0;
+            a = tmp;
+        }
+        a0 = (a0 + a) >>> 0; b0 = (b0 + b) >>> 0; c0 = (c0 + c) >>> 0; d0 = (d0 + d) >>> 0;
+    }
+    const out = new Uint8Array(16);
+    [a0, b0, c0, d0].forEach((v, k) => { for (let i = 0; i < 4; i++) out[k * 4 + i] = (v >>> (8 * i)) & 0xff; });
+    return out;
+}
+
+// CryptoJS.AES.decrypt(text, passphrase): base64 "Salted__" + 8-byte salt + ciphertext,
+// key/IV from OpenSSL's EVP_BytesToKey (MD5, one round), AES-256-CBC, PKCS#7.
+function cryptoJsAesDecrypt(b64, passphrase) {
+    const raw = base64ToBytes(b64);
+    if (raw.length < 32 || utf8Decode(raw.subarray(0, 8)) !== "Salted__") return "";
+    const salt = raw.subarray(8, 16);
+    const pass = utf8Encode(passphrase);
+    let derived = new Uint8Array(0), prev = new Uint8Array(0);
+    while (derived.length < 48) {
+        const input = new Uint8Array(prev.length + pass.length + salt.length);
+        input.set(prev, 0); input.set(pass, prev.length); input.set(salt, prev.length + pass.length);
+        prev = md5Bytes(input);
+        const next = new Uint8Array(derived.length + 16);
+        next.set(derived, 0); next.set(prev, derived.length);
+        derived = next;
+    }
+    const plain = aesCbcDecrypt(derived.subarray(0, 32), derived.subarray(32, 48), raw.subarray(16));
+    return utf8Decode(plain);
 }
 
 // ==========================================
@@ -285,46 +570,57 @@ async function extractEpisodes(url) {
 // 🎬 PLAYBACK
 // ==========================================
 
-// The relays sometimes sign a link whose upstream is gone (404/502) or
-// rate-limited: ask for the playlist once and keep only the live ones.
-async function playlistIsAlive(url) {
+// Servers sometimes sign a link whose origin is gone (Cloudflare 52x) or
+// rate-limited (429): request it once and keep only what really answers.
+async function streamIsAlive(stream) {
     try {
-        const response = await soraFetch(url, { method: 'GET', headers: streamHeaders() });
+        const headers = Object.assign({}, stream.headers);
+        if (stream.kind === 'mp4') headers["Range"] = "bytes=0-1023";
+        const response = await soraFetch(stream.streamUrl, { method: 'GET', headers: headers });
         if (!response) return false;
         if (typeof response.status === 'number' && response.status >= 400) return false;
         const body = await readBody(response);
-        return body.indexOf('#EXTM3U') !== -1;
+        if (stream.kind === 'hls') return body.indexOf('#EXTM3U') !== -1;
+        return !/^\s*</.test(body.slice(0, 64));
     } catch (e) { return false; }
 }
 
-// Turns one /api/sources answer into streams + subtitle tracks.
-function collect(data, providerName, dubLabel, streams, allSubtitles) {
-    const servers = data && Array.isArray(data.servers) ? data.servers : [];
-    for (const server of servers) {
-        const streamUrl = absolute(server && server.url);
-        if (!streamUrl) continue;
-        if (streams.some(s => s.streamUrl === streamUrl)) continue;
-        const name = String(server.name || server.title || providerName);
-        // "quality" is sometimes a real resolution, sometimes "Necro (Auto)".
-        const q = String(server.quality || "");
-        const quality = /^\d{3,4}p$|^4K/i.test(q) && name.indexOf(q) === -1 ? ` ${q}` : "";
-        const dub = dubLabel && name.indexOf(dubLabel) === -1 ? ` · ${dubLabel}` : "";
-        streams.push({ title: `bCine ${name}${quality}${dub}`, streamUrl: streamUrl, headers: streamHeaders() });
-    }
+// One server: token, links, decryption. Returns the playable streams.
+async function bcServer(ref, meta, provider) {
+    const data = await bcSigned(ref, meta, provider.key, `/backend/servers/${provider.key}`);
+    const links = data && Array.isArray(data.links) ? data.links : [];
+    const streams = [];
+    links.forEach((entry, index) => {
+        const kind = String(entry && entry.type || "").toLowerCase();
+        if (kind !== 'hls' && kind !== 'mp4') return;          // DASH: not playable on iOS
+        const link = absolute(cryptoJsAesDecrypt(String(entry.link || ""), BC_LINK_KEY));
+        if (!link) return;
+        const label = entry.resolution ? ` ${entry.resolution}p` : (links.length > 1 ? ` #${index + 1}` : "");
+        streams.push({
+            title: `bCine ${provider.name}${label} · ${kind === 'mp4' ? 'MP4' : 'HLS'}`,
+            streamUrl: link,
+            headers: streamHeaders(),
+            kind: kind
+        });
+    });
+    return streams;
+}
 
-    const tracks = data && Array.isArray(data.tracks) ? data.tracks : [];
-    for (const track of tracks) {
-        const subUrl = absolute(track && track.url);
-        if (!subUrl) continue;
-        if (allSubtitles.some(s => s.url === subUrl)) continue;
-        allSubtitles.push({
-            url: subUrl,
-            label: track.lanName || track.lan || providerName,
+async function bcSubtitles(ref, meta) {
+    const data = await bcSigned(ref, meta, "subtitle", "/backend/subtitle");
+    const captions = data && Array.isArray(data.captions) ? data.captions : [];
+    const tracks = [];
+    for (const caption of captions) {
+        if (!caption || !caption.file) continue;
+        tracks.push({
+            // The proxy converts the .srt to WebVTT.
+            url: `${BC_EMBED}/backend/subtitle/prox?url=${encodeURIComponent(caption.file)}`,
+            label: String(caption.display || caption.language || "Subtitle"),
             kind: "captions",
-            headers: { "Referer": `${BC_EMBED}/` },
-            lang: String(track.lan || "").toLowerCase()
+            headers: { "Referer": `${BC_EMBED}/`, "User-Agent": BC_UA }
         });
     }
+    return tracks;
 }
 
 async function extractStreamUrl(url) {
@@ -334,65 +630,46 @@ async function extractStreamUrl(url) {
 
     console.log(`[Player] 🎬 bCine — ${mediaUrl}`);
 
-    const streams = [];
-    const allSubtitles = [];
     const failedLinks = [];
     let bestSubtitle = "";
     let bestSubtitleHeaders = {};
 
     try {
-        const token = await bcToken(ref);
-        if (!token) {
-            console.log(`[Player] ⚠️ No token from ${BC_EMBED}/api/token`);
-            sendSupabaseLog("bCine", "UNSUPPORTED_HOSTS", {
-                media_url: mediaUrl, season_number: String(ref.season || "1"), ep_number: String(ref.episode || "1"),
-                failed_count: 1, failed_links: [{ server_name: "bCine", url: `${BC_EMBED}/api/token`, reason: "No token" }]
-            });
-            return JSON.stringify({ type: "none" });
-        }
+        const meta = await bcMeta(ref);
+        if (!meta.title) console.log(`[Player] ⚠️ No TMDB details, trying anyway`);
 
-        // The five servers are independent: ask them all at once.
-        const answers = await Promise.all(BC_PROVIDERS.map(p => bcSources(ref, token, p.key, null).catch(() => null)));
+        // Servers and subtitles are independent: ask everything at once.
+        const results = await Promise.all([
+            bcSubtitles(ref, meta).catch(() => []),
+            ...BC_PROVIDERS.map(p => bcServer(ref, meta, p).catch(() => []))
+        ]);
+        const allSubtitles = results[0];
 
-        for (let i = 0; i < BC_PROVIDERS.length; i++) {
-            const provider = BC_PROVIDERS[i];
-            const data = answers[i];
-            const before = streams.length;
-
-            // Acme answers in one audio language per call (Hindi first); the
-            // other languages are fetched with their dubId.
-            const dubs = data && Array.isArray(data.dubs) ? data.dubs : [];
-            const current = dubs.find(d => d && d.id === data.currentDubId);
-            collect(data, provider.name, current ? (current.language || current.name) : "", streams, allSubtitles);
-
-            for (const dub of dubs) {
-                if (!dub || !dub.id || dub.id === data.currentDubId) continue;
-                const other = await bcSources(ref, token, provider.key, dub.id).catch(() => null);
-                collect(other, provider.name, dub.language || dub.name || "", streams, allSubtitles);
-            }
-
-            if (streams.length === before) {
-                failedLinks.push({ server_name: provider.name, url: `${BC_EMBED}/api/sources?provider=${provider.key}`, reason: "No server returned" });
+        let streams = [];
+        BC_PROVIDERS.forEach((provider, i) => {
+            const found = results[i + 1];
+            if (found.length === 0) {
+                failedLinks.push({ server_name: provider.name, url: `${BC_EMBED}/backend/servers/${provider.key}`, reason: "No playable link" });
             } else {
-                console.log(`   -> ${provider.name}: ${streams.length - before} stream(s)`);
+                console.log(`   -> ${provider.name}: ${found.length} link(s)`);
+                for (const s of found) if (!streams.some(x => x.streamUrl === s.streamUrl)) streams.push(s);
             }
-        }
+        });
 
-        // Drop the links whose playlist does not answer (checked in parallel).
-        const alive = await Promise.all(streams.map(s => playlistIsAlive(s.streamUrl)));
-        for (let i = streams.length - 1; i >= 0; i--) {
-            if (alive[i]) continue;
-            failedLinks.push({ server_name: streams[i].title, url: streams[i].streamUrl, reason: "Playlist unreachable" });
-            streams.splice(i, 1);
-        }
+        // Drop the links that do not answer (checked in parallel).
+        const alive = await Promise.all(streams.map(s => streamIsAlive(s)));
+        streams = streams.filter((s, i) => {
+            if (!alive[i]) failedLinks.push({ server_name: s.title, url: s.streamUrl, reason: "Stream unreachable" });
+            return alive[i];
+        });
+        for (const s of streams) delete s.kind;
 
         // English first for the default subtitle.
-        const english = allSubtitles.find(s => s.lang === 'en' || /^english/i.test(s.label));
+        const english = allSubtitles.find(s => /^english/i.test(s.label));
         if (english) {
             bestSubtitle = english.url;
             bestSubtitleHeaders = english.headers;
         }
-        for (const sub of allSubtitles) delete sub.lang;
 
         console.log(`-----------------------------------------------------`);
         console.log(`[Player] 📊 Summary: ${streams.length} link(s), ${allSubtitles.length} subtitle track(s).`);

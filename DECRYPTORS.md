@@ -665,3 +665,48 @@ Links come in two shapes, absolute
 
 ---
 *Part III — modules `vidhawk`, `vidrift`, `aniclipse`, `anikura` (verified live, playback included) and `animesalt` (verified up to the signed link). Last updated 2026-09-16.*
+
+# Part IV — vidstuck.xyz player (`bcine` module, 2026-10-04)
+
+## 23. vidstuck.xyz (ZXCStream family) — passphrase CryptoJS AES
+
+bCine (`cineyz.com`) dropped its `vidcorn.cfd` player (Cloudflare 502 on every route,
+homepage included) for `vidstuck.xyz`, a Next.js player of the ZXCStream family (its
+referrer allowlist names `zxcstream.icu`, `bcine.ru`, `7movies.ac`…). Everything goes
+through `/backend/`, with deliberately unreadable field names:
+
+```
+POST /backend/fuckyou   {<tmdbId>, <type>, <server>, [<season>, <episode>]}  -> {ts, token}
+GET  /backend/servers/<server>?<tmdbId>&<server>&<type>&<ts>&<token>&<title>&<year>&<date>
+                               [&<season>&<episode>&<latestDate>][&<imdbId>]
+     -> {links:[{type:"hls"|"mp4"|"dash", link:"U2FsdGVkX1…"}], subtitles, dubs}
+GET  /backend/subtitle?…   (same dance, server "subtitle") -> {captions:[{file:.srt, display}]}
+GET  /backend/subtitle/prox?url=<srt>   -> the same subtitle as WebVTT
+```
+
+The field names (`a7f39c821d604e5b9c71f36e1547b` = tmdbId, etc.) are bundle constants;
+`title`/`year`/`date` are TMDB's (`release_date`, or `first_air_date` for a show). One
+token per server and per request.
+
+**Decryption.** Each `link` is `CryptoJS.AES.decrypt(link, passphrase)` with a hard-coded
+passphrase (`7f4c9e2a…a7b832c`). OpenSSL format: `"Salted__"` + 8-byte salt + ciphertext;
+key and IV from **EVP_BytesToKey** (MD5, one round, 48 bytes → 32-byte key + 16-byte IV),
+AES-256-CBC, PKCS#7. In pure JS: an MD5 written for it, AES-CBC taken from `anichan`
+(checked against Node's `crypto`: MD5 600/600, CryptoJS decryption 300/300).
+
+**Five servers, two useful on iOS.** Orion and Centaurus return DASH (`.mpd`) only, which
+AVPlayer cannot play. Atlas and Ursa (`meow`) return HLS whose segments are TS (byte
+`0x47`) served under image or font content types. Andromeda returns MP4 for episodes, but
+its `api1.zxcstream.xyz` relay answers **522 after ~20 s**; Sora has no timer to cut that
+short, so it is left out until it comes back.
+
+**Rate limit.** The backend answers 429 (Cloudflare page) when one IP fires dozens of calls
+— which happens while testing, not for a user starting one title. Metadata is therefore
+read from TMDB directly rather than `/backend/tmdb/details`, saving one backend call.
+
+| Module | Status |
+|---|---|
+| **bcine** | ✅ verified live — Inception, Oppenheimer (films) and Breaking Bad S1E1: 3 HLS streams, 15-16 subtitle tracks, ~1 s |
+
+---
+*Part IV — `bcine` module (vidstuck.xyz player). Last updated 2026-10-04.*
