@@ -1,0 +1,23 @@
+{
+    "sourceName": "Dramahood",
+    "iconUrl": "https://dramahood.mom/wp-content/uploads/2025/04/cropped-kdramahood-192x192.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "720p",
+    "baseUrl": "https://dramahood.mom/",
+    "searchBaseUrl": "https://dramahood.mom/?s=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/dramahood/dramahood.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: Asian dramas from dramahood.mom; the dramavideo.se backend (shared with DramaNice and kisskh.dk) and vidbasic.top, both AES-256-CBC decrypted in pure JS"
+}

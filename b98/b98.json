@@ -1,0 +1,23 @@
+{
+    "sourceName": "B98",
+    "iconUrl": "https://www.b98.tv/wp-content/themes/b98/favicon.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "MP4",
+    "quality": "720p",
+    "baseUrl": "https://www.b98.tv/",
+    "searchBaseUrl": "https://www.b98.tv/?s=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/b98/b98.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: classic cartoons from b98.tv — series/studio grids and the site search parsed from HTML, the self-hosted mp4 read from each cartoon page"
+}

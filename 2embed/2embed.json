@@ -1,0 +1,23 @@
+{
+    "sourceName": "2Embed",
+    "iconUrl": "https://www.2embed.cc/images/favicon.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://www.2embed.cc/",
+    "searchBaseUrl": "https://www.2embed.cc/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/2embed/2embed.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue; playback through 2Embed's VIDEM servers (vidsrc.buzz / videm.xyz): page token -> api.php sources/play -> /_stream HLS, with WebVTT subtitles"
+}

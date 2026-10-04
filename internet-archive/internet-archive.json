@@ -1,0 +1,23 @@
+{
+    "sourceName": "Internet Archive",
+    "iconUrl": "https://archive.org/apple-touch-icon.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "MP4",
+    "quality": "1080p",
+    "baseUrl": "https://archive.org/",
+    "searchBaseUrl": "https://archive.org/advancedsearch.php?q=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/internet-archive/internet-archive.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: public-domain films (feature_films) and classic TV (classic_tv) via archive.org's advancedsearch + metadata APIs, playing the item's mp4 files directly"
+}

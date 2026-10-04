@@ -1,0 +1,23 @@
+{
+    "sourceName": "VidNest",
+    "iconUrl": "https://vidnest.fun/favicon.ico",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://vidnest.fun/",
+    "searchBaseUrl": "https://vidnest.fun/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/vidnest/vidnest.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue, streams from VidNest's own relays (new.vidnest.fun/<relay>/<movie|tv>/…), whose shuffled-alphabet base64 answers are decoded locally"
+}

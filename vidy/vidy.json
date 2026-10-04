@@ -1,0 +1,23 @@
+{
+    "sourceName": "Vidy",
+    "iconUrl": "https://www.vidy.st/icon-512x512.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "2160p",
+    "baseUrl": "https://www.vidy.st/",
+    "searchBaseUrl": "https://www.vidy.st/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/vidy/vidy.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue, streams from Vidy's own API (api.wecollege.net, one server per city: Miami, Boise, Phoenix, Atlanta, Portland, Vegas + German, French, Spanish), its enc=2 stream cipher decrypted locally in pure JS"
+}

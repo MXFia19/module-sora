@@ -1,0 +1,23 @@
+{
+    "sourceName": "VidZee",
+    "iconUrl": "https://www.google.com/s2/favicons?domain=vidzee.wtf&sz=128",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://player.vidzee.wtf/",
+    "searchBaseUrl": "https://player.vidzee.wtf/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/vidzee/vidzee.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue; streams from core.vidzee.wtf/streams (Dcloud, Acme per language, IPcloud, V6…), whose RC4-drop2048 payload (key lifted from the player's WASM) is decrypted in pure JS, plus the site's VTT subtitles"
+}

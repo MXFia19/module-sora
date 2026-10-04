@@ -1,0 +1,23 @@
+{
+    "sourceName": "VidLove (111Movies)",
+    "iconUrl": "https://111movies.net/assets/img/logo.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://player.vidlove.cc/",
+    "searchBaseUrl": "https://player.vidlove.cc/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/vidlove/vidlove.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue, streams and subtitles from VidLove's JSON API (api.vidlove.cc/<movie|tv>?…&mode=json&sources=<key>), the backend 111movies.net now redirects to"
+}

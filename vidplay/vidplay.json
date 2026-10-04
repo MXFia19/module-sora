@@ -1,0 +1,23 @@
+{
+    "sourceName": "VidPlay",
+    "iconUrl": "https://vidplay.to/favicon.ico",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://vidplay.to/",
+    "searchBaseUrl": "https://vidplay.to/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/vidplay/vidplay.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue, streams from VidPlay's own CinePro server (s.torrentio.to /v1/sources/stream event stream, every scraper's links, dead ones filtered)"
+}

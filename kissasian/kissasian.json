@@ -1,0 +1,23 @@
+{
+    "sourceName": "KissAsian",
+    "iconUrl": "https://kissasian.gr/wp-content/uploads/2026/10/cropped-kiss-icon-150x150-1-300x300.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://kissasian.gr/",
+    "searchBaseUrl": "https://kissasian.gr/wp-json/wp/v2/series?search=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/kissasian/kissasian.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: Asian dramas from kissasian.gr (WordPress REST search, series pages); dramavibe's player_source m3u8s and KissKH's CDN m3u8, with their SRT subtitles"
+}

@@ -1,0 +1,23 @@
+{
+    "sourceName": "Moviepire",
+    "iconUrl": "https://phland.org/logo.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://phland.org/",
+    "searchBaseUrl": "https://phland.org/",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/moviepire/moviepire.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: TMDB catalogue, streams from Phland's own Vyla scraper API (/api/source/<key>: VidAPI, LookMovie, LMScript, FSOnline, FlaxMovies, Blaze, Drive, KissKH…) through Phland's relay, dead links probed out, subtitles from /api/meta"
+}

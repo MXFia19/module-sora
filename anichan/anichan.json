@@ -1,0 +1,23 @@
+{
+    "sourceName": "AniChan",
+    "iconUrl": "https://anichan.to/icon-192.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "HLS",
+    "quality": "1080p",
+    "baseUrl": "https://anichan.to/",
+    "searchBaseUrl": "https://anichan.to/search?q=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/anichan/anichan.js",
+    "type": "anime",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: search page + /api/catalog for the catalogue, streams from /api/watch/servers (watch session, AES-256-GCM payload decrypted locally in pure JS), sub and dub servers played through the site's signed relay with soft subtitles"
+}

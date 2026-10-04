@@ -1,0 +1,23 @@
+{
+    "sourceName": "FshareTV",
+    "iconUrl": "https://fsharetv.co/img/fsharetv.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "English",
+    "streamType": "MP4",
+    "quality": "1080p",
+    "baseUrl": "https://fsharetv.co/",
+    "searchBaseUrl": "https://fsharetv.co/api/movie/autocomplete-search?query=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/fsharetv/fsharetv.js",
+    "type": "movies/shows",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: FshareTV's own search API, movie pages and self-hosted MP4 files (/api/file/<id>/source -> /api/media)"
+}

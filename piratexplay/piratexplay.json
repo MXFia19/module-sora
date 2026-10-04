@@ -1,0 +1,23 @@
+{
+    "sourceName": "PirateXplay",
+    "iconUrl": "https://piratexplay.cc/public/img/favicon/apple-icon-180x180.png",
+    "author": {
+        "name": "MXFia19",
+        "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
+        "url": "https://github.com/MXFia19"
+    },
+    "version": "1.0.0",
+    "language": "Hindi",
+    "streamType": "HLS",
+    "quality": "720p",
+    "baseUrl": "https://piratexplay.cc/",
+    "searchBaseUrl": "https://piratexplay.cc/?s=",
+    "scriptUrl": "https://raw.githubusercontent.com/MXFia19/module-sora/main/piratexplay/piratexplay.js",
+    "type": "anime",
+    "downloadSupport": true,
+    "asyncJS": true,
+    "softsub": true,
+    "supportsSora": true,
+    "supportsLuna": true,
+    "changelog": "first release: anime with Indian dubs from piratexplay.cc (site search, per-season episodes API); plays the Vidmoly embeds (multi-audio HLS), other hosts are reported as unsupported"
+}
