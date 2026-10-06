@@ -234,28 +234,80 @@ function miruroCard(item) {
     return { id, title, image };
 }
 
+/** Appel direct à l'API REST v1 de miruro (le « pipe » /api/secure/pipe
+ *  renvoie désormais 404 : il a été abandonné). On demande une réponse NON
+ *  compressée (Accept-Encoding: identity) pour récupérer du JSON lisible —
+ *  sinon le corps revient en br/zstd, illisible via le text() de fetchv2. */
+async function miruroV1(path, query = {}) {
+    const qs = Object.keys(query)
+        .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(query[k])}`)
+        .join('&');
+    const url = `${BASE_URL}/api/v1/${path}${qs ? `?${qs}` : ''}`;
+    console.log(`[v1] 🔗 ${url}`);
+
+    const headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Encoding": "identity",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": `${BASE_URL}/`,
+        "Origin": BASE_URL,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    };
+
+    let text = "";
+    let status = "Unknown";
+    try {
+        const resp = await soraFetch(url, { method: 'GET', headers: headers });
+        if (resp) {
+            status = resp.status || 'Unknown';
+            text = typeof resp.text === 'function' ? await resp.text() : (resp.data || "");
+        }
+    } catch (e) {
+        console.error(`[v1] ❌ network: ${e.message}`);
+    }
+    console.log(`[v1] HTTP ${status} | ${text ? text.length : 0} bytes | head: ${String(text).slice(0, 90)}`);
+
+    if (!text) return null;
+    const trimmed = text.trim();
+    if (trimmed.startsWith('<') || /just a moment|cloudflare|attention required/i.test(trimmed.slice(0, 300))) {
+        return { _blocked_by_cloudflare: true };
+    }
+    try { return JSON.parse(trimmed); } catch (e) {
+        console.error(`[v1] ❌ réponse non-JSON (compressée ?) : ${trimmed.slice(0, 60)}`);
+        return null;
+    }
+}
+
 async function searchResults(keyword) {
     console.log(`[Search] 🔍 Starting for : "${keyword}"`);
     // L'API de recherche de miruro est passée de la forme GraphQL
     // (path "search", sort "POPULARITY_DESC") à un REST v1
     // (/api/v1/anime?q=&limit=&sort=-popularity). On tente la nouvelle forme
     // d'abord, avec repli sur l'ancienne pour les instances pas encore migrées.
-    const attempts = [
-        { path: "v1/anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
-        { path: "anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
-        { path: "search", query: { q: keyword, limit: 30, offset: 0, sort: "POPULARITY_DESC", type: "ANIME", isAdult: false } },
-    ];
-
     try {
         let items = [];
         let blocked = false;
-        for (const a of attempts) {
-            const data = await makeSecureRequest(a.path, a.query);
-            if (data && data._blocked_by_cloudflare) { blocked = true; continue; }
-            items = miruroItems(data);
-            if (items.length) {
-                console.log(`[Search] ✅ ${items.length} via "${a.path}"`);
-                break;
+
+        // 1) API directe v1 (chemin actuel du site).
+        const direct = await miruroV1("anime", { q: keyword, limit: 30, sort: "-popularity" });
+        if (direct && direct._blocked_by_cloudflare) blocked = true;
+        else items = miruroItems(direct);
+        if (items.length) console.log(`[Search] ✅ ${items.length} via /api/v1/anime`);
+
+        // 2) Repli sur l'ancien pipe, pour une instance pas encore migrée.
+        if (!items.length) {
+            const attempts = [
+                { path: "anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
+                { path: "search", query: { q: keyword, limit: 30, offset: 0, sort: "POPULARITY_DESC", type: "ANIME", isAdult: false } },
+            ];
+            for (const a of attempts) {
+                const data = await makeSecureRequest(a.path, a.query);
+                if (data && data._blocked_by_cloudflare) { blocked = true; continue; }
+                items = miruroItems(data);
+                if (items.length) { console.log(`[Search] ✅ ${items.length} via pipe "${a.path}"`); break; }
             }
         }
 
