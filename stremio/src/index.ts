@@ -8,11 +8,11 @@ import { handleProxy, handleSubPlaylist } from './proxy';
 import { enabledScrapers, allScrapers } from './scrapers';
 import { dedupe, sortStreams, toStremio } from './display';
 import { relaxHeaders } from './direct';
-import { decodeConfig, applyConfig, DEFAULT_CONFIG } from './userconfig';
+import { decodeConfig, applyConfig, DEFAULT_CONFIG, DEFAULT_CATALOGS } from './userconfig';
 import type { UserConfig } from './userconfig';
 import { configurePage } from './configure';
 import { debugPage } from './debugpage';
-import { search, trending } from './catalog';
+import { search, trending, catalogDef } from './catalog';
 import { catalog as buildCatalog, meta as buildMeta } from './meta';
 import * as history from './history';
 import { livePage } from './livepage';
@@ -41,11 +41,12 @@ function manifest(c: UserConfig) {
   const configured = c !== DEFAULT_CONFIG;
   return {
     id: 'community.mxfia19.sora',
-    version: '0.3.0',
+    version: '0.4.0',
     name: 'Sora',
     description: [
       'Agrégateur de flux — portage Stremio des modules Sora',
       '(movix, anime-sama, nakanime, purstream, voiranime).',
+      'Catalogues par plateforme (Netflix, Disney+, Prime…) configurables.',
       configured ? `Mode ${c.mode}, langues ${c.languages.join(' > ')}.` : '',
     ].filter(Boolean).join(' '),
     logo: 'https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg',
@@ -55,18 +56,42 @@ function manifest(c: UserConfig) {
     // Sans eux, l'addon ne servait que des flux et dépendait de Cinemeta.
     resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'] as MediaType[],
-    // Deux catalogues typés, chacun avec une recherche. `extra` déclare la
-    // recherche optionnelle ; Stremio appelle alors /catalog/.../search=....json
-    catalogs: [
-      { type: 'movie', id: 'sora-movie', name: 'Sora — Films', extra: [{ name: 'search', isRequired: false }] },
-      { type: 'series', id: 'sora-series', name: 'Sora — Séries', extra: [{ name: 'search', isRequired: false }] },
-    ],
+    // Un couple (Films / Séries) par catalogue choisi dans la configuration :
+    // Nouveautés, Tendance, Populaire, puis une entrée par plateforme
+    // (Netflix, Disney+…). `extra` déclare la recherche (sur Tendance seule,
+    // pour ne pas la dupliquer) et la pagination.
+    catalogs: buildCatalogs(c),
     /** Ce que l'addon sait traiter : IMDb (ce que donne Cinemeta) et TMDB. */
     idPrefixes: ['tt', 'tmdb:'],
     // `configurable` fait apparaître le bouton « Configurer » dans Stremio,
     // qui renvoie vers /configure.
     behaviorHints: { configurable: true, configurationRequired: false, p2p: false },
   };
+}
+
+/** Catalogues déclarés au manifeste, dérivés de la config. Pour chaque clé
+ *  activée, un catalogue Films et un catalogue Séries, côte à côte (comme la
+ *  maquette : « Netflix · Films », « Netflix · Séries »). */
+function buildCatalogs(c: UserConfig) {
+  const keys = c.catalogs && c.catalogs.length ? c.catalogs : DEFAULT_CATALOGS;
+  const out: Array<Record<string, unknown>> = [];
+  for (const key of keys) {
+    const def = catalogDef(key);
+    // Une clé inconnue retombe sur « Tendance » ; on ne la déclare qu'une fois.
+    if (def.key !== key) continue;
+    for (const type of ['movie', 'series'] as MediaType[]) {
+      const extra: Array<Record<string, unknown>> = [];
+      if (def.searchable) extra.push({ name: 'search', isRequired: false });
+      extra.push({ name: 'skip', isRequired: false });
+      out.push({
+        type,
+        id: `sora-${def.key}`,
+        name: `${def.label} · ${type === 'movie' ? 'Films' : 'Séries'}`,
+        extra,
+      });
+    }
+  }
+  return out;
 }
 
 // La configuration voyage dans le chemin, avant /manifest.json : c'est la
@@ -106,16 +131,20 @@ async function handleCatalog(req: Request, res: Response): Promise<void> {
     res.json({ metas: [] });
     return;
   }
-  // `extra` arrive tel quel ('search=inception' ou 'skip=100&search=...') ;
-  // on n'en lit que la recherche, seul paramètre que le catalogue gère.
+  // `extra` arrive tel quel ('search=inception' ou 'skip=100&search=...') :
+  // on en lit la recherche et la pagination.
+  const id = req.params.id ?? 'sora-trending';
   let query: string | undefined;
   const extra = req.params.extra ? decodeURIComponent(req.params.extra) : '';
   const m = extra.match(/(?:^|&)search=([^&]*)/);
   if (m) query = decodeURIComponent(m[1] ?? '');
   else if (typeof req.query.search === 'string') query = req.query.search;
 
+  const skipMatch = extra.match(/(?:^|&)skip=(\d+)/);
+  const skip = skipMatch ? Number(skipMatch[1]) : (typeof req.query.skip === 'string' ? Number(req.query.skip) : 0);
+
   try {
-    const metas = await buildCatalog(type, query);
+    const metas = await buildCatalog(type, id, query, Number.isFinite(skip) ? skip : 0);
     res.json({ metas });
   } catch (e) {
     log.error('catalogue en échec:', e);

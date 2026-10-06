@@ -1,4 +1,5 @@
 import { ALL_LANGUAGES, ALL_QUALITIES, DEFAULT_CONFIG, decodeConfig } from './userconfig';
+import { CATALOG_DEFS } from './catalog';
 import type { Scraper } from './types';
 
 /** Page de configuration : l'utilisateur choisit ses réglages, la page fabrique
@@ -124,6 +125,18 @@ ${base === null ? `<section>
 </section>
 
 <section>
+  <h2>Catalogues</h2>
+  <p class="hint">Les rangées qui apparaissent dans Stremio. Chacune donne un catalogue Films
+  et un catalogue Séries. Les plateformes listent ce qui y est disponible (données TMDB, région FR).</p>
+  <div class="chips">
+    ${CATALOG_DEFS.map(d => `<label class="chip"><input type="checkbox" class="cat" value="${d.key}"${
+      c.catalogs.includes(d.key) ? ' checked' : ''}>${esc(d.label)}</label>`).join('\n    ')}
+  </div>
+  <p class="hint">Tout décocher n'affiche aucun catalogue : l'addon ne sert alors que des flux
+  (via un autre addon de métadonnées, comme Cinemeta).</p>
+</section>
+
+<section>
   <h2>Qualités, tri et langues</h2>
 
   <label>Qualités à afficher</label>
@@ -191,6 +204,7 @@ ${base === null ? `<section>
 </main>
 <script>
 const FIXED_BASE = ${JSON.stringify(base)};
+const DEFAULT_CAT = ${JSON.stringify(DEFAULT_CONFIG.catalogs)};
 function currentBase() {
   if (FIXED_BASE !== null) return FIXED_BASE;
   return ($('#base').value.trim() || 'http://127.0.0.1:7000').replace(/\\/+$/, '');
@@ -222,6 +236,11 @@ function build() {
 
   const src = all('.src').filter(i => i.checked).map(i => i.value);
   if (src.length && src.length < all('.src').length) cfg.src = src;
+
+  // Catalogues : on inscrit la liste seulement si elle diffère du défaut (lien plus court).
+  const cat = all('.cat').filter(i => i.checked).map(i => i.value);
+  const sameCat = cat.length === DEFAULT_CAT.length && cat.every((k, i) => k === DEFAULT_CAT[i]);
+  if (!sameCat) cfg.cat = cat;
 
   // base64url, comme côté serveur.
   const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(cfg))))

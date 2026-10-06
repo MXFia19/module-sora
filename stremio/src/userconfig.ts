@@ -40,10 +40,19 @@ export interface UserConfig {
   minStreams: number;
   /** Pseudo, affiché dans les logs pour rattacher un signalement à une config. */
   nickname?: string;
+  /** Catalogues à afficher, par clé (voir CATALOG_DEFS). Vide = aucun
+   *  catalogue (l'addon ne sert alors que des flux). */
+  catalogs: string[];
 }
 
 export const ALL_LANGUAGES = ['MULTI', 'VF', 'VOSTFR', 'VO'];
 export const ALL_QUALITIES = ['4K', '1080p', '720p', '480p', '360p', 'HD'];
+/** Catalogues proposés par défaut, dans l'ordre de l'écran de configuration.
+ *  Reprend les plateformes de la maquette ; Crunchyroll reste décochable. */
+export const DEFAULT_CATALOGS = [
+  'new', 'trending', 'popular',
+  'netflix', 'prime', 'appletv', 'paramount', 'universal', 'canal', 'hbomax', 'disney',
+];
 
 export const DEFAULT_CONFIG: UserConfig = {
   // L'URL sans configuration montre TOUT ce qui est trouvable, proxy compris :
@@ -57,6 +66,7 @@ export const DEFAULT_CONFIG: UserConfig = {
   sort: 'lang',
   fallback: 'souple',
   minStreams: 0,
+  catalogs: [...DEFAULT_CATALOGS],
 };
 
 /** Encodage compact en base64url. Les clés du JSON sont courtes parce que la
@@ -74,6 +84,10 @@ export function encodeConfig(c: UserConfig): string {
   if (c.preferredQuality) compact.pq = c.preferredQuality;
   if (c.minStreams > 0) compact.min = c.minStreams;
   if (c.nickname) compact.n = c.nickname;
+  // Encodé seulement si différent du défaut, pour garder les liens courts.
+  const sameAsDefault = c.catalogs.length === DEFAULT_CATALOGS.length
+    && c.catalogs.every((k, i) => k === DEFAULT_CATALOGS[i]);
+  if (!sameAsDefault) compact.cat = c.catalogs;
   return Buffer.from(JSON.stringify(compact), 'utf-8').toString('base64url');
 }
 
@@ -97,6 +111,8 @@ export function decodeConfig(encoded?: string): UserConfig {
       fallback: raw.f === 'strict' ? 'strict' : 'souple',
       minStreams: Number.isFinite(raw.min) && raw.min > 0 ? Math.floor(raw.min) : 0,
       nickname: typeof raw.n === 'string' ? raw.n.slice(0, 24) : undefined,
+      // Un tableau (même vide) est un choix explicite ; absent = défaut.
+      catalogs: Array.isArray(raw.cat) ? raw.cat.map(String) : [...DEFAULT_CATALOGS],
     };
   } catch {
     return { ...DEFAULT_CONFIG };

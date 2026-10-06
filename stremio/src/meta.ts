@@ -1,7 +1,7 @@
 import { cached } from './cache';
 import { config } from './config';
 import { tmdbGet } from './tmdb';
-import { trending, search, type CatalogEntry } from './catalog';
+import { fetchCatalog, search, type CatalogEntry } from './catalog';
 import type { MediaType } from './types';
 
 /** Ressources Stremio « catalog » et « meta ».
@@ -72,12 +72,18 @@ function preview(entry: CatalogEntry): MetaPreview {
   };
 }
 
-/** Catalogue Stremio : tendances par défaut, ou résultats de recherche quand
- *  Stremio passe `?search=`. Réutilise le catalogue déjà écrit pour /debug. */
-export async function catalog(type: MediaType, query?: string): Promise<MetaPreview[]> {
-  const entries = query && query.trim() ? await search(query) : await trending(type);
-  // La recherche multi mêle films et séries ; un catalogue Stremio est typé,
-  // donc on filtre sur le type demandé.
+/** Catalogue Stremio. L'identifiant (`sora-netflix`, `sora-new`, `sora-movie`
+ *  pour les vieux liens…) choisit la source ; `skip` pagine (20 entrées par
+ *  page TMDB) ; une recherche l'emporte sur tout, sur le catalogue qui la
+ *  déclare. */
+export async function catalog(type: MediaType, id: string, query?: string, skip = 0): Promise<MetaPreview[]> {
+  if (query && query.trim()) {
+    // La recherche multi mêle films et séries ; un catalogue est typé.
+    return (await search(query)).filter(e => e.type === type).map(preview);
+  }
+  const key = id.replace(/^sora-/, '') || 'trending';
+  const page = Math.floor(Math.max(0, skip) / 20) + 1;
+  const entries = await fetchCatalog(key, type, page);
   return entries.filter(e => e.type === type).map(preview);
 }
 

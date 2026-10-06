@@ -22,6 +22,7 @@ test('un aller-retour d’encodage préserve la configuration', () => {
     fallback: 'strict',
     minStreams: 5,
     nickname: 'quelquun',
+    catalogs: ['trending', 'netflix', 'disney'],
   };
   assert.deepEqual(decodeConfig(encodeConfig(c)), c);
 });
