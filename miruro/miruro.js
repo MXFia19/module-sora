@@ -268,7 +268,7 @@ async function miruroV1(path, query = {}) {
     } catch (e) {
         console.error(`[v1] ❌ network: ${e.message}`);
     }
-    console.log(`[v1] HTTP ${status} | ${text ? text.length : 0} bytes | head: ${String(text).slice(0, 90)}`);
+    console.log(`[v1] HTTP ${status} | ${text ? text.length : 0} bytes | head: ${String(text).slice(0, 300)}`);
 
     if (!text) return null;
     const trimmed = text.trim();
@@ -291,11 +291,26 @@ async function searchResults(keyword) {
         let items = [];
         let blocked = false;
 
-        // 1) API directe v1 (chemin actuel du site).
-        const direct = await miruroV1("anime", { q: keyword, limit: 30, sort: "-popularity" });
-        if (direct && direct._blocked_by_cloudflare) blocked = true;
-        else items = miruroItems(direct);
-        if (items.length) console.log(`[Search] ✅ ${items.length} via /api/v1/anime`);
+        // 1) API directe v1. Le jeu de paramètres exact a bougé ; on essaie
+        //    plusieurs formes connues et on garde la première qui rend des
+        //    résultats. Chaque essai journalise statut + début de réponse.
+        const variants = [
+            { path: "anime", query: { q: keyword } },
+            { path: "anime", query: { q: keyword, limit: 30 } },
+            { path: "anime", query: { search: keyword } },
+            { path: "search", query: { q: keyword } },
+            { path: "search", query: { q: keyword, limit: 30 } },
+            { path: "anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
+        ];
+        for (const v of variants) {
+            const direct = await miruroV1(v.path, v.query);
+            if (direct && direct._blocked_by_cloudflare) { blocked = true; continue; }
+            items = miruroItems(direct);
+            if (items.length) {
+                console.log(`[Search] ✅ ${items.length} via /api/v1/${v.path} ${JSON.stringify(v.query)}`);
+                break;
+            }
+        }
 
         // 2) Repli sur l'ancien pipe, pour une instance pas encore migrée.
         if (!items.length) {
