@@ -238,7 +238,7 @@ function miruroCard(item) {
  *  renvoie désormais 404 : il a été abandonné). On demande une réponse NON
  *  compressée (Accept-Encoding: identity) pour récupérer du JSON lisible —
  *  sinon le corps revient en br/zstd, illisible via le text() de fetchv2. */
-async function miruroV1(path, query = {}) {
+async function miruroV1(path, query = {}, referer = null) {
     const qs = Object.keys(query)
         .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(query[k])}`)
         .join('&');
@@ -248,11 +248,13 @@ async function miruroV1(path, query = {}) {
     const headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
-        "Accept-Encoding": "identity",
+        // gzip/br (jamais zstd ni identity) : fetchv2 décompresse gzip/br tout
+        // seul et rend du JSON ; zstd revenait en binaire illisible, et identity
+        // faisait répondre un corps vide (200, 0 octet).
+        "Accept-Encoding": "gzip, deflate, br",
         "Accept-Language": "en-US,en;q=0.9",
-        "Referer": `${BASE_URL}/`,
+        "Referer": referer || `${BASE_URL}/`,
         "Origin": BASE_URL,
-        "X-Requested-With": "XMLHttpRequest",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
@@ -295,20 +297,20 @@ async function searchResults(keyword) {
         // 1) API directe v1. Le jeu de paramètres exact a bougé ; on essaie
         //    plusieurs formes connues et on garde la première qui rend des
         //    résultats. Chaque essai journalise statut + début de réponse.
+        // Forme exacte du site : /api/v1/anime?q=&limit=15&sort=-popularity, avec
+        // le Referer de la page de recherche. Le catalogue plafonne `limit`
+        // (24 => 400), donc on reste à 15.
+        const referer = `${BASE_URL}/search?query=${encodeURIComponent(keyword)}&sort=-popularity`;
         const variants = [
-            // Forme exacte du site (limit bas) : si elle passe, le 400 venait
-            // du limit=30 trop grand.
-            { path: "anime", query: { q: keyword, limit: 5, sort: "-popularity" } },
-            { path: "anime", query: { q: keyword, limit: 24, sort: "-popularity" } },
-            { path: "anime", query: { q: keyword } },
-            { path: "search", query: { q: keyword } },
+            { q: keyword, limit: 15, sort: "-popularity" },
+            { q: keyword, limit: 15 },
         ];
-        for (const v of variants) {
-            const direct = await miruroV1(v.path, v.query);
+        for (const query of variants) {
+            const direct = await miruroV1("anime", query, referer);
             if (direct && direct._blocked_by_cloudflare) { blocked = true; continue; }
             items = miruroItems(direct);
             if (items.length) {
-                console.log(`[Search] ✅ ${items.length} via /api/v1/${v.path} ${JSON.stringify(v.query)}`);
+                console.log(`[Search] ✅ ${items.length} via /api/v1/anime ${JSON.stringify(query)}`);
                 break;
             }
         }
