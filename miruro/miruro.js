@@ -213,51 +213,78 @@ async function makeSecureRequest(path, query = {}, refererUrl = null) {
 // ⚙️ SORA MODULE LOGIC
 // ==========================================
 
+/** Extrait le tableau d'items quelle que soit la clé racine. L'API v1 a bougé
+ *  de forme plusieurs fois ; on tolère les variantes connues plutôt que de
+ *  casser à chaque renommage. */
+function miruroItems(data) {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    return data.results || data.data || data.media || data.anime || data.list || data.items || [];
+}
+
+/** id / titre / image d'un item, en acceptant les champs plats comme imbriqués. */
+function miruroCard(item) {
+    const id = item.id ?? item.anilistId ?? item.anilist?.id ?? item.malId ?? item.mal_id;
+    const t = item.title;
+    const title = (t && typeof t === 'object' ? (t.romaji || t.english || t.native || t.userPreferred) : t)
+        || item.name || item.romaji || item.english || "Unknown Title";
+    const image = item.coverImage?.large || item.coverImage?.medium || item.coverImage?.extraLarge
+        || item.cover || item.image || item.poster || item.img
+        || "https://via.placeholder.com/200x300.png?text=No+Poster";
+    return { id, title, image };
+}
+
 async function searchResults(keyword) {
     console.log(`[Search] 🔍 Starting for : "${keyword}"`);
-    try {
-        const data = await makeSecureRequest("search", {
-            q: keyword, 
-            limit: 30, 
-            offset: 0, 
-            sort: "POPULARITY_DESC", 
-            type: "ANIME",
-            isAdult: false 
-        });
+    // L'API de recherche de miruro est passée de la forme GraphQL
+    // (path "search", sort "POPULARITY_DESC") à un REST v1
+    // (/api/v1/anime?q=&limit=&sort=-popularity). On tente la nouvelle forme
+    // d'abord, avec repli sur l'ancienne pour les instances pas encore migrées.
+    const attempts = [
+        { path: "v1/anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
+        { path: "anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
+        { path: "search", query: { q: keyword, limit: 30, offset: 0, sort: "POPULARITY_DESC", type: "ANIME", isAdult: false } },
+    ];
 
-        if (!data || data._blocked_by_cloudflare) {
+    try {
+        let items = [];
+        let blocked = false;
+        for (const a of attempts) {
+            const data = await makeSecureRequest(a.path, a.query);
+            if (data && data._blocked_by_cloudflare) { blocked = true; continue; }
+            items = miruroItems(data);
+            if (items.length) {
+                console.log(`[Search] ✅ ${items.length} via "${a.path}"`);
+                break;
+            }
+        }
+
+        if (!items.length && blocked) {
             sendSupabaseLog("Miruro", "ERROR", { keyword: keyword, error_message: "Blocked by Cloudflare during search" });
             return JSON.stringify([]);
         }
 
         const results = [];
-        let items = [];
-
-        if (data && data.results) items = data.results;
-        else if (Array.isArray(data)) items = data;
-
         for (let item of items) {
             if (item.isAdult === true) continue;
             if (item.genres && Array.isArray(item.genres) && item.genres.includes("Hentai")) continue;
 
-            const id = item.id;
-            const title = item.title?.romaji || item.title?.english || item.title?.native || "Unknown Title";
-            const image = item.coverImage?.large || item.coverImage?.medium || "https://via.placeholder.com/200x300.png?text=No+Poster";
-            
-            results.push({ title: title, image: image, href: `miruro://${id}` });
+            const card = miruroCard(item);
+            if (card.id == null) continue;
+            results.push({ title: card.title, image: card.image, href: `miruro://${card.id}` });
         }
 
-        sendSupabaseLog("Miruro", "SEARCH", { 
-            keyword: keyword, 
+        sendSupabaseLog("Miruro", "SEARCH", {
+            keyword: keyword,
             results_count: results.length,
             top_results: results.slice(0, 3).map(r => r.title)
         });
-        
+
         return JSON.stringify(results);
 
-    } catch (error) { 
+    } catch (error) {
         sendSupabaseLog("Miruro", "ERROR", { keyword: keyword, error_message: String(error) });
-        return JSON.stringify([]); 
+        return JSON.stringify([]);
     }
 }
 
