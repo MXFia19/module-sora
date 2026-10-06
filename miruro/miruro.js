@@ -252,6 +252,7 @@ async function miruroV1(path, query = {}) {
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": `${BASE_URL}/`,
         "Origin": BASE_URL,
+        "X-Requested-With": "XMLHttpRequest",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
@@ -295,12 +296,12 @@ async function searchResults(keyword) {
         //    plusieurs formes connues et on garde la première qui rend des
         //    résultats. Chaque essai journalise statut + début de réponse.
         const variants = [
+            // Forme exacte du site (limit bas) : si elle passe, le 400 venait
+            // du limit=30 trop grand.
+            { path: "anime", query: { q: keyword, limit: 5, sort: "-popularity" } },
+            { path: "anime", query: { q: keyword, limit: 24, sort: "-popularity" } },
             { path: "anime", query: { q: keyword } },
-            { path: "anime", query: { q: keyword, limit: 30 } },
-            { path: "anime", query: { search: keyword } },
             { path: "search", query: { q: keyword } },
-            { path: "search", query: { q: keyword, limit: 30 } },
-            { path: "anime", query: { q: keyword, limit: 30, sort: "-popularity" } },
         ];
         for (const v of variants) {
             const direct = await miruroV1(v.path, v.query);
