@@ -57,17 +57,42 @@ export function nakaCacheKey(auth: NakaAuth): string {
   return `${digest}:${auth.profile ?? '-'}`;
 }
 
-/** naka.cx est derrière Cloudflare, qui peut opposer sa page de défi
- *  (« Just a moment… ») aux requêtes qui ne viennent pas d'un navigateur.
- *  Ce n'est pas un refus de Naka : le dire tel quel évite de chercher la
- *  panne du côté du compte ou du profil. */
-export function isBotWall(res: Pick<HttpResponse, 'status' | 'headers' | 'text'>): boolean {
-  if (res.status !== 403 && res.status !== 503) return false;
-  return res.headers.get('cf-mitigated') === 'challenge' || /<title>Just a moment/i.test(res.text);
+type WallResponse = Pick<HttpResponse, 'status' | 'headers' | 'text'>;
+
+/** naka.cx est derrière Cloudflare, qui peut arrêter une requête avant
+ *  qu'elle n'atteigne Naka : page de défi (« Just a moment… ») ou page de
+ *  blocage (« Attention Required! », typique d'une IP de datacenter). Ce
+ *  n'est pas un refus de Naka — son API répond toujours en JSON — et le dire
+ *  tel quel évite de chercher la panne du côté du compte ou du profil. */
+export function isBotWall(res: WallResponse): boolean {
+  if (res.status !== 403 && res.status !== 503 && res.status !== 429) return false;
+  if (res.headers.get('cf-mitigated') === 'challenge' || /<title>Just a moment/i.test(res.text)) return true;
+  const isJson = (() => { try { JSON.parse(res.text); return true; } catch { return false; } })();
+  if (isJson) return false;
+  return /cloudflare/i.test(res.headers.get('server') ?? '') || res.headers.has('cf-ray') || /cloudflare/i.test(res.text);
 }
 
-export const BOT_WALL_MESSAGE = 'naka.cx bloque les requêtes de ce serveur (protection anti-robots Cloudflare) : '
-  + 'la liaison et la lecture sont impossibles depuis cette instance.';
+/** Ce que Cloudflare a répondu, sans rien de sensible : de quoi savoir s'il
+ *  s'agit d'un défi ou d'un blocage, et le signaler à Naka (`cf-ray`). */
+export function wallDetails(res: WallResponse): Record<string, string> {
+  const title = res.text.match(/<title>([^<]{0,120})<\/title>/i)?.[1]?.trim() ?? '';
+  const out: Record<string, string> = { http: String(res.status) };
+  if (title) out.title = title;
+  const server = res.headers.get('server');
+  if (server) out.server = server;
+  const mitigated = res.headers.get('cf-mitigated');
+  if (mitigated) out.cfMitigated = mitigated;
+  const ray = res.headers.get('cf-ray');
+  if (ray) out.cfRay = ray;
+  return out;
+}
+
+export function botWallMessage(res: WallResponse): string {
+  const challenge = res.headers.get('cf-mitigated') === 'challenge' || /<title>Just a moment/i.test(res.text);
+  return challenge
+    ? 'naka.cx oppose un défi anti-robots Cloudflare aux requêtes de ce serveur : liaison et lecture impossibles depuis cette instance.'
+    : 'Cloudflare bloque les requêtes de ce serveur vers naka.cx (souvent : IP de datacenter refusée) : liaison et lecture impossibles depuis cette instance.';
+}
 
 // ---------------------------------------------------------------------------
 // Appairage
@@ -166,8 +191,9 @@ export async function pairNaka(rawCode: string): Promise<PairResult> {
 
   if (res.status === 0) return { ok: false, message: 'naka.cx ne répond pas. Réessayez dans un instant.' };
   if (isBotWall(res)) {
-    log.warn('appairage : défi Cloudflare de naka.cx');
-    return { ok: false, message: BOT_WALL_MESSAGE };
+    const wall = wallDetails(res);
+    log.warn(`appairage : arrêté par Cloudflare ${JSON.stringify(wall)}`);
+    return { ok: false, message: botWallMessage(res), shape: { cloudflare: wall } };
   }
   if (!res.ok) {
     const reason = body?.message ?? body?.errors?.[0]?.message ?? `HTTP ${res.status}`;
@@ -320,7 +346,7 @@ export async function resolveNaka(req: MediaRequest, auth: NakaAuth): Promise<Ra
     });
     const body = res.json<any>();
 
-    if (isBotWall(res)) throw new NakaAuthError(BOT_WALL_MESSAGE);
+    if (isBotWall(res)) throw new NakaAuthError(`${botWallMessage(res)} ${JSON.stringify(wallDetails(res))}`);
     if (res.status === 401) throw new NakaAuthError('session Naka expirée — refaites un code sur naka.cx/app-tv');
     if (res.status === 403) {
       const code = body?.code ?? body?.message ?? 'accès refusé';

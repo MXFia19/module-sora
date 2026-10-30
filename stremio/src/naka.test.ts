@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { findToken, describeShape, nakaQuality, nakaLanguage, toRawStream, nakaCacheKey, isBotWall, NAKA_ORIGIN } from './naka';
+import { findToken, describeShape, nakaQuality, nakaLanguage, toRawStream, nakaCacheKey, isBotWall, wallDetails, botWallMessage, NAKA_ORIGIN } from './naka';
 import { encodeConfig, decodeConfig, DEFAULT_CONFIG } from './userconfig';
 import { configurePage } from './configure';
 import type { UserConfig } from './userconfig';
@@ -136,4 +136,19 @@ test('le défi Cloudflare est reconnu comme tel, pas comme un refus de Naka', ()
   // Un vrai refus de l'API (JSON) n'est pas un mur anti-robots.
   assert.equal(isBotWall({ status: 403, headers: new Headers(), text: '{"code":"PROFILE_LOCKED"}' }), false);
   assert.equal(isBotWall({ status: 404, headers: new Headers(), text: page }), false);
+});
+
+test('la page de blocage Cloudflare (IP de datacenter) est reconnue, détails compris', () => {
+  const page = '<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head>Sorry, you have been blocked';
+  const headers = new Headers({ server: 'cloudflare', 'cf-ray': 'a52c2021bc373d1a-BRU' });
+  const res = { status: 403, headers, text: page };
+  assert.equal(isBotWall(res), true);
+  assert.deepEqual(wallDetails(res), {
+    http: '403', title: 'Attention Required! | Cloudflare', server: 'cloudflare', cfRay: 'a52c2021bc373d1a-BRU',
+  });
+  assert.match(botWallMessage(res), /bloque/);
+  // Corps vide derrière Cloudflare : toujours un mur, pas un refus de Naka.
+  assert.equal(isBotWall({ status: 403, headers, text: '' }), true);
+  // Un JSON d'erreur servi à travers Cloudflare reste une réponse de Naka.
+  assert.equal(isBotWall({ status: 403, headers, text: '{"code":"PROFILE_LOCKED"}' }), false);
 });
