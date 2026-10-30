@@ -19,9 +19,6 @@ function esc(s: string): string {
  *  c'est le mode « le site ne sert qu'à fabriquer le lien ». */
 export function configurePage(base: string | null, scrapers: Scraper[], encoded?: string): string {
   const c = decodeConfig(encoded);
-  // Injecté dans un <script> : on neutralise « < » pour qu'aucune valeur ne
-  // puisse fermer la balise.
-  const nakaState = JSON.stringify(c.naka ?? null).replace(/</g, '\\u003c');
   const sources = scrapers.map(s => ({
     id: s.id,
     name: s.name,
@@ -71,11 +68,6 @@ button{padding:.6rem 1.1rem;border-radius:7px;border:1px solid var(--line);backg
  color:var(--fg);font:inherit;cursor:pointer}
 button.primary{background:var(--ok);border-color:var(--ok)}
 button:hover{filter:brightness(1.15)}
-.ok{color:#3fb950}
-.err{color:#f85149}
-details.diag{margin-top:.6rem;font-size:.82rem;color:var(--dim)}
-details.diag pre{white-space:pre-wrap;word-break:break-all;background:#0d1117;border:1px solid var(--line);
- border-radius:7px;padding:.6rem;margin:.4rem 0 0}
 .warn{background:#3d2b0c;border:1px solid #9e6a03;border-radius:8px;padding:.8rem;margin-top:1rem;font-size:.88rem}
 a{color:#79c0ff}
 </style>
@@ -195,34 +187,6 @@ ${base === null ? `<section>
 </section>
 
 <section>
-  <h2>Naka — compte requis</h2>
-  <p class="hint">Naka (ex-Nakastream) est devenu privé : sans compte, aucun flux. On s'y connecte
-  comme l'application TV du site. Sur <a href="https://naka.cx/app-tv" target="_blank" rel="noopener">naka.cx → App TV</a>,
-  connecté à votre compte (abonnés), cliquez « Générer un code », puis collez-le ici.</p>
-  <div id="nakaUnlinked">
-    <label for="nakaCode">Code d'appairage</label>
-    <div class="row" style="margin-top:0">
-      <input type="text" id="nakaCode" maxlength="5" placeholder="ex. A1B2C" autocomplete="off"
-        style="flex:1;min-width:8rem;text-transform:uppercase">
-      <button id="nakaLink">Lier mon compte</button>
-    </div>
-  </div>
-  <div id="nakaLinked" hidden>
-    <p><span class="ok">✓</span> <span id="nakaWho">Compte Naka lié.</span></p>
-    <div id="nakaProfileBox" hidden>
-      <label for="nakaProfile">Profil Naka</label>
-      <select id="nakaProfile"></select>
-    </div>
-    <div class="row"><button id="nakaUnlink">Délier</button></div>
-  </div>
-  <p class="hint" id="nakaMsg"></p>
-  <details class="diag" id="nakaDiag" hidden><summary>Diagnostic (sans données sensibles)</summary><pre></pre></details>
-  <p class="hint">La session est inscrite dans votre lien d'installation, comme la clé TMDB.
-  Les requêtes vers Naka partent du serveur qui fait tourner l'addon. Une session révoquée
-  sur naka.cx (Sécurité → Sessions) coupe l'accès ; il suffit de refaire un code.</p>
-</section>
-
-<section>
   <h2>Pseudo — facultatif</h2>
   <input type="text" id="nick" maxlength="24" placeholder="pour que l'hébergeur vous identifie si vous signalez un souci"
     value="${esc(c.nickname ?? '')}">
@@ -241,7 +205,6 @@ ${base === null ? `<section>
 <script>
 const FIXED_BASE = ${JSON.stringify(base)};
 const DEFAULT_CAT = ${JSON.stringify(DEFAULT_CONFIG.catalogs)};
-let naka = ${nakaState};
 function currentBase() {
   if (FIXED_BASE !== null) return FIXED_BASE;
   return ($('#base').value.trim() || 'http://127.0.0.1:7000').replace(/\\/+$/, '');
@@ -279,12 +242,6 @@ function build() {
   const sameCat = cat.length === DEFAULT_CAT.length && cat.every((k, i) => k === DEFAULT_CAT[i]);
   if (!sameCat) cfg.cat = cat;
 
-  if (naka && naka.token) {
-    cfg.nk = naka.token;
-    const p = $('#nakaProfile').value;
-    if (p !== '') cfg.nkp = Number(p);
-  }
-
   // base64url, comme côté serveur.
   const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(cfg))))
     .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
@@ -304,8 +261,6 @@ function refresh() {
     msgs.push('Aucune qualité cochée : aucun flux ne passera le filtre.');
   if ($('#key').value.trim())
     msgs.push('Votre clé TMDB est inscrite dans ce lien : ne le partagez pas.');
-  if (naka && naka.token)
-    msgs.push("Votre session Naka est inscrite dans ce lien : quiconque l'a peut utiliser votre compte.");
   if (FIXED_BASE === null && /127\\.0\\.0\\.1|localhost/.test(currentBase()))
     msgs.push("Adresse locale : ce lien ne marchera que sur la machine qui fait tourner l'addon.");
 
@@ -355,66 +310,6 @@ list.addEventListener('dragover', e => {
   list.insertBefore(dragged, after ? over.nextSibling : over);
 });
 
-// --- Naka : appairage par code -------------------------------------------
-function showNaka(profiles, selected) {
-  const linked = Boolean(naka && naka.token);
-  $('#nakaUnlinked').hidden = linked;
-  $('#nakaLinked').hidden = !linked;
-  if (!linked) return;
-  if (naka.user) $('#nakaWho').textContent = 'Compte Naka lié : ' + naka.user + '.';
-  const sel = $('#nakaProfile');
-  if (profiles && profiles.length) {
-    sel.innerHTML = '<option value="">Profil par défaut du compte</option>' + profiles.map(p =>
-      '<option value="' + p.id + '">' + p.name.replace(/[<>&"]/g, '') + (p.locked ? ' 🔒' : '') + '</option>').join('');
-    $('#nakaProfileBox').hidden = false;
-  } else if (selected != null) {
-    sel.innerHTML = '<option value="' + selected + '">Profil n°' + selected + '</option>';
-    $('#nakaProfileBox').hidden = false;
-  }
-  if (selected != null) sel.value = String(selected);
-}
-
-function nakaMessage(text, ok, shape) {
-  $('#nakaMsg').innerHTML = text ? '<span class="' + (ok ? 'ok' : 'err') + '">' + text.replace(/[<>&]/g, '') + '</span>' : '';
-  const d = $('#nakaDiag');
-  d.hidden = !shape;
-  if (shape) d.querySelector('pre').textContent = JSON.stringify(shape, null, 2);
-}
-
-$('#nakaLink').addEventListener('click', async () => {
-  const code = $('#nakaCode').value.trim().toUpperCase();
-  if (!/^[A-Z0-9]{4,5}$/.test(code)) { nakaMessage('Le code fait 5 caractères (lettres et chiffres).', false); return; }
-  $('#nakaLink').disabled = true;
-  nakaMessage('Liaison en cours…', true);
-  try {
-    // text/plain : pas de requête préalable CORS quand la page est servie ailleurs.
-    const r = await fetch(currentBase() + '/naka/pair', { method: 'POST', body: JSON.stringify({ code }) });
-    const res = await r.json();
-    if (res.ok && res.token) {
-      naka = { token: res.token, user: res.user };
-      $('#nakaCode').value = '';
-      showNaka(res.profiles, null);
-      nakaMessage(res.message, true, res.shape);
-    } else {
-      nakaMessage(res.message || 'Échec de la liaison.', false, res.shape);
-    }
-  } catch (e) {
-    nakaMessage("L'addon ne répond pas à " + currentBase() + '/naka/pair', false);
-  }
-  $('#nakaLink').disabled = false;
-  refresh();
-});
-
-$('#nakaUnlink').addEventListener('click', () => {
-  naka = null;
-  $('#nakaProfile').innerHTML = '';
-  $('#nakaProfileBox').hidden = true;
-  showNaka();
-  nakaMessage('Compte délié : le prochain lien ne contiendra plus la session.', true);
-  refresh();
-});
-
-showNaka(null, naka ? naka.profile : null);
 refresh();
 </script>
 </html>`;
