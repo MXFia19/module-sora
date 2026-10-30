@@ -1,5 +1,6 @@
 import { hasMeaningfulHeaders } from './display';
 import type { RawStream } from './types';
+import type { NakaAuth } from './naka';
 
 /** Configuration par utilisateur, transportée dans l'URL d'installation.
  *
@@ -43,6 +44,10 @@ export interface UserConfig {
   /** Catalogues à afficher, par clé (voir CATALOG_DEFS). Vide = aucun
    *  catalogue (l'addon ne sert alors que des flux). */
   catalogs: string[];
+  /** Session Naka obtenue par code d'appairage. Absente = source Naka inactive.
+   *  C'est un accès au compte de l'utilisateur : même règle que la clé TMDB,
+   *  le lien ne se partage pas. */
+  naka?: NakaAuth;
 }
 
 export const ALL_LANGUAGES = ['MULTI', 'VF', 'VOSTFR', 'VO'];
@@ -88,6 +93,10 @@ export function encodeConfig(c: UserConfig): string {
   const sameAsDefault = c.catalogs.length === DEFAULT_CATALOGS.length
     && c.catalogs.every((k, i) => k === DEFAULT_CATALOGS[i]);
   if (!sameAsDefault) compact.cat = c.catalogs;
+  if (c.naka) {
+    compact.nk = c.naka.token;
+    if (c.naka.profile != null) compact.nkp = c.naka.profile;
+  }
   return Buffer.from(JSON.stringify(compact), 'utf-8').toString('base64url');
 }
 
@@ -113,6 +122,16 @@ export function decodeConfig(encoded?: string): UserConfig {
       nickname: typeof raw.n === 'string' ? raw.n.slice(0, 24) : undefined,
       // Un tableau (même vide) est un choix explicite ; absent = défaut.
       catalogs: Array.isArray(raw.cat) ? raw.cat.map(String) : [...DEFAULT_CATALOGS],
+      // Clés posées seulement si présentes : un aller-retour d'encodage doit
+      // rendre exactement la config de départ.
+      ...(typeof raw.nk === 'string' && raw.nk.trim().length >= 16
+        ? {
+          naka: {
+            token: raw.nk.trim(),
+            ...(Number.isInteger(raw.nkp) ? { profile: raw.nkp as number } : {}),
+          },
+        }
+        : {}),
     };
   } catch {
     return { ...DEFAULT_CONFIG };

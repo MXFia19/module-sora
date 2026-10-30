@@ -19,6 +19,8 @@ import { livePage } from './livepage';
 import { runDiagnostic } from './debug';
 import { pushRequest, purge, restore, snapshot, subscribe, subscriberCount } from './livelog';
 import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
+import { pairNaka, resolveNaka, NakaAuthError } from './naka';
+import type { NakaAuth } from './naka';
 import type { MediaType, RawStream } from './types';
 
 const log = logger('Addon');
@@ -100,6 +102,18 @@ function buildCatalogs(c: UserConfig) {
 app.get('/manifest.json', (_req, res) => res.json(manifest(DEFAULT_CONFIG)));
 app.get('/c/:config/manifest.json', (req, res) =>
   res.json(manifest(decodeConfig(req.params.config))));
+
+// Appairage Naka : la page de configuration envoie le code généré sur
+// naka.cx, on l'échange contre une session. Le corps arrive en text/plain
+// (pas de requête préalable CORS) et ne dépasse jamais quelques octets.
+// Rien n'est conservé : le jeton repart vers la page, qui l'inscrit dans le
+// lien d'installation de l'utilisateur.
+app.post('/naka/pair', rateLimit, express.text({ type: () => true, limit: '1kb' }), async (req, res) => {
+  let code = '';
+  try { code = String(JSON.parse(String(req.body ?? '{}'))?.code ?? ''); } catch { /* code vide */ }
+  const result = await pairNaka(code);
+  res.status(result.ok ? 200 : 400).json(result);
+});
 
 app.get('/configure', (_req, res) =>
   res.type('html').send(configurePage(publicBase(), allScrapers(), undefined)));
@@ -200,10 +214,18 @@ async function handleStream(req: Request, res: Response, userConfig: UserConfig)
     const keyPart = userConfig.tmdbKey ? `:k${userConfig.tmdbKey.slice(-6)}` : '';
     const cacheKey = `streams:${type}:${rawId}${keyPart}`;
     const summary: SourceSummary = { sources: [] };
-    const streams = await cached(
-      cacheKey,
-      () => resolveStreams(type, id, season, episode, userConfig, cacheKey, summary),
-    );
+    // Naka est à part : ses flux sont ceux d'UN compte, ils ne doivent ni
+    // entrer dans le cache partagé ni être servis à un autre utilisateur.
+    const [shared, naka] = await Promise.all([
+      cached(
+        cacheKey,
+        () => resolveStreams(type, id, season, episode, userConfig, cacheKey, summary),
+      ),
+      userConfig.naka
+        ? nakaStreams(type, id, season, episode, userConfig.tmdbKey, userConfig.naka, summary)
+        : Promise.resolve([] as RawStream[]),
+    ]);
+    const streams = naka.length ? dedupe(sortStreams([...naka, ...shared])) : shared;
 
     const shown = applyConfig(streams, userConfig);
     const who = userConfig.nickname ? ` [${userConfig.nickname}]` : '';
@@ -225,6 +247,41 @@ async function handleStream(req: Request, res: Response, userConfig: UserConfig)
   } catch (e) {
     log.error(`échec sur ${type} ${rawId}:`, e);
     res.json({ streams: [] });
+  }
+}
+
+/** Flux Naka d'un utilisateur. Jamais d'exception : une session expirée ou un
+ *  profil verrouillé ne doivent pas priver l'utilisateur des autres sources —
+ *  on le dit dans les logs, où il le cherchera. */
+async function nakaStreams(
+  type: MediaType,
+  id: string,
+  season: number | undefined,
+  episode: number | undefined,
+  tmdbKey: string | undefined,
+  auth: NakaAuth,
+  summary?: SourceSummary,
+): Promise<RawStream[]> {
+  const t0 = Date.now();
+  try {
+    const req = await buildRequest(id, type, season, episode, tmdbKey);
+    if (!req) return [];
+    const raw = await withTimeout(resolveNaka(req, auth), config.scraperTimeoutMs);
+    // Les liens CDN se lisent en général sans en-tête : on le vérifie, comme
+    // pour les autres sources, sinon le mode direct les écarterait tous. Ceux
+    // qui passent par naka.cx gardent leur session (verdict par hôte : naka.cx
+    // ne doit jamais être déclaré « sans en-tête » à cause d'un lien public).
+    const session = raw.filter(s => s.headers?.Authorization);
+    const out = [...await relaxHeaders(raw.filter(s => !s.headers?.Authorization)), ...session];
+    log.info(`  Naka: ${out.length} flux (${Date.now() - t0}ms)`);
+    summary?.sources.push({ name: 'Naka', count: out.length, ms: Date.now() - t0 });
+    return out;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (e instanceof NakaAuthError) log.warn(`  Naka: ${msg}`);
+    else log.warn(`  Naka: échec — ${msg} (${Date.now() - t0}ms)`);
+    summary?.sources.push({ name: 'Naka', count: -1, ms: Date.now() - t0 });
+    return [];
   }
 }
 
