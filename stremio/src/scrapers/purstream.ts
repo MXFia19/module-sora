@@ -1,5 +1,5 @@
 import { cached } from '../cache';
-import { getJson, getText, absolute } from '../http';
+import { getJson, getText, absolute, request } from '../http';
 import { logger } from '../log';
 import { pickBest } from '../match';
 import { toIso639_2, isForced } from '../lang';
@@ -19,34 +19,54 @@ const log = logger('Purstream');
 
 const WIKI = 'https://purstream.wiki';
 const FALLBACK_DOMAIN = 'purstream.ac';
-const DOMAIN_TTL_MS = 60 * 60 * 1000;
+/** L'API de statut du wiki se remet à jour toutes les ~5 min : on la relit
+ *  au même rythme, pour savoir vite quand la plateforme tombe ou revient. */
+const STATUS_TTL_MS = 5 * 60 * 1000;
 const SEARCH_TTL_MS = 30 * 60 * 1000;
 
-async function currentDomain(): Promise<string> {
-  return cached('purstream:domain', async () => {
+export interface PlatformStatus {
+  domain: string;
+  /** Ce que dit purstream.wiki de sa plateforme ; null = on ne sait pas. */
+  reachable: boolean | null;
+}
+
+/** Lit la réponse de /api/server-status. Le wiki y publie le domaine courant
+ *  ET l'état de la plateforme, sondée depuis une dizaine de réseaux : quand
+ *  elle est tombée (`reachable: false`), inutile d'aller vérifier soi-même —
+ *  chaque recherche coûterait un délai plein, et trois titres essayés à la
+ *  suite suffisaient à faire sauter le budget de 25 s du scraper. */
+export function readStatus(status: any): PlatformStatus | null {
+  const main = Array.isArray(status?.servers)
+    ? status.servers.find((s: any) => s?.id === 'main')
+    : null;
+  if (!main?.url) return null;
+  return {
+    domain: String(main.url).replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+    reachable: typeof main.reachable === 'boolean' ? main.reachable : null,
+  };
+}
+
+async function platform(): Promise<PlatformStatus> {
+  return cached('purstream:status', async () => {
     // 1) API de statut — la voie officielle, et la plus rapide.
-    const status = await getJson<any>(`${WIKI}/api/server-status`);
-    const main = Array.isArray(status?.servers)
-      ? status.servers.find((s: any) => s?.id === 'main')
-      : null;
-    if (main?.url) {
-      const clean = String(main.url).replace(/^https?:\/\//, '').replace(/\/+$/, '');
-      log.debug(`domaine via API: ${clean}`);
-      return clean;
+    const status = readStatus(await getJson<any>(`${WIKI}/api/server-status`, { timeoutMs: 8000 }));
+    if (status) {
+      log.debug(`domaine via API: ${status.domain}${status.reachable === false ? ' (signalé injoignable)' : ''}`);
+      return status;
     }
 
     // 2) Repli HTML — quand l'API de statut tombe, le domaine reste écrit
-    //    dans la page d'accueil du wiki.
+    //    dans la page d'accueil du wiki. L'état, lui, est inconnu.
     const html = await getText(`${WIKI}/`);
     const m = html.match(/https:\/\/(purstream\.[a-z]+)/);
     if (m?.[1]) {
       log.debug(`domaine via HTML: ${m[1]}`);
-      return m[1];
+      return { domain: m[1], reachable: null };
     }
 
     log.warn(`domaine introuvable, repli sur ${FALLBACK_DOMAIN}`);
-    return FALLBACK_DOMAIN;
-  }, { ttlMs: DOMAIN_TTL_MS, shouldCache: v => typeof v === 'string' && v.length > 0 });
+    return { domain: FALLBACK_DOMAIN, reachable: null };
+  }, { ttlMs: STATUS_TTL_MS, shouldCache: v => Boolean(v?.domain) });
 }
 
 interface SearchHit {
@@ -64,13 +84,18 @@ function hitYear(h: SearchHit): number | undefined {
   return Number.isFinite(y) && y > 1900 ? y : undefined;
 }
 
-async function search(domain: string, query: string): Promise<SearchHit[]> {
+/** null = l'API n'a pas répondu (réseau, délai) — à ne pas confondre avec
+ *  « aucun résultat », qui vaut la peine d'essayer un autre titre. */
+async function search(domain: string, query: string): Promise<SearchHit[] | null> {
   return cached(`purstream:search:${query.toLowerCase()}`, async () => {
     const url = `https://api.${domain}/api/v1/search-bar/search/${encodeURIComponent(query)}`;
-    const data = await getJson<any>(url, { headers: refererHeaders(domain) });
-    const items = data?.data?.items?.movies?.items;
+    const res = await request(url, {
+      headers: { Accept: 'application/json, text/plain, */*', ...refererHeaders(domain) },
+    });
+    if (res.status === 0) return null;
+    const items = res.json<any>()?.data?.items?.movies?.items;
     return Array.isArray(items) ? (items as SearchHit[]) : [];
-  }, { ttlMs: SEARCH_TTL_MS });
+  }, { ttlMs: SEARCH_TTL_MS, shouldCache: v => Array.isArray(v) && v.length > 0 });
 }
 
 function refererHeaders(domain: string): Record<string, string> {
@@ -85,6 +110,12 @@ async function resolveId(domain: string, req: MediaRequest): Promise<string | nu
 
   for (const alias of req.aliases.slice(0, 3)) {
     const hits = await search(domain, alias);
+    // Un hôte muet ne répondra pas mieux au titre suivant : chaque essai
+    // coûterait un délai plein de plus.
+    if (hits === null) {
+      log.debug(`api.${domain} ne répond pas — pas d'autre titre essayé`);
+      return null;
+    }
     if (hits.length === 0) continue;
 
     const typed = hits.filter(h => {
@@ -149,7 +180,14 @@ async function subtitlesFromMaster(masterUrl: string, headers: Record<string, st
 }
 
 async function resolve(req: MediaRequest): Promise<RawStream[]> {
-  const domain = await currentDomain();
+  const { domain, reachable } = await platform();
+  if (reachable === false) {
+    // Le wiki la sonde lui-même depuis plusieurs pays : on le croit, et on
+    // rend la main tout de suite plutôt que de constater la panne à 12 s par
+    // requête. Revérifié toutes les STATUS_TTL_MS.
+    log.debug(`plateforme ${domain} signalée injoignable par purstream.wiki — source sautée`);
+    return [];
+  }
   const id = await resolveId(domain, req);
   if (!id) return [];
 
