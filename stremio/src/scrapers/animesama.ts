@@ -200,7 +200,7 @@ async function streamsAt(tab: Tab, index: number, domain: string): Promise<RawSt
   }
   log.debug(`${embeds.length} embed(s) à résoudre`);
 
-  const extracted = await extractAll(embeds, referer);
+  const extracted = await extractAll(embeds, referer, { source: 'Anime-Sama' });
   return extracted.map(e => ({
     url: e.url,
     quality: 'HD',

@@ -74,6 +74,7 @@ mark{background:#3b2f0b;color:#ffd75f;border-radius:2px}
   <span class="sp"></span>
   <button id="cache" class="danger" title="Oblige les sources à tout re-chercher à la prochaine requête">Vider le cache <span class="badge" id="centries">?</span></button>
   <a href="/debug" style="color:#79c0ff;font-size:.85rem">diagnostic →</a>
+  <a href="/debug/failures" style="color:#79c0ff;font-size:.85rem">liens en échec →</a>
 </header>
 <p class="hint">Laissez cette page ouverte et utilisez Stremio sur votre téléphone :
 chaque requête apparaît ici, avec ce que chaque source a rendu.</p>

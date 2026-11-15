@@ -4,6 +4,7 @@ import { logger } from '../log';
 import { audioLabel, toIso639_2 } from '../lang';
 import { pickBest, pickByKeywords } from '../match';
 import { extractEmbed } from '../extractors';
+import { recordFailure } from '../failures';
 import type { MediaRequest, RawStream, Scraper } from '../types';
 
 /** movix — agrégateur keyé TMDB : son API expose une dizaine de sondes qui
@@ -16,9 +17,11 @@ import type { MediaRequest, RawStream, Scraper } from '../types';
 
 const log = logger('Movix');
 
-/** Les chemins des sondes ci-dessous viennent du backend ouvert de movix
- *  (`movixcorp/MovixOpenSource`, `API/Mainapi/app.js` + `API/Mainapi/routes/`).
- *  C'est la seule façon de ne pas les deviner : `/api/films/download/:id` a
+/** Les chemins des sondes ci-dessous viennent du site lui-même : ce sont les
+ *  appels de ses pages de lecture (chunks WatchMovie / WatchTv du bundle,
+ *  relevés le 2026-11-15). Le backend ouvert qui servait de référence
+ *  (`movixcorp/MovixOpenSource`) a été retiré de GitHub par une plainte DMCA
+ *  le 2026-09-23. Ne jamais les deviner : `/api/films/download/:id` a
  *  longtemps été écrit `/api/movies/...` ici, et répondait 404 en silence.
  *
  *  Sources volontairement NON branchées, et pourquoi :
@@ -27,7 +30,12 @@ const log = logger('Movix');
  *     explicitement des robots.
  *   - `/api/ftv/*` (France TV) : recherche floue par titre sur un catalogue de
  *     replay disjoint de TMDB — « Squid Game » y ramène « Space Game ».
- *   - `POST /api/swiftflow/mp4/resolve` : exige un jeton Turnstile. */
+ *   - `POST /api/swiftflow/mp4/resolve` : exige un jeton Turnstile.
+ *   - `/api/extract-supervideo` : l'extracteur Supervideo/Dropload du site
+ *     vit sur un service koyeb aujourd'hui éteint (« No active service »).
+ *   - `iframe_src` des sondes TMDB et IMDB : lecteurvideo.com répond 403 (lien
+ *     signé pour le site), frvideosrc.co est un agrégateur qu'on ne lit pas.
+ *     Les relever ne ferait qu'allonger le journal des échecs. */
 const DISCOVERY_URL = 'https://movix.online/';
 const FALLBACK_DOMAIN = 'movix.chat';
 const DOMAIN_TTL_MS = 60 * 60 * 1000;
@@ -51,6 +59,9 @@ const ECARTES: Array<{ motif: RegExp; raison: string }> = [
   { motif: /\bveev\.\w+/i, raison: 'attestation canvas/WebGL' },
   { motif: /\b(?:listeamed|sandratableother)\.\w+/i, raison: 'interstitiel publicitaire' },
   { motif: /\b(?:younetu|netu|hqq)\.\w+/i, raison: 'hébergeur fermé' },
+  // Lecteurs de la sonde TMDB (« Omega » sur le site) : chaque page est une
+  // vérification de sécurité Cloudflare avant tout lecteur.
+  { motif: /\bemmmmbed\.\w+/i, raison: 'Turnstile (captcha Cloudflare) devant chaque lecteur' },
   { motif: /\bfembed\.com/i, raison: 'ne répond plus, coûte un délai plein' },
 ];
 
@@ -280,24 +291,23 @@ export function probes(domain: string, req: MediaRequest, movixId: string | null
     },
     {
       name: '1jour1film',
-      url: () => isTv ? null : api(`/api/j1f/movie/${id}`),
-      collect: (j, out) => {
-        (j?.players?.vf ?? []).forEach((p: any) => out.add(p?.url, 'VF', null, '1jour1film'));
-        (j?.players?.vostfr ?? []).forEach((p: any) => out.add(p?.url, 'VOSTFR', null, '1jour1film'));
-      },
+      url: () => isTv ? api(`/api/j1f/tv/${id}/season/${s}`) : api(`/api/j1f/movie/${id}`),
+      collect: (j, out) => collectPlayers(j, isTv ? e : null, '1jour1film', out),
     },
     {
       name: 'SwiftFlow',
-      url: () => isTv ? null : api(`/api/swiftflow/movie/${id}`),
-      collect: (j, out) => {
-        (j?.players?.vf ?? []).forEach((p: any) => out.add(p?.url, 'VF', null, 'swiftflow'));
-        (j?.players?.vostfr ?? []).forEach((p: any) => out.add(p?.url, 'VOSTFR', null, 'swiftflow'));
-      },
+      url: () => isTv ? api(`/api/swiftflow/tv/${id}/season/${s}`) : api(`/api/swiftflow/movie/${id}`),
+      collect: (j, out) => collectPlayers(j, isTv ? e : null, 'swiftflow', out),
     },
     {
       name: 'IMDB',
-      url: () => isTv ? api(`/api/imdb/tv/${id}`) : null,
+      url: () => isTv ? api(`/api/imdb/tv/${id}`) : api(`/api/imdb/movie/${id}`),
       collect: (j, out) => {
+        if (!isTv) {
+          // Films : { player_links: [{ player: 'Dropload', link, is_hd }] }.
+          (j?.player_links ?? []).forEach((p: any) => out.add(p?.link, null, null, 'imdb'));
+          return;
+        }
         const season = j?.series?.[0]?.seasons?.find((x: any) => String(x?.number) === String(s));
         const ep = season?.episodes?.find((x: any) => String(x?.number) === String(e));
         forEachLangGroup(ep?.versions, (lang, v) => {
@@ -306,6 +316,66 @@ export function probes(domain: string, req: MediaRequest, movixId: string | null
       },
     },
   ];
+}
+
+/** 1jour1film et SwiftFlow partagent leur forme : `players: { vf, vostfr }`
+ *  pour un film, `episodes: { "<n>": { vf, vostfr } }` pour une saison. */
+function collectPlayers(j: any, episode: number | null, via: string, out: LinkSet): void {
+  const groups = episode == null ? j?.players : j?.episodes?.[String(episode)];
+  forEachLangGroup(groups, (lang, p) => out.add(p?.url, lang, null, via));
+}
+
+/** Frembed : un lecteur keyé TMDB, que le site interroge sur son propre
+ *  domaine. Le domaine tourne et sa valeur courante est publiée dans un dépôt
+ *  de configuration ; l'API `public/v1` dit si le contenu est disponible, et
+ *  le lecteur est alors `film.php` / `serie.php`.
+ *
+ *  Quand son API rame (500 « Request Timeout » au bout de 30 s, observé le
+ *  2026-11-15), elle ne doit retenir personne : délai court, sonde qui tourne
+ *  à côté des extractions (voir `resolve`), et mise à l'écart pendant
+ *  FREMBED_PAUSE_MS après un silence — seule la première requête paie. */
+const FREMBED_CONFIG = 'https://raw.githubusercontent.com/kingofthrone73-dotcom/frembed-config/main/config.json';
+const FREMBED_FALLBACK = 'https://frembed.shop';
+const FREMBED_TIMEOUT_MS = 2500;
+const FREMBED_PAUSE_MS = 10 * 60 * 1000;
+let frembedPausedUntil = 0;
+
+async function frembedBase(): Promise<string> {
+  return cached('movix:frembed:domain', async () => {
+    const cfg = await getJson<any>(FREMBED_CONFIG, { timeoutMs: FREMBED_TIMEOUT_MS });
+    const base = [cfg?.main, cfg?.backup].find((u: unknown) => typeof u === 'string' && /^https?:\/\//.test(u));
+    return String(base ?? FREMBED_FALLBACK).replace(/\/+$/, '');
+  }, { ttlMs: DOMAIN_TTL_MS });
+}
+
+async function collectFrembed(req: MediaRequest, out: LinkSet): Promise<void> {
+  if (Date.now() < frembedPausedUntil) {
+    log.debug('sonde Frembed: en pause (API muette récemment)');
+    return;
+  }
+  const base = await frembedBase();
+  const isTv = req.type === 'series';
+  const s = req.season ?? 1;
+  const e = req.episode ?? 1;
+  const check = isTv
+    ? `${base}/api/public/v1/tv/${req.tmdbId}?sa=${s}&epi=${e}`
+    : `${base}/api/public/v1/movies/${req.tmdbId}`;
+  const json = await getJson<any>(check, { timeoutMs: FREMBED_TIMEOUT_MS, retries: 0 });
+  if (!json) {
+    // Pas de JSON = API en panne ou trop lente, pas « contenu absent ».
+    frembedPausedUntil = Date.now() + FREMBED_PAUSE_MS;
+    log.debug(`sonde Frembed: API muette, en pause ${FREMBED_PAUSE_MS / 60000} min`);
+    return;
+  }
+  if (json.status !== 200 || !json.result) {
+    log.debug('sonde Frembed: contenu indisponible');
+    return;
+  }
+  out.parent('frembed', `${base}/`);
+  out.add(isTv
+    ? `${base}/api/serie.php?id=${req.tmdbId}&sa=${s}&epi=${e}`
+    : `${base}/api/film.php?id=${req.tmdbId}`, 'VF', null, 'frembed');
+  log.debug('sonde Frembed: 1 lecteur');
 }
 
 /** Parcourt un objet { langue: [entrées] } sans supposer sa forme exacte —
@@ -455,6 +525,13 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
     }));
   };
 
+  // Frembed ne dépend pas de l'API movix et peut être lent : il remplit son
+  // propre ensemble, et n'est attendu qu'à la fin, pendant que les liens des
+  // autres sondes sont déjà en cours d'extraction. Il ne lève jamais.
+  const fb = new LinkSet();
+  const frembedTask = collectFrembed(req, fb).catch(e =>
+    log.debug(`sonde Frembed: ${e instanceof Error ? e.message : e}`));
+
   if (req.anime === true) {
     // Un anime a des chances des deux côtés : on interroge en parallèle.
     await Promise.all([runStandard(), collectAnime(domain, req, out)]);
@@ -466,46 +543,59 @@ async function resolve(req: MediaRequest): Promise<RawStream[]> {
     }
   }
 
-  if (out.links.length === 0) {
-    log.debug(`aucun lien pour tmdb ${req.tmdbId}`);
-    return [];
-  }
-  log.debug(`${out.links.length} lien(s) bruts: ${JSON.stringify(out.countByVia)}`);
+  if (out.links.length > 0) log.debug(`${out.links.length} lien(s) bruts: ${JSON.stringify(out.countByVia)}`);
 
-  const usable = out.links.filter(l => {
-    const raison = ecarte(l.url);
-    if (raison) {
-      log.debug(`hébergeur écarté (${raison}): ${l.url}`);
-      return false;
-    }
-    return true;
-  });
+  // Ce qu'on affiche dans le journal des échecs pour retrouver le cas.
+  const title = `${req.title}${req.year ? ` (${req.year})` : ''}`
+    + (req.type === 'series' ? ` S${req.season ?? 1}E${req.episode ?? 1}` : '');
 
-  const resolved = await Promise.all(usable.map(async link => {
-    // Un lien déjà direct n'a pas besoin d'extracteur, ni de headers : il est
-    // servi tel quel au lecteur, sans passer par le proxy.
-    if (/\.(m3u8|mp4)(\?|$)/i.test(link.url)) {
-      return [{
-        url: link.url,
+  const extractLinks = async (links: Link[]): Promise<RawStream[]> => {
+    const usable = links.filter(l => {
+      const raison = ecarte(l.url);
+      if (raison) {
+        log.debug(`hébergeur écarté (${raison}): ${l.url}`);
+        recordFailure({ url: l.url, kind: 'ecarte', reason: raison, source: `Movix · ${l.via}`, title });
+        return false;
+      }
+      return true;
+    });
+
+    const resolved = await Promise.all(usable.map(async link => {
+      // Un lien déjà direct n'a pas besoin d'extracteur, ni de headers : il est
+      // servi tel quel au lecteur, sans passer par le proxy.
+      if (/\.(m3u8|mp4)(\?|$)/i.test(link.url)) {
+        return [{
+          url: link.url,
+          quality: link.quality,
+          language: link.language,
+          server: `direct (${link.via})`,
+          container: link.url.includes('.m3u8') ? ('hls' as const) : ('mp4' as const),
+        }];
+      }
+
+      const streams = await extractEmbed(link.url, link.referer ?? `https://${domain}/`,
+        { source: `Movix · ${link.via}`, title });
+      return streams.map(s => ({
+        url: s.url,
         quality: link.quality,
         language: link.language,
-        server: `direct (${link.via})`,
-        container: link.url.includes('.m3u8') ? ('hls' as const) : ('mp4' as const),
-      }];
-    }
-
-    const streams = await extractEmbed(link.url, link.referer ?? `https://${domain}/`);
-    return streams.map(s => ({
-      url: s.url,
-      quality: link.quality,
-      language: link.language,
-      server: `${s.server} (${link.via})`,
-      headers: s.headers,
-      container: s.url.includes('.m3u8') ? ('hls' as const) : ('mp4' as const),
+        server: `${s.server} (${link.via})`,
+        headers: s.headers,
+        container: s.url.includes('.m3u8') ? ('hls' as const) : ('mp4' as const),
+      }));
     }));
-  }));
+    return resolved.flat();
+  };
 
-  return [...out.ready, ...resolved.flat()];
+  const [main, frembed] = await Promise.all([
+    extractLinks(out.links),
+    frembedTask.then(() => extractLinks(fb.links)),
+  ]);
+
+  // Les flux prêts (KissKH) comptent même sans aucun lien de lecteur : avant,
+  // l'absence de liens faisait rendre une liste vide et les jetait.
+  if (out.links.length + fb.links.length + out.ready.length === 0) log.debug(`aucun lien pour tmdb ${req.tmdbId}`);
+  return [...out.ready, ...main, ...frembed];
 }
 
 export const movix: Scraper = {

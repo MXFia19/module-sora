@@ -214,7 +214,8 @@ async function streamsOf(hit: Hit, episode: { id: number; number: number }): Pro
   const resolved = await Promise.all(sources.map(async src => {
     const embed = src.url ?? '';
     if (!embed) return [];
-    const streams = await extractEmbed(embed.startsWith('//') ? `https:${embed}` : embed, `${BASE}/`);
+    const streams = await extractEmbed(embed.startsWith('//') ? `https:${embed}` : embed, `${BASE}/`,
+      { source: 'Nakanime', title: `${hit.title} — épisode ${episode.number}` });
     return streams.map(s => ({
       url: s.url,
       quality: 'HD',

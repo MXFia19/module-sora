@@ -88,3 +88,72 @@ test('Voirdrama rend des liens de lecteur ordinaires', () => {
   assert.equal(out.links.length, 2);
   assert.equal(out.links[0]!.via, 'voirdrama');
 });
+
+test('les lecteurs « Omega » (emmmmbed, Turnstile) sont écartés, sans déborder', () => {
+  assert.match(ecarte('https://emmmmbed.com/embed/CKcaH9As?t=eyJ') ?? '', /Turnstile/);
+  assert.equal(ecarte('https://embed.example/embed/x'), null);
+});
+
+test('1jour1film, SwiftFlow et IMDB ont désormais leur variante film ET série', () => {
+  // Relevé sur les pages de lecture du site (2026-11-15).
+  assert.equal(urlDe('1jour1film', film), 'https://api.movix.men/api/j1f/movie/372058');
+  assert.equal(urlDe('1jour1film', serie), 'https://api.movix.men/api/j1f/tv/93405/season/1');
+  assert.equal(urlDe('SwiftFlow', film), 'https://api.movix.men/api/swiftflow/movie/372058');
+  assert.equal(urlDe('SwiftFlow', serie), 'https://api.movix.men/api/swiftflow/tv/93405/season/1');
+  assert.equal(urlDe('IMDB', film), 'https://api.movix.men/api/imdb/movie/372058');
+  assert.equal(urlDe('IMDB', serie), 'https://api.movix.men/api/imdb/tv/93405');
+});
+
+test('SwiftFlow série : on prend l’épisode demandé, pas toute la saison', () => {
+  const out = new LinkSet();
+  probes('movix.men', { ...serie, episode: 2 }, null).find(p => p.name === 'SwiftFlow')!.collect({
+    episodes: {
+      '1': { vf: [{ url: 'https://blinkflux.lol/api/v1/index.php?route=series/93405/1/1' }], vostfr: [] },
+      '2': {
+        vf: [{ url: 'https://blinkflux.lol/api/v1/index.php?route=series/93405/1/2' }],
+        vostfr: [{ url: 'https://blinkflux.lol/api/v1/index.php?route=series/93405/1/2/vo' }],
+      },
+    },
+  }, out);
+  assert.deepEqual(out.links.map(l => l.url), [
+    'https://blinkflux.lol/api/v1/index.php?route=series/93405/1/2',
+    'https://blinkflux.lol/api/v1/index.php?route=series/93405/1/2/vo',
+  ]);
+  assert.deepEqual(out.links.map(l => l.language), ['VF', 'VOSTFR']);
+  assert.equal(out.links[0]!.via, 'swiftflow');
+});
+
+test('SwiftFlow film : players { vf, vostfr }', () => {
+  const out = new LinkSet();
+  probes('movix.men', film, null).find(p => p.name === 'SwiftFlow')!.collect({
+    players: { vf: [{ url: 'https://blinkflux.lol/api/v1/index.php?route=movies/372058' }], vostfr: [] },
+  }, out);
+  assert.equal(out.links.length, 1);
+  assert.equal(out.links[0]!.language, 'VF');
+});
+
+test('IMDB film : player_links[{ player, link, is_hd }]', () => {
+  const out = new LinkSet();
+  probes('movix.men', film, null).find(p => p.name === 'IMDB')!.collect({
+    iframe_src: 'https://frvideosrc.co/film/372058',
+    player_links: [
+      { player: 'Dropload', link: 'https://dr0pstream.com/e/wky445ukd1fl', is_hd: true },
+      { player: 'Doodstream', link: 'https://doodstream.com/e/8341ketrdptv', is_hd: false },
+      { player: 'Cassé', link: null },
+    ],
+  }, out);
+  // iframe_src n'est pas relevé : agrégateur illisible, il ne ferait qu'un échec de plus.
+  assert.deepEqual(out.links.map(l => l.url), [
+    'https://dr0pstream.com/e/wky445ukd1fl',
+    'https://doodstream.com/e/8341ketrdptv',
+  ]);
+  assert.equal(out.links[0]!.via, 'imdb');
+});
+
+test('IMDB série : la forme historique reste lue', () => {
+  const out = new LinkSet();
+  probes('movix.men', serie, null).find(p => p.name === 'IMDB')!.collect({
+    series: [{ seasons: [{ number: 1, episodes: [{ number: 1, versions: { VF: { players: [{ link: 'https://voe.sx/e/abc' }] } } }] }] }],
+  }, out);
+  assert.deepEqual(out.links.map(l => l.url), ['https://voe.sx/e/abc']);
+});

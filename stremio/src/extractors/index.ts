@@ -1,6 +1,8 @@
 import { getText, request, origin, absolute } from '../http';
 import { cached } from '../cache';
 import { logger } from '../log';
+import { recordFailure, hostOf } from '../failures';
+import type { FailureContext } from '../failures';
 import { unpackAll, findMediaUrl, declaredHlsLink } from './unpack';
 import { extractEmbed4me } from './embed4me';
 import { extractFsvid, decodeFsvid } from './fsvid';
@@ -141,10 +143,20 @@ export function pageMorte(html: string): string | null {
   return null;
 }
 
+/** Pourquoi une extraction n'a rien donné. Rempli au point exact où elle
+ *  abandonne, parce que c'est le seul endroit qui le sait : plus haut, un
+ *  fichier supprimé et un lecteur inconnu se ressemblent (« rien extrait »). */
+interface Why { reason?: string }
+
 /** Repli générique : la page contient soit l'URL en clair, soit un bloc packé
  *  qui la contient. Couvre Vidhide et toute la famille qui partage ce lecteur,
  *  sans avoir à les nommer une par une. */
-async function extractGeneric(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream | ExtractedStream[] | null> {
+async function extractGeneric(
+  embedUrl: string,
+  referer: string,
+  depth = 0,
+  why: Why = {},
+): Promise<ExtractedStream | ExtractedStream[] | null> {
   // L'URL d'arrivée, pas celle de départ : plusieurs façades ne sont qu'une
   // 302 vers le vrai lecteur (kokoflix.lol/chamber_go.php -> bysesayeveum.com
   // /e/<code>). Le client suit la redirection tout seul, mais si on garde
@@ -158,13 +170,19 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
   const sansFragment = embedUrl.replace(/#.*$/, '');
   let page = first.url && first.url !== sansFragment ? first.url : embedUrl;
   let html = first.text;
-  if (!html) return null;
+  if (!html) {
+    why.reason = first.status
+      ? `réponse vide (HTTP ${first.status})`
+      : 'hébergeur injoignable (réseau coupé ou délai dépassé)';
+    return null;
+  }
   if (page !== embedUrl) log.debug(`redirection suivie -> ${page}`);
 
   // Un corps d'erreur n'est pas une page de lecteur. Le dire ici évite de
   // ranger « l'hébergeur est tombé » avec « on ne sait pas lire cette page ».
   if (!first.ok) {
     log.debug(`${page} : l'hébergeur répond HTTP ${first.status} — rien à extraire`);
+    why.reason = `l'hébergeur répond HTTP ${first.status}`;
     return null;
   }
 
@@ -179,7 +197,10 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     log.debug(`coquille de redirection -> ${jump[1]}`);
     page = jump[1];
     html = await getText(page, { headers: { Referer: referer } });
-    if (!html) return null;
+    if (!html) {
+      why.reason = `redirection vers ${hostOf(page)} restée sans réponse`;
+      return null;
+    }
   }
 
   // Coquille « Page is loading » dont le saut est calculé par un main.js
@@ -289,12 +310,14 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     const mort = pageMorte(html);
     if (mort) {
       log.debug(`${page} : l'hébergeur répond « ${mort} » — rien à extraire`);
+      why.reason = `fichier absent : « ${mort} »`;
       return null;
     }
 
     const mur = /recaptcha\/api\.js|grecaptcha\.execute|challenges\.cloudflare\.com\/turnstile|hcaptcha\.com\/1\/api\.js/.exec(html);
     if (mur) {
       log.debug(`${page} : protégé par un captcha (${mur[0].split('/')[0]}) — rien à extraire sans navigateur`);
+      why.reason = `protégé par un captcha (${mur[0].split('/')[0]})`;
       return null;
     }
 
@@ -302,8 +325,11 @@ async function extractGeneric(embedUrl: string, referer: string, depth = 0): Pro
     if (depth < 1 && html.length < 8000 && frames.length === 1) {
       const inner = absolute(frames[0]!.replace(/&amp;/g, '&'), page);
       log.debug(`enrobage -> ${inner}`);
-      return (await extractOnce(inner, page, depth + 1))[0] ?? null;
+      const found = (await extractOnce(inner, page, depth + 1))[0] ?? null;
+      if (!found) why.reason = `cadre vers ${hostOf(inner)} : rien extrait`;
+      return found;
     }
+    why.reason = 'lecteur non reconnu (aucune URL de flux trouvée dans la page)';
     return null;
   }
 
@@ -357,18 +383,33 @@ const EXTRACT_TTL_MS = 5 * 60 * 1000;
  *  et déchiffrée autant de fois qu'il y a de sources qui la citent. La
  *  déduplication des appels en vol de `cached` couvre le cas concurrent, qui
  *  est le cas normal ici. */
-export function extractEmbed(embedUrl: string, referer: string): Promise<ExtractedStream[]> {
-  return cached(`extract:${embedUrl}`, () => extractOnce(embedUrl, referer), {
+export function extractEmbed(
+  embedUrl: string,
+  referer: string,
+  ctx?: FailureContext,
+): Promise<ExtractedStream[]> {
+  return cached(`extract:${embedUrl}`, () => extractOnce(embedUrl, referer, 0, ctx), {
     ttlMs: EXTRACT_TTL_MS,
   });
 }
 
-async function extractOnce(embedUrl: string, referer: string, depth = 0): Promise<ExtractedStream[]> {
+async function extractOnce(
+  embedUrl: string,
+  referer: string,
+  depth = 0,
+  ctx?: FailureContext,
+): Promise<ExtractedStream[]> {
   const host = HOSTS.find(h => h.match.test(embedUrl));
+  const why: Why = {};
+  // Seul l'appel de premier niveau consigne l'échec : un cadre suivi
+  // (enrobage) est un détail de l'extraction de la page qui le contient.
+  const fail = (reason: string) => {
+    if (depth === 0) recordFailure({ url: embedUrl, kind: 'echec', extractor: host?.name ?? 'générique', reason, ...ctx });
+  };
   try {
     let result = host
       ? await host.extract(embedUrl, referer)
-      : await extractGeneric(embedUrl, referer, depth);
+      : await extractGeneric(embedUrl, referer, depth, why);
 
     // Un extracteur nommé qui rend zéro n'est pas le dernier mot : l'hébergeur
     // sert parfois une variante de page qu'il ne reconnaît pas (vidzy.org
@@ -376,19 +417,26 @@ async function extractOnce(embedUrl: string, referer: string, depth = 0): Promis
     // sait aussi lire les pages qui annoncent un fichier supprimé — sans quoi
     // « rien extrait » couvre indifféremment une vidéo morte et un hébergeur
     // qu'on ne sait pas lire. Une requête de plus, uniquement sur échec.
-    if (!result && host) result = await extractGeneric(embedUrl, referer, depth);
+    if (!result && host) result = await extractGeneric(embedUrl, referer, depth, why);
 
     if (!result) {
       log.debug(`rien extrait de ${embedUrl}${host ? ` (${host.name})` : ''}`);
+      const reason = why.reason ?? 'rien extrait';
+      fail(host ? `${host.name} : ${reason}` : reason);
       return [];
     }
 
     const playable = (Array.isArray(result) ? result : [result]).filter(r => isPlayable(r.url));
 
-    if (playable.length === 0) log.debug(`aucune URL jouable depuis ${embedUrl}`);
+    if (playable.length === 0) {
+      log.debug(`aucune URL jouable depuis ${embedUrl}`);
+      fail('URL extraite mais inutilisable (relative, ou marqueur de fichier absent)');
+    }
     return playable;
   } catch (e) {
-    log.debug(`échec ${embedUrl}: ${e instanceof Error ? e.message : e}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    log.debug(`échec ${embedUrl}: ${msg}`);
+    fail(`erreur pendant l'extraction : ${msg}`);
     return [];
   }
 }
@@ -403,9 +451,10 @@ const EMBED_BUDGET_MS = 15_000;
 export async function extractAll(
   embeds: Array<{ url: string; lang: string }>,
   referer: string,
+  ctx?: FailureContext,
 ): Promise<Array<ExtractedStream & { lang: string }>> {
   const out = await Promise.all(embeds.map(async e => {
-    const streams = await withBudget(extractEmbed(e.url, referer), EMBED_BUDGET_MS, e.url);
+    const streams = await withBudget(extractEmbed(e.url, referer, ctx), EMBED_BUDGET_MS, e.url, ctx);
     return streams.map(s => ({ ...s, lang: e.lang }));
   }));
   return out.flat();
@@ -413,10 +462,11 @@ export async function extractAll(
 
 /** Rend un tableau vide au lieu de faire attendre : un lecteur perdu vaut
  *  mieux que toute la source perdue. */
-function withBudget(
+export function withBudget(
   p: Promise<ExtractedStream[]>,
   ms: number,
   label: string,
+  ctx?: FailureContext,
 ): Promise<ExtractedStream[]> {
   let timer: NodeJS.Timeout;
   return Promise.race([
@@ -424,6 +474,7 @@ function withBudget(
     new Promise<ExtractedStream[]>(resolve => {
       timer = setTimeout(() => {
         log.debug(`abandon de ${label} après ${ms}ms`);
+        recordFailure({ url: label, kind: 'budget', reason: `abandonné après ${Math.round(ms / 1000)} s`, ...ctx });
         resolve([]);
       }, ms);
     }),

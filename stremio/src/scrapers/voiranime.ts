@@ -199,7 +199,8 @@ async function streamsOf(episodeUrl: string): Promise<RawStream[]> {
   // La langue n'est pas annoncée par lecteur : elle est dans le slug de
   // l'épisode quand elle l'est.
   const lang = audioLabel(episodeUrl);
-  const extracted = await extractAll(embeds.map(url => ({ url, lang })), `${BASE}/`);
+  const extracted = await extractAll(embeds.map(url => ({ url, lang })), `${BASE}/`,
+    { source: 'Voir-Anime', title: episodeUrl });
 
   return extracted.map(e => ({
     url: e.url,

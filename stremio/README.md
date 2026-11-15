@@ -112,6 +112,24 @@ Techniquement c'est du Server-Sent Events : unidirectionnel, ça traverse les
 proxies sans négociation, et le navigateur se reconnecte seul. `/health`
 indique le nombre de consoles connectées.
 
+### Les liens en échec
+
+`http://votre-hôte:7000/debug/failures` (même condition : `DEBUG_UI=true`).
+Chaque lien de lecteur qu'une source a fourni sans qu'on en tire un flux, avec
+**la raison** : hébergeur qui répond 403/404/500, fichier supprimé, captcha,
+lecteur non reconnu, délai dépassé — ou lien **écarté** d'avance parce que
+l'hébergeur ne peut pas marcher (veev, Turnstile…).
+
+- **par hébergeur** : combien de liens perdus, pour quelles raisons, venant de
+  quelles sources — de quoi savoir quel extracteur réparer en premier ;
+- **lien par lien** : source (« Movix · wiflix »), titre demandé, extracteur
+  essayé, et l'URL pour aller voir soi-même.
+
+Filtre texte et par type, rafraîchissement automatique, bouton pour vider.
+Gardé en mémoire (500 derniers liens), remis à zéro au redémarrage ; un même
+lien n'est consigné qu'une fois par période de cache d'extraction (5 min).
+Les données brutes sont sur `/debug/failures.json`.
+
 ### En ligne de commande
 
 ```bash

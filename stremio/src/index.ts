@@ -16,6 +16,8 @@ import { search, trending, catalogDef } from './catalog';
 import { catalog as buildCatalog, meta as buildMeta } from './meta';
 import * as history from './history';
 import { livePage } from './livepage';
+import { failPage } from './failpage';
+import { listFailures, clearFailures, summarize } from './failures';
 import { runDiagnostic } from './debug';
 import { pushRequest, purge, restore, snapshot, subscribe, subscriberCount } from './livelog';
 import { rateLimit, concurrencyGuard, activeStreams } from './ratelimit';
@@ -113,7 +115,7 @@ app.get('/', (_req, res) => {
 <h1>Sora</h1>
 <p>Addon actif. Sources : ${enabledScrapers().map(s => s.name).join(', ') || '<em>aucune</em>'}.</p>
 <p><a href="/configure">Configurer et générer mon lien d'installation →</a></p>
-${config.debugUi ? '<p><a href="/debug">Diagnostic des sources →</a> · <a href="/debug/live">Console en direct →</a></p>' : ''}
+${config.debugUi ? '<p><a href="/debug">Diagnostic des sources →</a> · <a href="/debug/live">Console en direct →</a> · <a href="/debug/failures">Liens en échec →</a></p>' : ''}
 <p>Ou, avec les réglages par défaut : <code>${publicBase()}/manifest.json</code></p>`);
 });
 
@@ -376,6 +378,14 @@ app.get('/proxy/s*', concurrencyGuard, handleProxy);
 // Page de diagnostic, volontairement optionnelle (DEBUG_UI=true).
 if (config.debugUi) {
   app.get('/debug', (_req, res) => res.type('html').send(debugPage()));
+
+  // Journal des liens qu'aucun extracteur n'a su lire (voir failures.ts).
+  app.get('/debug/failures', (_req, res) => res.type('html').send(failPage()));
+  app.get('/debug/failures.json', (_req, res) => {
+    const entries = listFailures();
+    res.set('Cache-Control', 'no-store').json({ total: entries.length, summary: summarize(entries), entries });
+  });
+  app.post('/debug/failures/clear', (_req, res) => res.json({ cleared: clearFailures() }));
   app.get('/debug/live', (_req, res) => res.type('html').send(livePage()));
 
   /** Flux d'événements en temps réel (Server-Sent Events).

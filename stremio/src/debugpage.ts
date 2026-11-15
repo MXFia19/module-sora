@@ -90,7 +90,7 @@ pre .debug{color:var(--dim)} pre .warn{color:var(--warn)} pre .error{color:var(-
 </style>
 <main>
 <h1>Diagnostic</h1>
-<p class="sub">Sources enregistrées : ${sources} — <a href="/debug/live" style="color:#79c0ff">console en direct →</a></p>
+<p class="sub">Sources enregistrées : ${sources} — <a href="/debug/live" style="color:#79c0ff">console en direct →</a> · <a href="/debug/failures" style="color:#79c0ff">liens en échec →</a></p>
 
 <div class="bar">
   <div class="row">
