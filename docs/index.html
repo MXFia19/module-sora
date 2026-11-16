@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Modules Sora — MXFia19</title>
+<meta name="description" content="Tous les modules Sora / Luna de MXFia19 : films, séries, anime, manga. Copiez le lien d'un module pour l'ajouter dans l'app.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%A9%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#f6f7f9; --card:#ffffff; --line:#e3e6eb; --fg:#15181d; --dim:#5d6672; --faint:#8a929c;
+  --accent:#2f6fde; --accent-bg:#e8f0fd; --ok:#1a7f37; --chip:#eef1f5;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0d1117; --card:#161b22; --line:#2a313b; --fg:#e6edf3; --dim:#9aa4af; --faint:#6e7781;
+    --accent:#58a6ff; --accent-bg:#132a4d; --ok:#3fb950; --chip:#1f2630;
+    --shadow:none; color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:76rem;margin:0 auto;padding:2rem 1.1rem 4rem}
+header h1{font-size:1.7rem;margin:0 0 .3rem;letter-spacing:-.01em}
+header p{margin:0;color:var(--dim);max-width:46rem}
+.how{margin:1.2rem 0 0;padding:.9rem 1rem;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  color:var(--dim);font-size:.9rem;box-shadow:var(--shadow)}
+.how b{color:var(--fg)}
+.tools{position:sticky;top:0;z-index:5;background:var(--bg);padding:1rem 0 .6rem;margin-top:1rem;
+  display:flex;flex-direction:column;gap:.6rem;border-bottom:1px solid var(--line)}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+input[type=search]{flex:1;min-width:14rem;padding:.65rem .8rem;border-radius:9px;border:1px solid var(--line);
+  background:var(--card);color:var(--fg);font:inherit}
+input[type=search]:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+select{padding:.6rem .7rem;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit}
+.chip{display:inline-flex;align-items:center;gap:.35rem;padding:.32rem .75rem;border-radius:999px;border:1px solid var(--line);
+  background:var(--card);color:var(--fg);font:inherit;font-size:.86rem;cursor:pointer;user-select:none}
+.chip[aria-pressed=true]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+.chip .n{color:var(--faint);font-variant-numeric:tabular-nums}
+.label{color:var(--faint);font-size:.8rem;margin-right:.2rem}
+.count{color:var(--dim);font-size:.88rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(19rem,1fr));gap:.9rem;margin-top:1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem;display:flex;flex-direction:column;
+  gap:.6rem;box-shadow:var(--shadow);min-width:0}
+.top{display:flex;gap:.8rem;align-items:center;min-width:0}
+.icon{width:48px;height:48px;border-radius:11px;flex:none;object-fit:cover;background:var(--chip);border:1px solid var(--line)}
+.icon.ph{display:grid;place-items:center;font-weight:700;color:var(--dim)}
+.name{font-weight:650;font-size:1.02rem;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{color:var(--dim);font-size:.83rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badges{display:flex;flex-wrap:wrap;gap:.3rem}
+.badge{font-size:.74rem;padding:.08rem .5rem;border-radius:5px;background:var(--chip);color:var(--dim)}
+.badge.cat{background:var(--accent-bg);color:var(--accent)}
+.changelog{color:var(--dim);font-size:.84rem;margin:0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.card.open .changelog{display:block}
+.more{background:none;border:none;color:var(--accent);font:inherit;font-size:.82rem;padding:0;cursor:pointer;align-self:flex-start}
+.actions{display:flex;gap:.45rem;flex-wrap:wrap;margin-top:auto;padding-top:.3rem}
+.btn{padding:.42rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);
+  font:inherit;font-size:.85rem;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.state{margin-top:2rem;padding:2rem 1rem;text-align:center;color:var(--dim);background:var(--card);border:1px dashed var(--line);border-radius:12px}
+.skeleton{height:12.5rem;border-radius:12px;background:linear-gradient(90deg,var(--card) 25%,var(--chip) 50%,var(--card) 75%);
+  background-size:200% 100%;animation:sk 1.2s infinite linear;border:1px solid var(--line)}
+@keyframes sk{to{background-position:-200% 0}}
+footer{margin-top:3rem;color:var(--faint);font-size:.82rem}
+@media (prefers-reduced-motion:reduce){.skeleton{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>🧩 Modules Sora</h1>
+  <p>Tous les modules de <a href="https://github.com/MXFia19/module-sora">MXFia19/module-sora</a> pour Sora, Luna et les apps compatibles :
+  films, séries, anime, manga. La liste se lit directement dans le dépôt, elle est donc toujours à jour.</p>
+  <div class="how"><b>Ajouter un module :</b> cliquez sur <b>Copier le lien</b>, puis collez-le dans l'app
+  (Sora : Réglages → Modules → Ajouter). Dans <b>ModuleTester</b>, ajoutez directement le dépôt
+  <code>MXFia19/module-sora</code> dans « Dépôts » pour tout récupérer d'un coup.</div>
+</header>
+
+<div class="tools" role="search">
+  <div class="row">
+    <input type="search" id="q" placeholder="Rechercher un module, un site, un type…" aria-label="Rechercher un module" autocomplete="off">
+    <select id="sort" aria-label="Trier">
+      <option value="name">Nom (A → Z)</option>
+      <option value="lang">Langue</option>
+      <option value="version">Version la plus récente</option>
+    </select>
+  </div>
+  <div class="row" id="cats" aria-label="Catégories"><span class="label">Type</span></div>
+  <div class="row" id="langs" aria-label="Langues"><span class="label">Langue</span></div>
+  <div class="count" id="count" aria-live="polite">Chargement des modules…</div>
+</div>
+
+<main id="grid" class="grid" aria-busy="true"></main>
+<div id="state" class="state" hidden></div>
+
+<footer>
+  Page générée dans votre navigateur à partir du dépôt GitHub (un appel à l'API GitHub, puis les manifests).
+  Projet éducatif, sans lien avec les sites ciblés par les modules.
+</footer>
+</div>
+
+<script>
+"use strict";
+const OWNER = "MXFia19", REPO = "module-sora", BRANCH = "main";
+const API = `https://api.github.com/repos/${OWNER}/${REPO}/git/trees/${BRANCH}?recursive=1`;
+const RAW = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/`;
+const TREE = `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/`;
+// Fichiers d'outillage qui ne sont jamais des manifests de module.
+const EXCLUDED = new Set(["package.json", "package-lock.json", "tsconfig.json", "jsconfig.json", "composer.json", "bower.json", "vercel.json"]);
+// Dossiers qui ne contiennent pas de modules Sora (l'addon Stremio, cette page…).
+const SKIP_DIRS = /^(stremio|docs|node_modules|\.github)(\/|$)/;
+
+const CATS = [
+  { key: "anime", label: "Anime", test: t => /anime/.test(t) },
+  { key: "movies", label: "Films", test: t => /movie|film/.test(t) },
+  { key: "shows", label: "Séries", test: t => /show|serie|tv(?!\w)/.test(t) && !/live/.test(t) },
+  { key: "manga", label: "Manga", test: t => /manga|novel/.test(t) },
+  { key: "live", label: "Direct / TV", test: t => /live|vod/.test(t) },
+];
+const LANG_FR = { French: "Français", English: "Anglais", Hindi: "Hindi", Multi: "Multi", Sinhala: "Cingalais", Spanish: "Espagnol", German: "Allemand", Italian: "Italien", Portuguese: "Portugais", Arabic: "Arabe" };
+
+const $ = s => document.querySelector(s);
+const state = { modules: [], cats: new Set(), langs: new Set() };
+
+function dirOf(path) { const i = path.lastIndexOf("/"); return i < 0 ? "" : path.slice(0, i); }
+function encodePath(path) { return path.split("/").map(encodeURIComponent).join("/"); }
+
+/** Un module = un .json qui se décode comme un manifest, posé à côté d'un .js. */
+function candidates(files) {
+  const jsDirs = new Set(files.filter(p => p.toLowerCase().endsWith(".js")).map(dirOf));
+  return files.filter(p => {
+    if (SKIP_DIRS.test(p)) return false;
+    const name = p.split("/").pop().toLowerCase();
+    return name.endsWith(".json") && !EXCLUDED.has(name) && jsDirs.has(dirOf(p));
+  });
+}
+
+function categoriesOf(type) {
+  const t = String(type || "").toLowerCase();
+  const found = CATS.filter(c => c.test(t)).map(c => c.key);
+  return found.length ? found : ["other"];
+}
+
+function versionKey(v) {
+  return String(v || "0").split(/[.\-]/).map(x => String(parseInt(x, 10) || 0).padStart(5, "0")).join(".");
+}
+
+async function fetchManifest(path) {
+  const url = RAW + encodePath(path);
+  try {
+    const r = await fetch(url, { cache: "no-cache" });
+    if (!r.ok) return null;
+    const m = JSON.parse((await r.text()).replace(/^﻿/, ""));
+    const script = m.scriptUrl || m.scriptURL;
+    if (!m || typeof m.sourceName !== "string" || typeof script !== "string") return null;
+    const icon = m.iconUrl || m.iconURL || "";
+    let site = "";
+    try { site = new URL(m.baseUrl || m.baseURL || "").hostname.replace(/^www\./, ""); } catch (e) { /* pas de site */ }
+    return {
+      name: m.sourceName, version: String(m.version || "?"), language: String(m.language || "?"),
+      type: String(m.type || ""), cats: categoriesOf(m.type), icon, site,
+      author: (m.author && (m.author.name || m.author)) || "", changelog: String(m.changelog || ""),
+      manifestUrl: url, folder: TREE + encodePath(dirOf(path)), path,
+    };
+  } catch (e) { return null; }
+}
+
+async function load() {
+  renderSkeleton();
+  let tree;
+  try {
+    const r = await fetch(API, { headers: { Accept: "application/vnd.github+json" } });
+    if (r.status === 403 || r.status === 429) throw new Error("rate");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    tree = await r.json();
+  } catch (e) {
+    return showState(e.message === "rate"
+      ? "GitHub limite les visites trop rapprochées (60 par heure et par connexion). Réessayez dans quelques minutes."
+      : "Impossible de lire le dépôt GitHub pour l'instant. Réessayez plus tard.", true);
+  }
+  const files = (tree.tree || []).filter(x => x.type === "blob").map(x => x.path);
+  const paths = candidates(files);
+
+  // 8 manifests à la fois : rapide sans inonder raw.githubusercontent.com.
+  const results = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (next < paths.length) {
+      const m = await fetchManifest(paths[next++]);
+      if (m) results.push(m);
+    }
+  }));
+  state.modules = results;
+  if (!results.length) return showState("Aucun module trouvé dans le dépôt.", false);
+  buildFilters();
+  render();
+}
+
+function chip(label, count, pressed, onClick) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip"; b.setAttribute("aria-pressed", pressed ? "true" : "false");
+  b.textContent = label + " ";
+  const n = document.createElement("span"); n.className = "n"; n.textContent = count; b.append(n);
+  b.addEventListener("click", () => { onClick(); b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); render(); });
+  return b;
+}
+
+function buildFilters() {
+  const cats = $("#cats"), langs = $("#langs");
+  for (const c of CATS) {
+    const n = state.modules.filter(m => m.cats.includes(c.key)).length;
+    if (!n) continue;
+    cats.append(chip(c.label, n, false, () => toggle(state.cats, c.key)));
+  }
+  const byLang = {};
+  for (const m of state.modules) byLang[m.language] = (byLang[m.language] || 0) + 1;
+  for (const [lang, n] of Object.entries(byLang).sort((a, b) => b[1] - a[1])) {
+    langs.append(chip(LANG_FR[lang] || lang, n, false, () => toggle(state.langs, lang)));
+  }
+}
+
+function toggle(set, key) { if (set.has(key)) set.delete(key); else set.add(key); }
+
+function visible() {
+  const q = $("#q").value.trim().toLowerCase();
+  const list = state.modules.filter(m => {
+    if (state.cats.size && !m.cats.some(c => state.cats.has(c))) return false;
+    if (state.langs.size && !state.langs.has(m.language)) return false;
+    if (!q) return true;
+    return [m.name, m.site, m.type, m.language, LANG_FR[m.language], m.author, m.changelog, m.path].join(" ").toLowerCase().includes(q);
+  });
+  const sort = $("#sort").value;
+  const byName = (a, b) => a.name.localeCompare(b.name, "fr", { sensitivity: "base" });
+  list.sort(sort === "lang" ? (a, b) => a.language.localeCompare(b.language) || byName(a, b)
+    : sort === "version" ? (a, b) => versionKey(b.version).localeCompare(versionKey(a.version)) || byName(a, b)
+    : byName);
+  return list;
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function card(m) {
+  const c = el("article", "card");
+  const top = el("div", "top");
+  if (m.icon) {
+    const img = el("img", "icon"); img.src = m.icon; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+    img.addEventListener("error", () => img.replaceWith(placeholder(m.name)), { once: true });
+    top.append(img);
+  } else top.append(placeholder(m.name));
+  const t = el("div"); t.style.minWidth = "0";
+  t.append(el("h2", "name", m.name));
+  t.append(el("div", "meta", ["v" + m.version, LANG_FR[m.language] || m.language, m.site].filter(Boolean).join(" · ")));
+  top.append(t); c.append(top);
+
+  const badges = el("div", "badges");
+  for (const k of m.cats) {
+    const cat = CATS.find(x => x.key === k);
+    badges.append(el("span", "badge cat", cat ? cat.label : "Autre"));
+  }
+  if (m.author) badges.append(el("span", "badge", m.author));
+  c.append(badges);
+
+  if (m.changelog) {
+    const p = el("p", "changelog", m.changelog);
+    c.append(p);
+    if (m.changelog.length > 140) {
+      const more = el("button", "more", "Lire la suite");
+      more.type = "button";
+      more.addEventListener("click", () => { const o = c.classList.toggle("open"); more.textContent = o ? "Réduire" : "Lire la suite"; });
+      c.append(more);
+    }
+  }
+
+  const actions = el("div", "actions");
+  const copy = el("button", "btn primary", "Copier le lien");
+  copy.type = "button";
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(m.manifestUrl); }
+    catch (e) { window.prompt("Lien du module :", m.manifestUrl); return; }
+    copy.textContent = "Copié ✓"; copy.classList.add("done");
+    setTimeout(() => { copy.textContent = "Copier le lien"; copy.classList.remove("done"); }, 1600);
+  });
+  const json = el("a", "btn", "Manifest"); json.href = m.manifestUrl; json.target = "_blank"; json.rel = "noopener";
+  const code = el("a", "btn", "Code"); code.href = m.folder; code.target = "_blank"; code.rel = "noopener";
+  actions.append(copy, json, code);
+  c.append(actions);
+  return c;
+}
+
+function placeholder(name) {
+  const d = el("div", "icon ph", (name || "?").trim().charAt(0).toUpperCase());
+  d.setAttribute("aria-hidden", "true");
+  return d;
+}
+
+function render() {
+  const list = visible();
+  const grid = $("#grid");
+  grid.replaceChildren(...list.map(card));
+  grid.setAttribute("aria-busy", "false");
+  $("#count").textContent = list.length === state.modules.length
+    ? state.modules.length + " modules"
+    : list.length + " sur " + state.modules.length + " modules";
+  const empty = $("#state");
+  empty.hidden = list.length > 0;
+  if (!list.length) empty.textContent = "Aucun module ne correspond à cette recherche.";
+}
+
+function renderSkeleton() {
+  $("#grid").replaceChildren(...Array.from({ length: 9 }, () => el("div", "skeleton")));
+}
+
+function showState(msg, retry) {
+  $("#grid").replaceChildren();
+  $("#count").textContent = "";
+  const s = $("#state"); s.hidden = false; s.textContent = msg;
+  if (retry) {
+    const b = el("button", "btn", "Réessayer"); b.type = "button"; b.style.marginLeft = ".6rem";
+    b.addEventListener("click", () => { s.hidden = true; load(); });
+    s.append(" ", b);
+  }
+}
+
+$("#q").addEventListener("input", render);
+$("#sort").addEventListener("change", render);
+load();
+</script>
+</body>
+</html>
