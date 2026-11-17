@@ -16,7 +16,7 @@ import type { MediaRequest, RawStream, Scraper } from '../types';
 
 const log = logger('VoirAnime');
 
-const BASE = 'https://voir-anime.to';
+const BASE = 'https://voiranime.cx';
 const SEARCH_TTL_MS = 30 * 60 * 1000;
 const PAGE_TTL_MS = 60 * 60 * 1000;
 

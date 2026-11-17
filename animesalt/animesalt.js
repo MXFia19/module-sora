@@ -332,10 +332,11 @@ function parseMultiLang(html) {
     } catch (e) { return []; }
 }
 
-// The iframe names the host and the token: https://as-cdnNN.top/video/<hash>
+// The iframe names the host and the token: https://<cdn>/video/<hash>. The CDN
+// was as-cdnNN.top until late 2026 and is ravok.buzz since: accept any host.
 function parseCdnEmbeds(html) {
     const embeds = [];
-    const re = /https:\/\/([a-z0-9-]+\.top)\/video\/([a-f0-9]{16,64})/g;
+    const re = /https:\/\/((?:[a-z0-9-]+\.)+[a-z]{2,})\/video\/([a-f0-9]{16,64})/g;
     let m;
     while ((m = re.exec(html)) !== null) {
         const entry = { host: m[1], hash: m[2] };

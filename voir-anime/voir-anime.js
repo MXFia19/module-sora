@@ -2,7 +2,7 @@
 // ⚙️ MODULE SORA — VOIRANIME (Tracker Pro + Filemoon + Logs Console)
 // ==========================================
 
-const BASE_URL = "https://voir-anime.to";
+const BASE_URL = "https://voiranime.cx";
 
 // ==========================================
 // 🎛️ CONFIG — Activer / désactiver les extracteurs
@@ -77,7 +77,7 @@ async function searchResults(keyword) {
 
         const headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://voir-anime.to"
+            "Referer": "https://voiranime.cx"
         };
 
         const response = await soraFetch(searchUrl, { headers });
@@ -309,7 +309,7 @@ async function extractStreamUrl(url) {
                 logDebug(`[MOTEUR] Sélection de Filemoon/Filelions`);
                 try {
                     logDebug(`[Filemoon] Exécution de filemoonExtractor...`);
-                    // 🌟 CORRECTION 1 : On passe l'URL parent (voir-anime.to/...) à l'extracteur
+                    // 🌟 CORRECTION 1 : On passe l'URL parent (voiranime.cx/...) à l'extracteur
                     let fmResult = await filemoonExtractor(embedUrl, url, logDebug);
                     
                     if (fmResult && fmResult.url) {

@@ -34,9 +34,9 @@
 const AC_BASE = "https://anichan.to";
 
 // Constants of the site's watch module (chunk 7621).
-const AC_WK = "a8c6e3d0";
-const AC_KEY_P = "ICo+KyF5ANB1XEOjrMNcodrjnVH2OpV1CYKx1HPMlUc=";
-const AC_KEY_I = "DWT7cCRlI2rx2AVa5vICiZsrxK3My5duU3Y2Oys7FqQ=";
+const AC_WK = "96c33adc";
+const AC_KEY_P = "/Vw9xqmYztcVijKHGJNvs4o28YY47mgmwBVPCoOThUE=";
+const AC_KEY_I = "QzLcXpbmclsqDoXz+TGu065qUnasSoT7Voy9YIo5tbs=";
 
 // Session attempts per stream request (a fresh session after each 401).
 const AC_SESSION_TRIES = 10;
@@ -260,6 +260,37 @@ async function extractEpisodes(url) {
 // 🔐 SESSION + DECRYPTION
 // ==========================================
 
+// The site rotates these three constants with each deploy. Read them from the
+// live watch chunk (the one that names "anichan_ws_n"); the values above are
+// only the fallback.
+let acKeys = { wk: AC_WK, p: AC_KEY_P, i: AC_KEY_I, loaded: false };
+
+async function loadSiteKeys(referer) {
+    if (acKeys.loaded) return;
+    acKeys.loaded = true;
+    try {
+        const page = await readBody(await soraFetch(referer, { method: 'GET', headers: { "User-Agent": AC_UA, "Accept": "text/html" } }));
+        const chunks = [];
+        const re = /\/_next\/static\/chunks\/(?:app\/[^"']*?\/)?[\w-]+\.js/g;
+        let m;
+        while ((m = re.exec(page)) !== null) if (chunks.indexOf(m[0]) === -1) chunks.push(m[0]);
+        // The watch module has been chunk 7621 so far: try it first.
+        chunks.sort((a, b) => (/\/7621-/.test(b) ? 1 : 0) - (/\/7621-/.test(a) ? 1 : 0));
+        for (const path of chunks.slice(0, 14)) {
+            const js = await readBody(await soraFetch(`${AC_BASE}${path}`, { method: 'GET', headers: { "User-Agent": AC_UA } }));
+            if (!js || js.indexOf('anichan_ws_n') === -1) continue;
+            const found = js.match(/"anichan_ws_n",\s*\w+\s*=\s*"([0-9a-f]{6,16})",\s*\w+\s*=\s*"([A-Za-z0-9+\/]{43}=)",\s*\w+\s*=\s*"([A-Za-z0-9+\/]{43}=)"/);
+            if (found) {
+                acKeys = { wk: found[1], p: found[2], i: found[3], loaded: true };
+                console.log(`[Player] 🔑 Keys read from ${path.split('/').pop()}`);
+            }
+            return;
+        }
+    } catch (e) {
+        console.log(`[Player] ⚠️ Could not read the site keys, using the built-in ones: ${e.message}`);
+    }
+}
+
 async function openSession(referer) {
     const headers = {
         "User-Agent": AC_UA,
@@ -280,7 +311,7 @@ async function openSession(referer) {
 
 function decryptServers(payload, nonce) {
     try {
-        const p = base64ToBytes(AC_KEY_P), i = base64ToBytes(AC_KEY_I);
+        const p = base64ToBytes(acKeys.p), i = base64ToBytes(acKeys.i);
         const key0 = new Uint8Array(p.length);
         for (let k = 0; k < p.length; k++) key0[k] = p[k] ^ i[k];
         const aesKey = hmacSha256(key0, utf8Encode(nonce));
@@ -293,7 +324,7 @@ function decryptServers(payload, nonce) {
 }
 
 async function fetchServers(session, anilistId, epNumber, category, tier, referer) {
-    const headers = { "User-Agent": AC_UA, "Accept": "application/json", "X-Wk": AC_WK, "Referer": referer };
+    const headers = { "User-Agent": AC_UA, "Accept": "application/json", "X-Wk": acKeys.wk, "Referer": referer };
     if (session.cookie) headers["Cookie"] = `anichan_ws=${session.cookie}`;
     const path = `/api/watch/servers?anilistId=${encodeURIComponent(anilistId)}&ep=${encodeURIComponent(epNumber)}&category=${category}&tier=${tier}`;
     const text = await readBody(await soraFetch(`${AC_BASE}${path}`, { method: 'GET', headers: headers }));
@@ -362,6 +393,7 @@ async function extractStreamUrl(url) {
         const categories = ['sub'];
         if (!availability || availability.dubAvailable !== false) categories.push('dub');
 
+        await loadSiteKeys(referer);
         const state = { session: null };
         for (const category of categories) {
             const servers = await serversFor(state, anilistId, epNumber, category, referer);

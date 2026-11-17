@@ -12,7 +12,10 @@
 //   _3chk('<name>','<value>')  ->  document.cookie = name=value
 // (otherwise it answers 404). Both are read from the page response here.
 //
-// Hosts: almost every link goes to Luluvdo (luluvdo.com / lulust.com), whose
+// Hosts: almost every link goes to Luluvdo. go.php still points at the dead
+// luluvdo.com domain, so its Location is read without following it and only
+// the 12-character file code is kept; the player now lives on lplaygo.com
+// (lulustream.com redirects there). Its
 // /e/<code> player hides the HLS master in a Dean Edwards p.a.c.k.e.r block,
 // unpacked locally. Many Luluvdo files are deleted, so links are tried in
 // order until a few live ones are found. Wootly (IP-bound signed links) and
@@ -242,14 +245,37 @@ async function extractEpisodes(url) {
 // 🎞️ HOST: LULUVDO
 // ==========================================
 
+const LULU_HOST = "https://lplaygo.com";
+
+// Where go.php points, without following it (the target domain is dead).
+async function goTarget(goUrl, headers) {
+    try {
+        if (typeof fetchv2 !== 'undefined') {
+            const h = { "User-Agent": LV_UA, ...headers };
+            const res = await fetchv2(goUrl, h, 'GET', null, false);
+            const hs = res && res.headers;
+            let loc = "";
+            if (hs) {
+                if (typeof hs.get === 'function') loc = hs.get('location') || hs.get('Location') || "";
+                else loc = hs.location || hs.Location || "";
+            }
+            if (loc) return { location: String(loc), html: "" };
+            const body = await readBody(res);
+            return { location: res && typeof res.url === 'string' ? res.url : "", html: body };
+        }
+    } catch (e) { /* falls back to a followed request below */ }
+    const hop = await getPage(goUrl, headers);
+    return { location: hop.response && typeof hop.response.url === 'string' ? hop.response.url : "", html: hop.html };
+}
+
 async function luluvdo(code) {
-    const embedUrl = `https://luluvdo.com/e/${code}`;
+    const embedUrl = `${LULU_HOST}/e/${code}`;
     const { html } = await getPage(embedUrl, { "Referer": `${LV_SITE}/` });
     if (/no longer available|deleted|not found/i.test(html) && html.indexOf('eval(function(p,a,c,k,e,d)') === -1) return { error: "File deleted on Luluvdo" };
     const code2 = html + unpackAll(html);
     const file = code2.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/) || code2.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/);
     if (!file) return { error: "No HLS in the Luluvdo player" };
-    return { streamUrl: file[1].replace(/\\\//g, '/'), headers: { "Referer": "https://luluvdo.com/", "Origin": "https://luluvdo.com", "User-Agent": LV_UA } };
+    return { streamUrl: file[1].replace(/\\\//g, '/'), headers: { "Referer": `${LULU_HOST}/`, "Origin": LULU_HOST, "User-Agent": LV_UA } };
 }
 
 // ==========================================
@@ -293,10 +319,10 @@ async function extractStreamUrl(url) {
             }
             tries++;
             try {
-                // go.php -> 302 -> luluvdo.com/d/<code> (followed by the client).
-                const hop = await getPage(link.go, cookie ? { "Referer": url, "Cookie": cookie } : { "Referer": url });
-                const finalUrl = hop.response && typeof hop.response.url === 'string' ? hop.response.url : "";
-                const code = (finalUrl.match(/lulu[a-z]*\.[a-z]+\/(?:[de]\/)?([a-z0-9]{12})/i) || [])[1]
+                // go.php -> 302 -> luluvdo.com/[d/]<code> (read, not followed).
+                const hop = await goTarget(link.go, cookie ? { "Referer": url, "Cookie": cookie } : { "Referer": url });
+                const finalUrl = hop.location;
+                const code = (finalUrl.match(/^https?:\/\/[^/]+\/(?:[de]\/)?([a-z0-9]{12})(?:[/?#]|$)/i) || [])[1]
                     || (hop.html.match(/lulu[a-z]*\.[a-z]+\/e\/([a-z0-9]{12})/i) || [])[1]
                     || (hop.html.match(/name="file_code" value="([a-z0-9]{12})"/i) || [])[1];
                 if (!code) {
@@ -305,7 +331,7 @@ async function extractStreamUrl(url) {
                 }
                 const res = await luluvdo(code);
                 if (res.error) {
-                    failedLinks.push({ server_name: link.host, url: `https://luluvdo.com/e/${code}`, reason: res.error });
+                    failedLinks.push({ server_name: link.host, url: `${LULU_HOST}/e/${code}`, reason: res.error });
                     continue;
                 }
                 // Several listings often point at the same upload: compare without the token.

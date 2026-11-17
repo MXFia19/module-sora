@@ -6,7 +6,7 @@
 // Its record carries ani_id and mal_id, but the playback endpoint is keyed by
 // the internal id, so everything hangs off that.
 //
-//   1. Search    GET /search?q=<text>
+//   1. Search    GET /library?q=<text>   (/search and /browse now redirect here)
 //                -> <a class="poster-link" href="/anime/<id>/<slug>"> with the
 //                   title in the img alt and the poster behind
 //                   /api/media/image?u=<url-encoded original>
@@ -19,7 +19,7 @@
 //
 // Note on /browse: it takes a ?q= parameter that the server ignores — every
 // query, including a nonsense one, returns the same 47-record default payload.
-// Only /search?q= actually searches. Verified by counter-example rather than
+// Only /library?q= (formerly /search?q=) actually searches. Verified by counter-example rather than
 // assumed.
 //
 // The site has accounts and a membership (/api/auth/me, /api/membership/me),
@@ -30,7 +30,7 @@
 // Stream urls come both absolute (anikura-stream-edge.anikura.workers.dev) and
 // site-relative (/api/stream/proxy?url=…); the relative ones are prefixed.
 
-const AK_BASE = "https://www.anikura.club";
+const AK_BASE = "https://anikura.club";
 
 const AK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -140,7 +140,7 @@ function unwrapPoster(src) {
 async function searchResults(keyword) {
     console.log(`[Search] 🔍 Anikura — searching for "${keyword}"`);
     try {
-        const html = await akGet(`/search?q=${encodeURIComponent(keyword)}`);
+        const html = await akGet(`/library?q=${encodeURIComponent(keyword)}`);
 
         const results = [];
         const seen = new Set();
@@ -161,7 +161,7 @@ async function searchResults(keyword) {
             const title = altMatch ? decodeEntities(altMatch[1]) : `Anikura ${id}`;
 
             const srcMatch = chunk.match(/\bsrc="([^"]*)"/);
-            const image = unwrapPoster(srcMatch ? srcMatch[1] : "");
+            const image = unwrapPoster(srcMatch ? decodeEntities(srcMatch[1]) : "");
 
             results.push({ title: title, image: image, href: `anikura://${path}` });
         }

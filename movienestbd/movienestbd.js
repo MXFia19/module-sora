@@ -322,8 +322,31 @@ function isArchive(name) {
     return !n || n === 'none' || n === 'download_links' || n.indexOf('zip') !== -1 || n.indexOf('rar') !== -1 || n.indexOf('season') !== -1;
 }
 
+function base64Text(text) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const s = String(text).replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+    let out = "", buffer = 0, bits = 0;
+    for (let i = 0; i < s.length; i++) {
+        const v = alphabet.indexOf(s.charAt(i));
+        if (v < 0) continue;
+        buffer = (buffer << 6) | v;
+        bits += 6;
+        if (bits >= 8) { bits -= 8; out += String.fromCharCode((buffer >> bits) & 0xff); }
+    }
+    return out;
+}
+
+// Two link shapes: the old jiofiles "/<24 hex>" and, since November 2026,
+// "/file/<base64url of "<24 hex>|<slug>|<expiry>|<signature>">". The 24-hex id
+// is the stable part (the token expires), so it is what hrefs carry.
 function fileId(link) {
-    const m = String(link || "").match(/\/([a-f0-9]{24})(?:$|[/?#])/i);
+    const s = String(link || "");
+    const token = s.match(/\/file\/([A-Za-z0-9_-]{20,})/);
+    if (token) {
+        const id = base64Text(token[1]).split('|')[0];
+        return /^[a-f0-9]{24}$/i.test(id) ? id : "";
+    }
+    const m = s.match(/\/([a-f0-9]{24})(?:$|[/?#])/i);
     return m ? m[1] : "";
 }
 
@@ -375,6 +398,26 @@ async function extractEpisodes(url) {
 // 🎬 PLAYBACK
 // ==========================================
 
+// "/file/<token>" pages (November 2026). The page carries FILE_ID and a
+// DL_TOKEN; of its buttons, "Play / Stream Online" and "Direct Download" go to
+// xcloud (behind a Cloudflare challenge, not used), while "High Speed
+// Download (Drive Mirror)" answers {status, downloadLink} with a plain Google
+// download URL. That link is the file itself (usually MKV): it opens in an
+// external player (VLC, Infuse) rather than in iOS's native one.
+async function resolveFilePage(path) {
+    const pageUrl = /^https?:/.test(path) ? path : `${MN_SITE}${path}`;
+    const html = await getPage(pageUrl, `${MN_SITE}/`);
+    const id = (html.match(/FILE_ID\s*=\s*"([a-f0-9]{24})"/i) || [])[1];
+    const token = (html.match(/DL_TOKEN\s*=\s*"([^"]+)"/) || [])[1];
+    if (!id || !token) return { error: "No download token on the file page" };
+    const api = `${MN_SITE}/file/${encodeURIComponent(id)}/highspeed?token=${encodeURIComponent(token)}&_t=${Date.now()}`;
+    const text = await readBody(await soraFetch(api, { method: 'GET', headers: { "User-Agent": MN_UA, "Referer": pageUrl, "Accept": "application/json" } }));
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { data = null; }
+    if (!data || !data.status || !data.downloadLink) return { error: (data && data.message) || "Drive mirror busy" };
+    return { streamUrl: data.downloadLink, headers: { "User-Agent": MN_UA }, subtitles: [], mkv: /\.mkv\b/i.test(html) };
+}
+
 // jiofiles id -> { streamUrl, headers, subtitles[] } through Seekplayer.
 async function resolveFile(id) {
     const embed = await getPage(`${MN_EMBED}/${id}`, `${MN_SITE}/`);
@@ -422,15 +465,15 @@ async function extractStreamUrl(url) {
 
         if (hash.indexOf('ep=') === 0) {
             const id = hash.slice(3);
-            const info = data.links.find(l => fileId(l.link) === id);
-            targets.push({ id: id, label: info ? [info.quality, info.language].filter(Boolean).join(' · ') : "Episode" });
+            const info = data.links.find(l => fileId(l.link) === id) || data.episodes.find(l => fileId(l.link) === id);
+            targets.push({ id: id, path: info && /\/file\//.test(info.link) ? info.link : "", label: info ? [info.quality, info.language].filter(Boolean).join(' · ') || "Episode" : "Episode" });
         } else {
             // Movie pages list one file per quality; archives are skipped.
             const playable = data.links.filter(l => !/zip|rar/i.test(l.name));
             for (const file of playable) {
                 const id = fileId(file.link);
                 if (!id || targets.some(t => t.id === id)) continue;
-                targets.push({ id: id, label: [file.quality, file.language, !isArchive(file.name) ? file.name : ""].filter(Boolean).join(' · ') || "File" });
+                targets.push({ id: id, path: /\/file\//.test(file.link) ? file.link : "", label: [file.quality, file.language, !isArchive(file.name) ? file.name : ""].filter(Boolean).join(' · ') || "File" });
             }
             const def = fileId(data.defaultEmbed);
             if (def && !targets.some(t => t.id === def)) targets.unshift({ id: def, label: "Default" });
@@ -438,13 +481,14 @@ async function extractStreamUrl(url) {
 
         for (const target of targets.slice(0, MN_MAX_FILES)) {
             try {
-                const res = await resolveFile(target.id);
+                const res = target.path ? await resolveFilePage(target.path) : await resolveFile(target.id);
+                const server = target.path ? "Drive" : "Seekplayer";
                 if (res.error) {
-                    failedLinks.push({ server_name: `Seekplayer ${target.label}`, url: `${MN_EMBED}/${target.id}`, reason: res.error });
+                    failedLinks.push({ server_name: `${server} ${target.label}`, url: target.path ? `${MN_SITE}${target.path}` : `${MN_EMBED}/${target.id}`, reason: res.error });
                     continue;
                 }
                 if (streams.some(s => s.streamUrl === res.streamUrl)) continue;
-                streams.push({ title: `Seekplayer ${target.label}`, streamUrl: res.streamUrl, headers: res.headers });
+                streams.push({ title: `${server} ${target.label}${res.mkv ? " (MKV)" : ""}`, streamUrl: res.streamUrl, headers: res.headers });
                 for (const sub of res.subtitles) if (!allSubtitles.some(s => s.url === sub.url)) allSubtitles.push(sub);
                 console.log(`   -> ${target.label}: ${res.streamUrl.slice(0, 80)}…`);
             } catch (e) {

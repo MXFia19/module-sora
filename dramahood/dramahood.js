@@ -1,42 +1,35 @@
 // ==========================================
-// ⚙️ SORA MODULE — DRAMAHOOD (dramavideo.se backend)
+// ⚙️ SORA MODULE — DRAMAHOOD
 // ==========================================
-// dramahood.mom is a WordPress drama catalog whose episodes play from
-// dramavideo.se, the same backend (same video ids) behind dramanice.boo and
-// kisskh.dk: one module covers that backend, through Dramahood's catalog,
-// which also adds a second, independent server (vidbasic.top).
+// dramahood.mom moved to a new WordPress theme ("alidramacool") in November
+// 2026 and dropped its own dramavideo.se / vidbasic backends: every episode
+// now embeds third-party TMDB players (VidNest, vidsrc, VidLink).
 //
-// Catalog (HTML, theme "asianmozi"):
-//   Search  : /?s=<q>                     -> <ul class="items"> cover + title
-//   Drama   : /<slug>                     -> poster, plot, fields, "List Episode"
-//   Episode : /<slug>-episode-<n>/        -> servers in data-video="…" and an iframe
+// Catalogue (WordPress REST, custom post type "series"):
+//   Search   GET /wp-json/wp/v2/series?search=<q>&_embed=wp:featuredmedia
+//            (the HTML search /?s= renders an empty list server-side)
+//   Details  GET /wp-json/wp/v2/series?slug=<slug>&_embed=wp:term
+//   Episodes the series page links /<slug>-episode-<n>[-k]/
+//   Stream   the episode page lists data-video="https://vidnest.fun/tv/<tmdb>/<s>/<e>"
 //
-// Server 1 — dramavideo.se/watch?v=<id>
-//   The watch page lists providers: <li data-provider="v2|v8|…" data-video="<code>">.
-//   Its player.js builds https://player.dramavideo.se/?id=<code>&sv=<provider>
-//   (that host is base64 in player.js and is re-read from there if it moves).
-//   The player page ships its real HTML encrypted, with the key beside it:
-//     encData="<base64>", keyHex="<64 hex>", ivHex="<32 hex>"  -> AES-256-CBC
-//   and the decrypted HTML holds `const sources = JSON.parse(`[{file,type,label}]`)`.
-//   Files go through hls.dramavideo.se/media/<hex>: the hex is the origin URL
-//   XORed with 0x89. Origins on vibuxer.com hand out TS segments wrapped in a
-//   PNG header (TikTok CDN images); they are listed last.
-//   Playlists answer 403 without Referer/Origin https://player.dramavideo.se.
-//
-// Server 2 — vidbasic.top/embed/<id>
-//   The embed links /3rdplayer.html?key=<k>&id=…&sub=<s>; that player decrypts
-//   both with AES-256-CBC, UTF-8 key "94588293375053432799222445521289" and IV
-//   "5259228356829423" (constants in its obfuscated script): key -> the m3u8
-//   on stream.vidbasic.top, sub -> a subtitle URL.
-//
-// AES is implemented below in pure JS (FIPS-197; checked against Node's crypto).
+// Playback reuses this repository's VidNest module: VidNest's backend
+// (new.vidnest.fun) is asked for each relay with a random "_n" nonce and
+// answers {v:2, n, d}: AES-256-GCM, key = SHA-256("<n>|<constant>"),
+// decrypted in pure JS. See vidnest/vidnest.js for the relay list.
 
 const DH_BASE = "https://dramahood.mom";
-const DV_BASE = "https://dramavideo.se";
-const DV_PLAYER_DEFAULT = "https://player.dramavideo.se";
-const VB_KEY = "94588293375053432799222445521289";
-const VB_IV = "5259228356829423";
-const DH_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+const VN_SITE = "https://vidnest.fun";
+const VN_API = "https://new.vidnest.fun";
+const VN_SUBS = "https://sub.vdrk.site/v2";
+
+const VN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+// Constant the VidNest player mixes into the v2 answer key (see vnDecryptV2).
+const VN_NONCE_SALT = "K3p8vQ2mX9rL5wZ0fN7bG1sH4tJ6dC9_y8S3wM1nQ5pL2";
+// Shuffled base64 alphabet of VidNest's older v1 answers.
+const VN_ALPHABET = "RB0fpH8ZEyVLkv7c2i6MAJ5u3IKFDxlS1NTsnGaqmXYdUrtzjwObCgQP94hoeW+/=";
+
 
 // ==========================================
 // 🗄️ SUPABASE TRACKER
@@ -66,8 +59,10 @@ async function sendSupabaseLog(moduleName, actionType, dataPayload) {
 // ==========================================
 
 async function soraFetch(url, options = { headers: {}, method: 'GET', body: null }) {
+    // The hosts expect every request to carry a User-Agent; fill one in when
+    // the caller did not set one (TMDB calls, notably).
     const headers = options.headers || {};
-    if (!headers["User-Agent"]) headers["User-Agent"] = DH_UA;
+    if (!headers["User-Agent"]) headers["User-Agent"] = VN_UA;
     try {
         if (typeof fetchv2 !== 'undefined') {
             return await fetchv2(url, headers, options.method ?? 'GET', options.body ?? null);
@@ -86,338 +81,307 @@ async function readBody(response) {
     return "";
 }
 
-async function getPage(url, referer) {
-    const response = await soraFetch(url, {
-        method: 'GET',
-        headers: { "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Referer": referer || `${DH_BASE}/` }
-    });
-    return await readBody(response);
+// ==========================================
+// 🔓 DECODING THE BACKEND ANSWERS
+// ==========================================
+
+// Bytes -> string, UTF-8 (TextDecoder is not available in Sora).
+function utf8Decode(bytes) {
+    let out = "";
+    for (let i = 0; i < bytes.length;) {
+        const b = bytes[i++];
+        if (b < 0x80) { out += String.fromCharCode(b); continue; }
+        let cp;
+        if (b >= 0xf0) { cp = ((b & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f); }
+        else if (b >= 0xe0) { cp = ((b & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f); }
+        else { cp = ((b & 0x1f) << 6) | (bytes[i++] & 0x3f); }
+        if (cp > 0xffff) { cp -= 0x10000; out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff)); }
+        else out += String.fromCharCode(cp);
+    }
+    return out;
 }
 
-// ==========================================
-// 🔐 PURE-JS AES-CBC (128/192/256) + BYTE HELPERS
-// ==========================================
+// Base64 over VidNest's shuffled alphabet, as the player decodes it: a symbol
+// outside the alphabet (or the padding) counts as 64.
+function vnDecodeData(text) {
+    const index = {};
+    for (let i = 0; i < VN_ALPHABET.length; i++) index[VN_ALPHABET.charAt(i)] = i;
+    const bytes = [];
+    for (let t = 0; t < text.length; t += 4) {
+        let chunk = text.slice(t, t + 4);
+        while (chunk.length < 4) chunk += "=";
+        const v = [];
+        for (let k = 0; k < 4; k++) {
+            const n = index[chunk.charAt(k)];
+            v.push(n === undefined ? 64 : n);
+        }
+        bytes.push(((v[0] << 2) | (v[1] >> 4)) & 0xff);
+        if (v[2] !== 64) bytes.push((((v[1] & 15) << 4) | (v[2] >> 2)) & 0xff);
+        if (v[3] !== 64) bytes.push((((v[2] & 3) << 6) | v[3]) & 0xff);
+    }
+    return utf8Decode(bytes);
+}
 
-const AES_SBOX = [], AES_INV_SBOX = [];
-function initAesTables() {
-    const rotl8 = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;
+// --- v2 answers: AES-256-GCM, key = SHA-256("<n>|<VN_NONCE_SALT>") ---------
+// Sora has no WebCrypto, so SHA-256 and the AES block cipher are written out
+// here. GCM decryption is AES-CTR from counter 2; the 16-byte tag at the end is
+// dropped, not checked (a corrupted answer simply fails to parse as JSON).
+
+function vnRandomNonce() {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let out = "";
+    for (let i = 0; i < 22; i++) out += alphabet.charAt(Math.floor(Math.random() * 64));
+    return out;
+}
+
+function vnB64urlBytes(text) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const s = String(text).replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+    const bytes = [];
+    let buffer = 0, bits = 0;
+    for (let i = 0; i < s.length; i++) {
+        const v = alphabet.indexOf(s.charAt(i));
+        if (v < 0) continue;
+        buffer = (buffer << 6) | v;
+        bits += 6;
+        if (bits >= 8) { bits -= 8; bytes.push((buffer >> bits) & 0xff); }
+    }
+    return bytes;
+}
+
+function vnUtf8Bytes(str) {
+    const out = [];
+    for (let i = 0; i < str.length; i++) {
+        let c = str.charCodeAt(i);
+        if (c >= 0xd800 && c < 0xdc00 && i + 1 < str.length) {
+            c = 0x10000 + ((c - 0xd800) << 10) + (str.charCodeAt(++i) - 0xdc00);
+        }
+        if (c < 0x80) out.push(c);
+        else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+        else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+        else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return out;
+}
+
+function vnSha256(bytes) {
+    const K = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ];
+    const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    const msg = bytes.slice();
+    const bitLen = bytes.length * 8;
+    msg.push(0x80);
+    while (msg.length % 64 !== 56) msg.push(0);
+    for (let i = 7; i >= 0; i--) msg.push(i >= 4 ? 0 : (bitLen >>> (i * 8)) & 0xff);
+    const W = new Array(64);
+    const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+    for (let off = 0; off < msg.length; off += 64) {
+        for (let i = 0; i < 16; i++) {
+            W[i] = (msg[off + 4 * i] << 24) | (msg[off + 4 * i + 1] << 16) | (msg[off + 4 * i + 2] << 8) | msg[off + 4 * i + 3];
+        }
+        for (let i = 16; i < 64; i++) {
+            const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
+            const s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
+            W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+        }
+        let [a, b, c, d, e, f, g, h] = H;
+        for (let i = 0; i < 64; i++) {
+            const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const ch = (e & f) ^ (~e & g);
+            const t1 = (h + S1 + ch + K[i] + W[i]) | 0;
+            const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const maj = (a & b) ^ (a & c) ^ (b & c);
+            const t2 = (S0 + maj) | 0;
+            h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+        }
+        H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+        H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    const out = [];
+    for (const v of H) out.push((v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff);
+    return out;
+}
+
+// AES forward cipher only (CTR mode never needs the inverse).
+const VN_AES_SBOX = (function () {
+    const sbox = new Array(256);
     let p = 1, q = 1;
     do {
-        // p *= 3 and q /= 3 in GF(2^8): q walks the multiplicative inverses of p.
-        p = (p ^ (p << 1) ^ (p & 0x80 ? 0x1b : 0)) & 0xff;
+        p = p ^ ((p << 1) & 0xff) ^ (p & 0x80 ? 0x1b : 0);
         q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff;
         if (q & 0x80) q ^= 0x09;
-        const s = (q ^ rotl8(q, 1) ^ rotl8(q, 2) ^ rotl8(q, 3) ^ rotl8(q, 4) ^ 0x63) & 0xff;
-        AES_SBOX[p] = s;
-        AES_INV_SBOX[s] = p;
+        const x = q ^ ((q << 1) | (q >> 7)) ^ ((q << 2) | (q >> 6)) ^ ((q << 3) | (q >> 5)) ^ ((q << 4) | (q >> 4));
+        sbox[p] = (x ^ 0x63) & 0xff;
     } while (p !== 1);
-    AES_SBOX[0] = 0x63;
-    AES_INV_SBOX[0x63] = 0;
-}
-initAesTables();
+    sbox[0] = 0x63;
+    return sbox;
+})();
 
-function aesMul(a, b) {
-    let r = 0;
-    while (b) {
-        if (b & 1) r ^= a;
-        a = (a << 1) ^ (a & 0x80 ? 0x11b : 0);
-        b >>= 1;
-    }
-    return r & 0xff;
-}
-
-function aesExpandKey(key) {
-    const nk = key.length / 4, nr = nk + 6, total = 4 * (nr + 1);
+function vnAesExpandKey(key) {
+    const Nk = key.length / 4, Nr = Nk + 6;
     const w = [];
-    for (let i = 0; i < nk; i++) w.push([key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]]);
+    for (let i = 0; i < Nk; i++) w.push([key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]]);
     let rcon = 1;
-    for (let i = nk; i < total; i++) {
+    for (let i = Nk; i < 4 * (Nr + 1); i++) {
         let t = w[i - 1].slice();
-        if (i % nk === 0) {
-            t = [AES_SBOX[t[1]] ^ rcon, AES_SBOX[t[2]], AES_SBOX[t[3]], AES_SBOX[t[0]]];
-            rcon = aesMul(rcon, 2);
-        } else if (nk > 6 && i % nk === 4) {
-            t = t.map(b => AES_SBOX[b]);
+        if (i % Nk === 0) {
+            t = [VN_AES_SBOX[t[1]] ^ rcon, VN_AES_SBOX[t[2]], VN_AES_SBOX[t[3]], VN_AES_SBOX[t[0]]];
+            rcon = ((rcon << 1) ^ (rcon & 0x80 ? 0x1b : 0)) & 0xff;
+        } else if (Nk > 6 && i % Nk === 4) {
+            t = t.map(b => VN_AES_SBOX[b]);
         }
-        w.push(w[i - nk].map((b, j) => b ^ t[j]));
+        w.push([w[i - Nk][0] ^ t[0], w[i - Nk][1] ^ t[1], w[i - Nk][2] ^ t[2], w[i - Nk][3] ^ t[3]]);
     }
-    return { w: w, nr: nr };
+    return { w: w, rounds: Nr };
 }
 
-function aesDecryptBlock(block, ks) {
-    const s = new Array(16);
-    for (let i = 0; i < 16; i++) s[i] = block[i];
-    const addRound = (round) => {
-        for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) s[c * 4 + r] ^= ks.w[round * 4 + c][r];
-    };
-    const invShiftSub = () => {
+function vnAesEncryptBlock(ks, input) {
+    const xt = b => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;
+    let s = input.slice();
+    const addRoundKey = r => { for (let c = 0; c < 4; c++) for (let k = 0; k < 4; k++) s[4 * c + k] ^= ks.w[4 * r + c][k]; };
+    addRoundKey(0);
+    for (let r = 1; r <= ks.rounds; r++) {
+        for (let i = 0; i < 16; i++) s[i] = VN_AES_SBOX[s[i]];
         const t = s.slice();
-        for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) s[c * 4 + r] = AES_INV_SBOX[t[((c - r + 4) % 4) * 4 + r]];
-    };
-    const invMix = () => {
-        for (let c = 0; c < 4; c++) {
-            const a0 = s[c * 4], a1 = s[c * 4 + 1], a2 = s[c * 4 + 2], a3 = s[c * 4 + 3];
-            s[c * 4] = aesMul(a0, 14) ^ aesMul(a1, 11) ^ aesMul(a2, 13) ^ aesMul(a3, 9);
-            s[c * 4 + 1] = aesMul(a0, 9) ^ aesMul(a1, 14) ^ aesMul(a2, 11) ^ aesMul(a3, 13);
-            s[c * 4 + 2] = aesMul(a0, 13) ^ aesMul(a1, 9) ^ aesMul(a2, 14) ^ aesMul(a3, 11);
-            s[c * 4 + 3] = aesMul(a0, 11) ^ aesMul(a1, 13) ^ aesMul(a2, 9) ^ aesMul(a3, 14);
+        for (let c = 0; c < 4; c++) for (let k = 0; k < 4; k++) s[4 * c + k] = t[4 * ((c + k) % 4) + k];
+        if (r !== ks.rounds) {
+            for (let c = 0; c < 4; c++) {
+                const a0 = s[4 * c], a1 = s[4 * c + 1], a2 = s[4 * c + 2], a3 = s[4 * c + 3];
+                const all = a0 ^ a1 ^ a2 ^ a3;
+                s[4 * c] = a0 ^ all ^ xt(a0 ^ a1);
+                s[4 * c + 1] = a1 ^ all ^ xt(a1 ^ a2);
+                s[4 * c + 2] = a2 ^ all ^ xt(a2 ^ a3);
+                s[4 * c + 3] = a3 ^ all ^ xt(a3 ^ a0);
+            }
         }
-    };
-    addRound(ks.nr);
-    for (let round = ks.nr - 1; round >= 1; round--) {
-        invShiftSub();
-        addRound(round);
-        invMix();
+        addRoundKey(r);
     }
-    invShiftSub();
-    addRound(0);
     return s;
 }
 
-function aesCbcDecrypt(cipher, key, iv) {
-    const ks = aesExpandKey(key);
-    const out = [];
-    let prev = iv;
-    for (let off = 0; off + 16 <= cipher.length; off += 16) {
-        const block = cipher.slice(off, off + 16);
-        const plain = aesDecryptBlock(block, ks);
-        for (let i = 0; i < 16; i++) out.push(plain[i] ^ prev[i]);
-        prev = block;
-    }
-    const pad = out.length ? out[out.length - 1] : 0;
-    return pad > 0 && pad <= 16 ? out.slice(0, out.length - pad) : out;
-}
-
-const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-function base64ToBytes(input) {
-    const clean = String(input || "").replace(/-/g, "+").replace(/_/g, "/").replace(/[^A-Za-z0-9+/]/g, "");
-    const out = [];
-    let buffer = 0, bits = 0;
-    for (let i = 0; i < clean.length; i++) {
-        buffer = ((buffer << 6) | B64_CHARS.indexOf(clean.charAt(i))) & 0xffffff;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            out.push((buffer >> bits) & 0xff);
-        }
+function vnAesGcmDecrypt(keyBytes, data) {
+    const iv = data.slice(0, 12);
+    const cipher = data.slice(12, data.length - 16);
+    const ks = vnAesExpandKey(keyBytes);
+    const out = new Array(cipher.length);
+    let counter = 2;
+    for (let off = 0; off < cipher.length; off += 16) {
+        const block = iv.concat([(counter >>> 24) & 0xff, (counter >>> 16) & 0xff, (counter >>> 8) & 0xff, counter & 0xff]);
+        const stream = vnAesEncryptBlock(ks, block);
+        for (let i = 0; i < 16 && off + i < cipher.length; i++) out[off + i] = cipher[off + i] ^ stream[i];
+        counter++;
     }
     return out;
 }
 
-function hexToBytes(hex) {
-    const out = [];
-    for (let i = 0; i + 1 < hex.length; i += 2) out.push(parseInt(hex.substr(i, 2), 16));
-    return out;
+function vnDecryptV2(d, n) {
+    const key = vnSha256(vnUtf8Bytes(`${n}|${VN_NONCE_SALT}`));
+    return utf8Decode(vnAesGcmDecrypt(key, vnB64urlBytes(d)));
 }
 
-function textToBytes(text) {
-    const out = [];
-    for (let i = 0; i < text.length; i++) out.push(text.charCodeAt(i) & 0xff);
-    return out;
-}
-
-function utf8Decode(bytes) {
-    let out = "";
-    for (let i = 0; i < bytes.length; i++) {
-        const c = bytes[i];
-        if (c < 0x80) { out += String.fromCharCode(c); continue; }
-        if (c >= 0xc0 && c < 0xe0 && i + 1 < bytes.length) {
-            out += String.fromCharCode(((c & 0x1f) << 6) | (bytes[++i] & 0x3f));
-        } else if (c >= 0xe0 && c < 0xf0 && i + 2 < bytes.length) {
-            out += String.fromCharCode(((c & 0x0f) << 12) | ((bytes[++i] & 0x3f) << 6) | (bytes[++i] & 0x3f));
-        } else if (c >= 0xf0 && i + 3 < bytes.length) {
-            const cp = ((c & 0x07) << 18) | ((bytes[++i] & 0x3f) << 12) | ((bytes[++i] & 0x3f) << 6) | (bytes[++i] & 0x3f);
-            const v = cp - 0x10000;
-            out += String.fromCharCode(0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff));
-        } else {
-            out += String.fromCharCode(c);
-        }
-    }
-    return out;
-}
-
-function latin1Decode(bytes) {
-    let out = "";
-    for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
-    return out;
-}
-
-// ==========================================
-// 🧰 HELPERS
-// ==========================================
-
-function decodeEntities(text) {
-    return String(text || "")
-        .replace(/&#(\d+);/g, (m, n) => String.fromCharCode(parseInt(n, 10)))
-        .replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCharCode(parseInt(n, 16)))
-        .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-        .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
-}
-
-function textOf(html) {
-    return decodeEntities(String(html || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-}
-
-function queryParam(url, name) {
-    const m = String(url).match(new RegExp(`[?&]${name}=([^&#]*)`));
-    if (!m) return "";
-    try { return decodeURIComponent(m[1].replace(/\+/g, "%2B")); } catch (e) { return m[1]; }
-}
-
-function field(html, label) {
-    const m = String(html || "").match(new RegExp(`<strong>${label}:<\\/strong>\\s*<span>([\\s\\S]*?)<\\/span>`, "i"));
-    return m ? textOf(m[1]) : "";
-}
-
-// ==========================================
-// 🔌 SERVER 1 — DRAMAVIDEO.SE
-// ==========================================
-
-let dvPlayerHost = "";
-
-// The player host is base64 in dramavideo.se/player.js ("parts" array).
-async function dramavideoPlayerHost() {
-    if (dvPlayerHost) return dvPlayerHost;
+// One relay call: returns the decoded JSON object, or null.
+async function vnRelay(relayPath) {
+    const headers = {
+        "User-Agent": VN_UA,
+        "Accept": "application/json, text/plain, */*",
+        "Referer": `${VN_SITE}/`,
+        "Origin": VN_SITE
+    };
+    const body = await readBody(await soraFetch(`${VN_API}/${relayPath}${relayPath.indexOf("?") === -1 ? "?" : "&"}_n=${vnRandomNonce()}`, { method: 'GET', headers: headers }));
+    if (!body || body.charAt(0) !== '{') return null;
     try {
-        const js = await getPage(`${DV_BASE}/player.js`, `${DV_BASE}/`);
-        const active = js.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-        const m = active.match(/const\s+parts\s*=\s*\[([^\]]+)\]/);
-        if (m) {
-            const joined = (m[1].match(/"([^"]*)"/g) || []).map(s => s.slice(1, -1)).join("");
-            const host = latin1Decode(base64ToBytes(joined)).trim().replace(/\/+$/, "");
-            if (/^https?:\/\/[a-z0-9.-]+$/i.test(host)) dvPlayerHost = host;
+        const json = JSON.parse(body);
+        if (!json || typeof json !== 'object') return null;
+        if (json.v === 2 && typeof json.d === "string") return JSON.parse(vnDecryptV2(json.d, json.n));
+        if (!json.encrypted) return json;
+        if (typeof json.data !== 'string') return null;
+        return JSON.parse(vnDecodeData(json.data));
+    } catch (e) { return null; }
+}
+
+// Header maps from the backend carry hop-by-hop noise and stray spaces. When
+// a relay sends none, present ourselves as the VidNest player.
+function cleanHeaders(raw) {
+    const out = {};
+    if (raw && typeof raw === 'object') {
+        for (const key of Object.keys(raw)) {
+            const name = String(key).trim();
+            if (!name || /^(connection|accept|host|content-length)$/i.test(name)) continue;
+            out[name] = String(raw[key]).trim();
         }
-    } catch (e) { /* keep the default */ }
-    return dvPlayerHost || DV_PLAYER_DEFAULT;
-}
-
-// hls.dramavideo.se/media/<hex>: the origin URL XOR 0x89.
-function dramavideoOrigin(fileUrl) {
-    const hex = (String(fileUrl).match(/\/media\/([0-9a-f]+)/i) || [])[1];
-    if (!hex) return "";
-    return latin1Decode(hexToBytes(hex).map(b => b ^ 0x89));
-}
-
-function decryptPlayerHtml(html) {
-    const enc = (html.match(/encData\s*=\s*"([^"]+)"/) || [])[1];
-    const key = (html.match(/keyHex\s*=\s*"([0-9a-f]+)"/i) || [])[1];
-    const iv = (html.match(/ivHex\s*=\s*"([0-9a-f]+)"/i) || [])[1];
-    if (!enc || !key || !iv) return "";
-    return utf8Decode(aesCbcDecrypt(base64ToBytes(enc), hexToBytes(key), hexToBytes(iv)));
-}
-
-function jsonArrayAfter(html, name) {
-    const m = String(html || "").match(new RegExp(`const\\s+${name}\\s*=\\s*JSON\\.parse\\(\`([\\s\\S]*?)\`\\)`));
-    if (!m) return [];
-    try { const list = JSON.parse(m[1]); return Array.isArray(list) ? list : []; } catch (e) { return []; }
-}
-
-async function dramavideoStreams(watchUrl, streams, subtitles, failedLinks) {
-    const watchHtml = await getPage(watchUrl, `${DH_BASE}/`);
-    const providers = [];
-    const re = /<li[^>]*data-provider="([^"]+)"[^>]*data-video="([^"]+)"[^>]*>([^<]*)/g;
-    let m;
-    while ((m = re.exec(watchHtml)) !== null) providers.push({ sv: m[1], code: m[2], name: m[3].trim() || m[1] });
-    if (providers.length === 0) {
-        failedLinks.push({ server_name: "DramaVideo", url: watchUrl, reason: "No provider on the watch page" });
-        return;
     }
-
-    const host = await dramavideoPlayerHost();
-    const headers = { "User-Agent": DH_UA, "Referer": `${host}/`, "Origin": host };
-
-    const pages = await Promise.all(providers.map(p =>
-        getPage(`${host}/?id=${encodeURIComponent(p.code)}&sv=${encodeURIComponent(p.sv)}`, watchUrl).catch(() => "")));
-
-    const wrapped = [];
-    providers.forEach((provider, i) => {
-        const html = decryptPlayerHtml(pages[i] || "");
-        const sources = jsonArrayAfter(html, "sources");
-        if (sources.length === 0) {
-            failedLinks.push({ server_name: `DramaVideo ${provider.name}`, url: watchUrl, reason: html ? "Provider returned no source" : "Player page unreadable" });
-            return;
-        }
-        for (const source of sources) {
-            const file = source && source.file;
-            if (!file || streams.some(s => s.streamUrl === file) || wrapped.some(s => s.streamUrl === file)) continue;
-            const origin = dramavideoOrigin(file);
-            const kind = String(source.type || (/\.mp4/i.test(file) ? "mp4" : "hls")).toUpperCase();
-            const entry = { title: `DramaVideo ${provider.name} · ${kind} · Sub`, streamUrl: file, headers: headers };
-            if (/vibuxer\./i.test(origin)) {
-                entry.title = `DramaVideo ${provider.name} · ${kind} (image-wrapped segments) · Sub`;
-                wrapped.push(entry);
-            } else {
-                streams.push(entry);
-            }
-        }
-        for (const track of jsonArrayAfter(html, "tracks")) {
-            if (!track || !track.file || subtitles.some(s => s.url === track.file)) continue;
-            subtitles.push({ url: track.file, label: track.label || "Subtitle", kind: "captions", headers: headers });
-        }
-    });
-    // Image-wrapped TS last: not every native player strips the PNG header.
-    for (const entry of wrapped) streams.push(entry);
+    if (!out["Referer"] && !out["referer"]) {
+        out["Referer"] = `${VN_SITE}/`;
+        out["Origin"] = VN_SITE;
+    }
+    if (!out["User-Agent"]) out["User-Agent"] = VN_UA;
+    return out;
 }
 
-// ==========================================
-// 🔌 SERVER 2 — VIDBASIC.TOP
-// ==========================================
-
-function vidbasicDecrypt(value) {
-    if (!value) return "";
+// Some relays hand back a link whose CDN may be gone (Cloudflare-blocked
+// zone, embed page instead of a playlist): ask for it before offering it.
+async function isPlaylist(url, headers) {
     try {
-        return utf8Decode(aesCbcDecrypt(base64ToBytes(value), textToBytes(VB_KEY), textToBytes(VB_IV))).trim();
-    } catch (e) { return ""; }
+        const response = await soraFetch(url, { method: 'GET', headers: { ...headers } });
+        if (!response) return false;
+        if (typeof response.status === 'number' && response.status >= 400) return false;
+        const body = await readBody(response);
+        return !!body && body.trimStart().indexOf('#EXTM3U') === 0;
+    } catch (e) { return false; }
 }
 
-async function vidbasicStreams(embedUrl, streams, subtitles, failedLinks) {
-    const html = await getPage(embedUrl, `${DH_BASE}/`);
-    const player = decodeEntities((html.match(/["'](\/3rdplayer\.html\?[^"']+)["']/) || [])[1] || "");
-    if (!player) {
-        failedLinks.push({ server_name: "VidBasic", url: embedUrl, reason: "No player link in the embed" });
-        return;
-    }
-    const file = vidbasicDecrypt(queryParam(player, "key"));
-    if (!/^https?:\/\//.test(file)) {
-        failedLinks.push({ server_name: "VidBasic", url: embedUrl, reason: "Key did not decrypt to a URL" });
-        return;
-    }
-    const origin = (embedUrl.match(/^https?:\/\/[^/]+/) || ["https://vidbasic.top"])[0];
-    const headers = { "User-Agent": DH_UA, "Referer": `${origin}/`, "Origin": origin };
-    if (!streams.some(s => s.streamUrl === file)) {
-        streams.unshift({ title: `VidBasic · ${/\.m3u8/i.test(file) ? "HLS" : "MP4"} · Sub`, streamUrl: file, headers: headers });
-    }
-    const sub = vidbasicDecrypt(queryParam(player, "sub"));
-    if (/^https?:\/\//.test(sub) && !subtitles.some(s => s.url === sub)) {
-        subtitles.push({ url: sub, label: "English", kind: "captions", headers: headers });
-    }
-}
 
 // ==========================================
 // 🔍 SEARCH
 // ==========================================
 
+function dhText(html) {
+    return String(html || "")
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&#8217;|&#039;|&#39;|&rsquo;/g, "'")
+        .replace(/&#8211;|&ndash;/g, '-').replace(/&#8220;|&#8221;|&quot;/g, '"')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+        .replace(/&#(\d+);/g, (m, code) => String.fromCharCode(parseInt(code, 10)))
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+async function dhJson(path) {
+    const body = await readBody(await soraFetch(`${DH_BASE}${path}`, { method: 'GET', headers: { "User-Agent": VN_UA, "Accept": "application/json" } }));
+    try { return JSON.parse(body); } catch (e) { return null; }
+}
+
+async function dhPage(url) {
+    return await readBody(await soraFetch(url, { method: 'GET', headers: { "User-Agent": VN_UA, "Accept": "text/html" } }));
+}
+
+function dhPoster(item) {
+    const media = item && item._embedded && item._embedded["wp:featuredmedia"];
+    return Array.isArray(media) && media[0] && media[0].source_url ? media[0].source_url : "";
+}
+
 async function searchResults(keyword) {
     console.log(`[Search] 🔍 Dramahood — searching for "${keyword}"`);
     try {
-        const q = encodeURIComponent(String(keyword || "").trim());
-        let html = await getPage(`${DH_BASE}/?s=${q}`);
-        // Ten dramas per page: read a second page when there is one.
-        if (html.indexOf(`/page/2/?s=`) !== -1) html += await getPage(`${DH_BASE}/page/2/?s=${q}`);
-        const block = (html.match(/<ul class="items">[\s\S]*?<\/ul>/g) || []).join("\n");
-
+        const list = await dhJson(`/wp-json/wp/v2/series?search=${encodeURIComponent(keyword)}&per_page=40&_embed=wp:featuredmedia`);
         const results = [];
-        // The anchor's title attribute embeds raw HTML (with ">"), so key on
-        // the href that directly precedes the cover.
-        const re = /href="([^"]+)"\s*>\s*<div class="cover">[\s\S]*?<img src="([^"]+)" alt="([^"]*)"/g;
-        let m;
-        while ((m = re.exec(block)) !== null) {
-            const slug = m[1].replace(/^https?:\/\/[^/]+\//, "").replace(/\/+$/, "");
-            if (!slug || results.some(r => r.href === `dramahood://drama/${slug}`)) continue;
-            results.push({ title: decodeEntities(m[3]).trim() || slug, image: m[2], href: `dramahood://drama/${slug}` });
+        for (const item of Array.isArray(list) ? list : []) {
+            if (!item || !item.link) continue;
+            results.push({
+                title: dhText(item.title && item.title.rendered) || item.slug,
+                image: dhPoster(item),
+                href: item.link
+            });
         }
-
         console.log(`[Search] ✅ ${results.length} result(s)`);
         sendSupabaseLog("Dramahood", "SEARCH", {
             keyword: keyword,
@@ -435,32 +399,33 @@ async function searchResults(keyword) {
 // 📖 DETAILS
 // ==========================================
 
-function dramaUrl(url) {
-    const slug = (String(url).match(/^dramahood:\/\/drama\/([^?#]+)/) || [])[1];
-    if (slug) return `${DH_BASE}/${slug.replace(/\/+$/, "")}/`;
-    return String(url);
+function seriesSlug(url) {
+    return (String(url).match(/\/series\/([^/?#]+)/) || [])[1] || "";
 }
 
 async function extractDetails(url) {
-    const pageUrl = dramaUrl(url);
-    console.log(`[Details] 📖 Dramahood — ${pageUrl}`);
-    sendSupabaseLog("Dramahood", "DETAILS", { media_url: pageUrl });
-
+    console.log(`[Details] 📖 Dramahood — ${url}`);
+    sendSupabaseLog("Dramahood", "DETAILS", { media_url: url });
     try {
-        const html = await getPage(pageUrl);
-        const plot = textOf((html.match(/<h3><i class="t1"><\/i>Plot<\/h3>\s*<div class="info">([\s\S]*?)<\/div>/) || [])[1] || "");
-        const aliasParts = [];
-        for (const label of ["Original name", "Country", "Status"]) {
-            const value = field(html, label);
-            if (value) aliasParts.push(value);
+        const slug = seriesSlug(url);
+        const list = slug ? await dhJson(`/wp-json/wp/v2/series?slug=${encodeURIComponent(slug)}&_embed=wp:term`) : null;
+        const item = Array.isArray(list) ? list[0] : null;
+        if (!item) return JSON.stringify([{ description: 'No synopsis available.', aliases: '', airdate: '' }]);
+
+        const terms = [];
+        const groups = item._embedded && item._embedded["wp:term"];
+        for (const group of Array.isArray(groups) ? groups : []) {
+            for (const term of Array.isArray(group) ? group : []) {
+                if (term && term.name && (term.taxonomy === 'genres' || term.taxonomy === 'country')) terms.push(dhText(term.name));
+            }
         }
         return JSON.stringify([{
-            description: plot || "No synopsis available.",
-            aliases: aliasParts.join(' | '),
-            airdate: field(html, "Release year")
+            description: dhText(item.content && item.content.rendered) || "No synopsis available.",
+            aliases: terms.join(', '),
+            airdate: String(item.date || "").slice(0, 10)
         }]);
     } catch (error) {
-        sendSupabaseLog("Dramahood", "ERROR", { media_url: pageUrl, error_message: String(error) });
+        sendSupabaseLog("Dramahood", "ERROR", { media_url: url, error_message: String(error) });
         return JSON.stringify([{ description: 'Loading error.', aliases: '', airdate: '' }]);
     }
 }
@@ -469,39 +434,27 @@ async function extractDetails(url) {
 // 📂 EPISODES
 // ==========================================
 
+// The series page links every episode post: /<slug>-episode-<n>[-<k>]/ (the
+// "-<k>" suffix is WordPress de-duplicating a reused slug).
 async function extractEpisodes(url) {
-    const pageUrl = dramaUrl(url);
-    console.log(`[Episodes] 📂 Dramahood — ${pageUrl}`);
-
+    console.log(`[Episodes] 📂 Dramahood — ${url}`);
     try {
-        const html = await getPage(pageUrl);
-        const block = (html.match(/<ul class="list-episode">([\s\S]*?)<\/ul>/) || [])[1] || "";
-
+        const html = await dhPage(url);
         const episodes = [];
-        const re = /<li>\s*(?:<img[^>]*src="([^"]*)"[^>]*>)?\s*<h2><a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a><\/h2>/g;
+        const seen = {};
+        const re = /href="(https?:\/\/[^"]+?-episode-(\d+)(?:-\d+)?\/)"/g;
         let m;
-        while ((m = re.exec(block)) !== null) {
-            const path = m[2].replace(/^https?:\/\/[^/]+/, "").replace(/^\/+/, "");
-            const href = `dramahood-play://${path}`;
-            if (episodes.some(e => e.href === href)) continue;
-            const title = decodeEntities(m[3]).trim();
-            const numMatch = title.match(/\bEP(?:isode)?\s*(\d+(?:\.\d+)?)/i) || path.match(/episode-(\d+)/i);
-            episodes.push({
-                href: href,
-                number: numMatch ? parseFloat(numMatch[1]) : 0,
-                season: 1,
-                title: `${/RAW\.png/i.test(m[1] || "") ? "RAW · " : ""}${title}`
-            });
+        while ((m = re.exec(html)) !== null) {
+            const n = parseInt(m[2], 10);
+            if (seen[n]) continue;
+            seen[n] = true;
+            episodes.push({ href: m[1], number: n, season: 1, title: `Episode ${n}` });
         }
-
-        // Newest first on the page.
-        episodes.reverse();
-        episodes.forEach((e, i) => { if (!e.number) e.number = i + 1; });
-
+        episodes.sort((a, b) => a.number - b.number);
         console.log(`[Episodes] ✅ ${episodes.length} episode(s)`);
         return JSON.stringify(episodes);
     } catch (error) {
-        sendSupabaseLog("Dramahood", "ERROR", { media_url: pageUrl, error_message: String(error) });
+        sendSupabaseLog("Dramahood", "ERROR", { media_url: url, error_message: String(error) });
         return JSON.stringify([]);
     }
 }
@@ -510,70 +463,271 @@ async function extractEpisodes(url) {
 // 🎬 PLAYBACK
 // ==========================================
 
+// The episode page names its servers in data-video="…". VidNest's link gives
+// the TMDB id, season and episode; the streams then come from VidNest's relays.
 async function extractStreamUrl(url) {
+    console.log(`[Player] 🎬 Dramahood — ${url}`);
+    try {
+        const html = await dhPage(url);
+        const m = html.match(/vidnest\.fun\/(tv|movie)\/(\d+)(?:\/(\d+)\/(\d+))?/);
+        if (!m) {
+            sendSupabaseLog("Dramahood", "UNSUPPORTED_HOSTS", { media_url: url, failed_count: 1, failed_links: [{ server_name: "VidNest", url: url, reason: "No VidNest link on the episode page" }] });
+            return JSON.stringify({ type: "none" });
+        }
+        const ref = { kind: m[1], id: m[2], season: m[3] || "1", episode: m[4] || "1" };
+        return await vidnestStreams(ref, url);
+    } catch (error) {
+        sendSupabaseLog("Dramahood", "ERROR", { media_url: url, error_message: String(error) });
+        return JSON.stringify({ type: "none" });
+    }
+}
+
+// "movie/<id>" or "tv/<id>/<s>/<e>", the tail every relay path ends with.
+function mediaPath(ref) {
+    return ref.kind === 'tv' ? `tv/${ref.id}/${ref.season}/${ref.episode}` : `movie/${ref.id}`;
+}
+
+// Each relay turns its decoded answer into [{title, streamUrl, headers}].
+// Listed in the order streams are offered (most reliable first).
+const VN_RELAYS = [
+    {
+        name: "Beta", path: (ref) => `superstream/${mediaPath(ref)}`,
+        read: (data) => (Array.isArray(data.streams) ? data.streams : [])
+            .filter(s => s && s.url)
+            .map(s => ({
+                title: `VidNest Beta · ${s.quality || s.language || 'Auto'}`,
+                streamUrl: s.url,
+                headers: { "Referer": `${VN_SITE}/`, "Origin": VN_SITE, "User-Agent": VN_UA }
+            }))
+    },
+    {
+        name: "Zeta", path: (ref) => `nextgencloudfabric/${mediaPath(ref)}`,
+        read: (data) => data.url ? [{
+            title: "VidNest Zeta · Auto",
+            streamUrl: data.url,
+            headers: cleanHeaders(data.headers)
+        }] : []
+    },
+    {
+        name: "Prime", path: (ref) => `rpmvid/${mediaPath(ref)}`,
+        read: (data) => (Array.isArray(data.streams) ? data.streams : [])
+            .filter(s => s && s.url)
+            .map(s => ({
+                title: `VidNest Prime · ${s.quality && s.quality !== 'auto' ? s.quality : (s.language || 'Auto')}`,
+                streamUrl: s.url,
+                headers: cleanHeaders(s.headers)
+            }))
+    },
+    {
+        name: "Sigma", path: (ref) => `hollymoviehd/${mediaPath(ref)}`,
+        read: (data) => (Array.isArray(data.streams) ? data.streams : [])
+            .filter(s => s && s.url && s.type === 'hls')
+            .map(s => ({
+                title: `VidNest Sigma · ${s.language || 'Auto'}`,
+                streamUrl: s.url,
+                headers: cleanHeaders(s.headers)
+            }))
+    },
+    {
+        name: "Lamda/Delta", path: (ref) => `allmovies/${mediaPath(ref)}`,
+        read: (data) => (Array.isArray(data.streams) ? data.streams : [])
+            .filter(s => s && s.url)
+            .map(s => ({
+                title: `VidNest ${String(s.language || '').toLowerCase() === 'hindi' ? 'Delta' : 'Lamda'} · ${s.language || 'Auto'}`,
+                streamUrl: s.url,
+                headers: cleanHeaders(s.headers)
+            }))
+    },
+    {
+        name: "Hexa", path: (ref) => `vidlink/${mediaPath(ref)}`,
+        read: (data) => {
+            const stream = data && data.data && data.data.stream;
+            if (!stream || !stream.playlist) return [];
+            return [{
+                title: "VidNest Hexa · Auto",
+                streamUrl: String(stream.playlist).trim().replace(/\s+/g, ''),
+                headers: cleanHeaders(data.headers)
+            }];
+        }
+    },
+    {
+        // Direct files (often .mkv): fine for external players, not for every
+        // built-in one, hence offered after the HLS relays.
+        name: "Gama", path: (ref) => `vidzee/${mediaPath(ref)}`,
+        read: (data) => (Array.isArray(data.streams) ? data.streams : [])
+            .filter(s => s && s.url)
+            .map(s => {
+                const ext = (String(s.url).split('?')[0].match(/\.([a-z0-9]{2,4})$/i) || [])[1];
+                return {
+                    title: `VidNest Gama · ${s.language || s.quality || 'Auto'}${ext ? ` (${ext.toUpperCase()})` : ''}`,
+                    streamUrl: s.url,
+                    headers: cleanHeaders(s.headers)
+                };
+            })
+    },
+    {
+        // TS segments disguised as images on a TikTok CDN (120-byte PNG header).
+        name: "Catflix", path: (ref) => `yflix/${mediaPath(ref)}`,
+        read: (data) => data.url ? [{
+            title: "VidNest Catflix · Auto",
+            streamUrl: data.url,
+            headers: cleanHeaders(data.headers)
+        }] : []
+    },
+    {
+        name: "Filxer", path: (ref) => `rogflix/${mediaPath(ref)}`, probe: true,
+        read: (data) => data.url ? [{
+            title: "VidNest Filxer · Auto",
+            streamUrl: data.url,
+            headers: { "Referer": `${VN_SITE}/`, "Origin": VN_SITE, "User-Agent": VN_UA }
+        }] : []
+    },
+    {
+        name: "Ophim", path: (ref) => `klikxxi/${mediaPath(ref)}`, probe: true,
+        read: (data) => (Array.isArray(data.sources) ? data.sources : [])
+            .filter(s => s && s.url && s.type === 'hls')
+            .map(s => ({
+                title: `VidNest Ophim · ${s.quality || 'Auto'}`,
+                streamUrl: s.url,
+                headers: { "Referer": `${VN_SITE}/`, "Origin": VN_SITE, "User-Agent": VN_UA }
+            }))
+    }
+];
+
+async function vnSubtitles(ref) {
+    const url = ref.kind === 'tv'
+        ? `${VN_SUBS}/tv/${ref.id}/${ref.season}/${ref.episode}`
+        : `${VN_SUBS}/movie/${ref.id}`;
+    const body = await readBody(await soraFetch(url, { method: 'GET', headers: { "Accept": "application/json", "Referer": `${VN_SITE}/` } }));
+    if (!body) return [];
+    try {
+        const list = JSON.parse(body);
+        return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+}
+
+async function vidnestStreams(ref, mediaUrl) {
     const startTime = Date.now();
-    const path = String(url).replace(/^dramahood-play:\/\//, "").replace(/^https?:\/\/[^/]+/, "").replace(/^\/+/, "");
-    const mediaUrl = `${DH_BASE}/${path}`;
-    const epNumber = String((path.match(/episode-(\d+)/i) || [])[1] || "1");
-    console.log(`[Player] 🎬 Dramahood — ${mediaUrl}`);
+
+    console.log(`[Player] 🎞️ VidNest relays — ${ref.kind} ${ref.id} ${ref.season}x${ref.episode}`);
 
     const streams = [];
-    const subtitles = [];
+    const allSubtitles = [];
     const failedLinks = [];
+    let bestSubtitle = "";
+    let bestSubtitleHeaders = {};
 
     try {
-        const html = await getPage(mediaUrl);
+        // All relays (and the subtitle list) in parallel: each answers on its
+        // own, some take several seconds.
+        const results = await Promise.all([
+            Promise.all(VN_RELAYS.map(relay => vnRelay(relay.path(ref)).catch(() => null))),
+            vnSubtitles(ref).catch(() => [])
+        ]);
+        const answers = results[0];
+        const subtitleList = results[1];
 
-        // Servers: every data-video, plus the iframe already loaded.
-        const servers = [];
-        const re = /(?:data-video|<iframe[^>]+src)="(https?:\/\/[^"]+)"/g;
-        let m;
-        while ((m = re.exec(html)) !== null) {
-            const link = decodeEntities(m[1]);
-            if (/vidbasic\.|dramavideo\.se\/watch/i.test(link) && servers.indexOf(link) === -1) servers.push(link);
-        }
-        if (servers.length === 0) failedLinks.push({ server_name: "Dramahood", url: mediaUrl, reason: "No known server on the page" });
+        // Candidates from the relays that need a liveness check.
+        const probes = [];
 
-        for (const server of servers) {
-            try {
-                if (/vidbasic\./i.test(server)) await vidbasicStreams(server, streams, subtitles, failedLinks);
-                else await dramavideoStreams(server, streams, subtitles, failedLinks);
-            } catch (e) {
-                failedLinks.push({ server_name: server, url: server, reason: String(e) });
+        for (let i = 0; i < VN_RELAYS.length; i++) {
+            const relay = VN_RELAYS[i];
+            const data = answers[i];
+            let found = [];
+            try { found = data ? relay.read(data) : []; } catch (e) { found = []; }
+
+            if (!found.length) {
+                failedLinks.push({ server_name: relay.name, url: `${VN_API}/${relay.path(ref)}`, reason: data ? "No stream in answer" : "No answer" });
+                continue;
+            }
+
+            for (const stream of found) {
+                if (!stream.streamUrl || !/^https?:\/\//.test(stream.streamUrl)) continue;
+                if (relay.probe) probes.push({ relay: relay.name, stream: stream });
+                else streams.push(stream);
+            }
+
+            // Beta (superstream) carries its own subtitle list.
+            if (Array.isArray(data.subtitles)) {
+                for (const caption of data.subtitles) {
+                    const subUrl = caption && (caption.url || caption.file);
+                    if (!subUrl || allSubtitles.some(s => s.url === subUrl)) continue;
+                    allSubtitles.push({
+                        url: subUrl,
+                        label: caption.lang || caption.label || caption.language || relay.name,
+                        kind: "captions",
+                        headers: { "Referer": `${VN_SITE}/` }
+                    });
+                }
             }
         }
 
-        const best = subtitles.find(s => /english/i.test(s.label)) || subtitles[0];
+        if (probes.length) {
+            const alive = await Promise.all(probes.map(p => isPlaylist(p.stream.streamUrl, p.stream.headers)));
+            for (let i = 0; i < probes.length; i++) {
+                if (alive[i]) streams.push(probes[i].stream);
+                else failedLinks.push({ server_name: probes[i].relay, url: probes[i].stream.streamUrl, reason: "Link returned no playlist" });
+            }
+        }
 
+        // De-duplicate by URL, keep the first title.
+        const unique = [];
+        for (const stream of streams) {
+            if (!unique.some(s => s.streamUrl === stream.streamUrl)) unique.push(stream);
+        }
+
+        for (const caption of subtitleList) {
+            const subUrl = caption && (caption.file || caption.url);
+            if (!subUrl || allSubtitles.some(s => s.url === subUrl)) continue;
+            allSubtitles.push({
+                url: subUrl,
+                label: caption.label || "Unknown",
+                kind: "captions",
+                headers: { "Referer": `${VN_SITE}/` }
+            });
+        }
+
+        // Prefer an English track as the default one.
+        const english = allSubtitles.find(s => /^english\b|^en$/i.test(String(s.label).trim()));
+        const chosen = english || allSubtitles[0];
+        if (chosen) {
+            bestSubtitle = chosen.url;
+            bestSubtitleHeaders = chosen.headers;
+        }
+
+        for (const s of unique) console.log(`   -> ${s.title}: ${s.streamUrl.slice(0, 80)}…`);
         console.log(`-----------------------------------------------------`);
-        console.log(`[Player] 📊 Summary: ${streams.length} link(s), ${subtitles.length} subtitle track(s).`);
+        console.log(`[Player] 📊 Summary: ${unique.length} link(s), ${allSubtitles.length} subtitle track(s).`);
 
         sendSupabaseLog("Dramahood", "PLAYER", {
             media_url: mediaUrl,
-            season_number: "1",
-            ep_number: epNumber,
-            streams_found: streams.length,
-            subtitles_found: !!best,
-            allSubtitles_count: subtitles.length,
+            season_number: String(ref.season || "1"),
+            ep_number: String(ref.episode || "1"),
+            streams_found: unique.length,
+            subtitles_found: bestSubtitle !== "",
+            allSubtitles_count: allSubtitles.length,
             execution_time_ms: Date.now() - startTime,
-            servers: streams.map(s => ({ nom: s.title, lien: s.streamUrl }))
+            servers: unique.map(s => ({ nom: s.title, lien: s.streamUrl }))
         });
 
         if (failedLinks.length > 0) {
             sendSupabaseLog("Dramahood", "UNSUPPORTED_HOSTS", {
-                media_url: mediaUrl, season_number: "1", ep_number: epNumber,
-                failed_count: failedLinks.length, failed_links: failedLinks
+                media_url: mediaUrl,
+                season_number: String(ref.season || "1"),
+                ep_number: String(ref.episode || "1"),
+                failed_count: failedLinks.length,
+                failed_links: failedLinks
             });
         }
 
-        if (streams.length === 0) return JSON.stringify({ type: "none" });
+        if (unique.length === 0) return JSON.stringify({ type: "none" });
 
         return JSON.stringify({
             type: "servers",
-            streams: streams,
-            subtitles: best ? best.url : "",
-            subtitlesHeaders: best ? best.headers : {},
-            allSubtitles: subtitles
+            streams: unique,
+            subtitles: bestSubtitle,
+            subtitlesHeaders: bestSubtitleHeaders,
+            allSubtitles: allSubtitles
         });
     } catch (error) {
         sendSupabaseLog("Dramahood", "ERROR", { media_url: mediaUrl, error_message: String(error) });

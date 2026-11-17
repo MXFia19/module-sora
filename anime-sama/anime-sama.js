@@ -182,17 +182,23 @@ async function extractEpisodes(url) {
 
         for (let tab of tabs) {
             try {
-                let jsUrl = tab.url;
-                if (!jsUrl.endsWith('/')) jsUrl += '/';
-                jsUrl += "episodes.js";
-                
+                let pageUrl = tab.url.endsWith('/') ? tab.url : tab.url + '/';
+                let jsUrl = pageUrl + "episodes.js";
+
                 let jsRes = await fetchv2(jsUrl, headers, "GET");
                 let jsContent = await jsRes.text();
 
                 if (!jsContent || jsContent.includes("<html") || jsContent.length < 50) {
                     let tabRes = await fetchv2(tab.url, headers, "GET");
                     let tabText = await tabRes.text();
-                    let scriptMatch = tabText.match(/<script[^>]+src=['"]([^'"]*episodes\.js[^'"]*)['"]/i);
+                    // Nouveau format (nov. 2026) : plus d'episodes.js, les tableaux
+                    // eps1, eps2… sont écrits dans la page de saison elle-même.
+                    let inPage = epsArraysOnly(tabText);
+                    if (inPage) {
+                        jsContent = inPage;
+                        jsUrl = pageUrl;
+                    }
+                    let scriptMatch = inPage ? null : tabText.match(/<script[^>]+src=['"]([^'"]*episodes\.js[^'"]*)['"]/i);
                     if (scriptMatch) {
                         let scriptSrc = scriptMatch[1].trim();
                         let baseFolder = tab.url.endsWith('/') ? tab.url : tab.url + '/';
@@ -239,6 +245,25 @@ async function extractEpisodes(url) {
     } catch (e) { return JSON.stringify([]); }
 }
 
+// Les seuls tableaux d'épisodes d'une page de saison (var eps1 = […]; …).
+// La page contient d'autres tableaux (domaines, publicités) : les prendre
+// fausserait le nombre d'épisodes. "" si la page n'en a aucun.
+function epsArraysOnly(html) {
+    const blocks = String(html || "").match(/var\s+eps\d+\s*=\s*\[[\s\S]*?\]/g) || [];
+    return blocks.map(b => b + ";").join("\n");
+}
+
+// Une entrée « lien:<id> » ne donne l'adresse du lecteur qu'à la demande :
+// /api/lien.php?j=<jeton de la page>&l=<id> -> {"u": "https://…"}.
+async function resolveLien(origin, jeton, id, referer) {
+    try {
+        const res = await fetchv2(`${origin}/api/lien.php?j=${encodeURIComponent(jeton)}&l=${encodeURIComponent(id)}`,
+            { "User-Agent": "Mozilla/5.0", "Referer": referer, "Accept": "application/json" }, "GET");
+        const data = JSON.parse(await res.text());
+        return data && typeof data.u === "string" && data.u.startsWith("http") ? data.u : null;
+    } catch (e) { return null; }
+}
+
 // --- 4. LECTEUR ---
 async function extractStreamUrl(url) {
     console.log(`[Lecteur AS] 🎬 Démarrage pour : ${url}`);
@@ -274,9 +299,18 @@ async function extractStreamUrl(url) {
         let contents = await Promise.all(fetchPromises);
         
         let allEmbeds = [];
+        let pending = [];
+        const origin = (url.match(/^https?:\/\/[^/]+/) || ["https://anime-sama.to"])[0];
 
-        function parseJsContent(jsText, langTag) {
-            if (!jsText || jsText.includes("<html") || jsText.length < 50) return;
+        function parseJsContent(jsText, langTag, pageUrl) {
+            if (!jsText || jsText.length < 50) return;
+            // Nouveau format : la page de saison elle-même, avec son jeton.
+            let jeton = null;
+            if (jsText.includes("<html")) {
+                jeton = (jsText.match(/epsJeton\s*=\s*["']([^"']+)["']/) || [])[1] || null;
+                jsText = epsArraysOnly(jsText);
+                if (!jsText) return;
+            }
             const arrayRegex = /(?:var|let|const)\s+([a-zA-Z0-9_]+)\s*=\s*\[([\s\S]*?)\];/gm;
             let match;
             while ((match = arrayRegex.exec(jsText)) !== null) {
@@ -285,13 +319,22 @@ async function extractStreamUrl(url) {
                     let rawUrl = urls[epIndex].replace(/['"]/g, '').trim();
                     if (rawUrl.startsWith('http')) {
                         allEmbeds.push({ url: rawUrl, lang: langTag });
+                    } else if (rawUrl.startsWith('lien:') && jeton) {
+                        pending.push({ id: rawUrl.slice(5), lang: langTag, jeton: jeton, referer: pageUrl });
                     }
                 }
             }
         }
 
         for (let i = 0; i < contents.length; i++) {
-            if (contents[i]) parseJsContent(contents[i], langsToFetch[i].lang);
+            if (contents[i]) parseJsContent(contents[i], langsToFetch[i].lang, langsToFetch[i].url);
+        }
+
+        // Les « lien:<id> » se résolvent un par un auprès du site : en parallèle.
+        if (pending.length > 0) {
+            console.log(`[Lecteur AS] 🔑 ${pending.length} lien(s) à résoudre via /api/lien.php`);
+            const resolved = await Promise.all(pending.map(p => resolveLien(origin, p.jeton, p.id, p.referer)));
+            resolved.forEach((u, i) => { if (u) allEmbeds.push({ url: u, lang: pending[i].lang }); });
         }
 
         let streams = [];

@@ -2,8 +2,45 @@
 // ⚙️ MODULE SORA — LIVEWATCH TV (V2 - Nouvelle API)
 // ==========================================
 
-const API_BASE = "https://livewatch.top/api";
-const SITE_URL = "https://livewatch.top";
+// Domaine : livewatch.top redirige vers livewatch.icu depuis novembre 2026.
+const API_BASE = "https://livewatch.icu/api";
+const SITE_URL = "https://livewatch.icu";
+const LW_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+// Lecture anonyme, comme le lecteur du site :
+//   POST /api/play/ticket            -> {ticket, min_wait}
+//   POST /api/play/grant {ticket}    -> {grant, tier, expires_in}  (425 too_early avant min_wait)
+//   GET  /api/stream/<id> avec l'en-tête X-Play-Grant: <grant>
+function lwWait(ms) {
+    if (typeof setTimeout === "function") return new Promise(r => setTimeout(r, ms));
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* pas de minuterie dans Sora */ }
+    return Promise.resolve();
+}
+
+async function lwPost(path, body) {
+    const headers = { "User-Agent": LW_UA, "Referer": SITE_URL + "/", "Origin": SITE_URL, "Content-Type": "application/json", "Accept": "application/json" };
+    const res = await soraFetch(`${API_BASE}${path}`, { headers: headers, method: "POST", body: body == null ? null : JSON.stringify(body) });
+    if (!res) return { status: 0, data: null };
+    let data = null;
+    try { data = JSON.parse(await res.text()); } catch (e) { data = null; }
+    return { status: res.status, data: data };
+}
+
+async function getPlayGrant() {
+    const t = await lwPost("/play/ticket", null);
+    const ticket = t.data && t.data.ticket;
+    if (!ticket) return "";
+    let wait = Math.max(0, Number(t.data.min_wait) || 0) * 1000;
+    for (let i = 0; i < 6; i++) {
+        if (wait > 0) await lwWait(Math.min(3000, wait + 150));
+        const g = await lwPost("/play/grant", { ticket: ticket });
+        if (g.data && g.data.grant) return g.data.grant;
+        if (g.status !== 425) return "";
+        wait = (Number(g.data && g.data.retry_after) || 1) * 1000;
+    }
+    return "";
+}
 
 // ==========================================
 // 🗄️ TRACKER SUPABASE (Fire & Forget)
@@ -177,7 +214,11 @@ async function extractStreamUrl(url) {
         const streamApiUrl = `${API_BASE}/stream/${channelId}`;
         console.log(`[Lecteur LiveWatch] 📡 Appel API : ${streamApiUrl}`);
         
-        const response = await soraFetch(streamApiUrl);
+        const grant = await getPlayGrant();
+        console.log(`[Lecteur LiveWatch] 🎟️ Grant : ${grant ? "obtenu" : "absent"}`);
+        const streamHeaders = { "User-Agent": LW_UA, "Referer": SITE_URL + "/", "Origin": SITE_URL, "Accept": "application/json" };
+        if (grant) streamHeaders["X-Play-Grant"] = grant;
+        const response = await soraFetch(streamApiUrl, { headers: streamHeaders, method: "GET" });
         
         if (!response) {
             console.log(`[Lecteur LiveWatch] ❌ Échec réseau. Le serveur n'a pas répondu.`);
@@ -206,7 +247,7 @@ async function extractStreamUrl(url) {
             streams.push({
                 title: "LiveWatch (Proxy Officiel)",
                 streamUrl: proxyStreamUrl,
-                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Referer": SITE_URL + "/" }
+                headers: { "User-Agent": LW_UA, "Referer": SITE_URL + "/", "Origin": SITE_URL }
             });
             extractedNames.push("Proxy Officiel");
             console.log(`   -> 🟢 Ajout du flux Proxy : ${proxyStreamUrl}`);
