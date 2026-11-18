@@ -47,13 +47,13 @@ function extractorKeyForUrl(urlLower) {
     if (urlLower.includes("hgcloud") || urlLower.includes("audinifer") || urlLower.includes("masukestin") || urlLower.includes("hglink") || urlLower.includes("huntrexus") || urlLower.includes("vibuxer")) return "hgcloud";
     if (urlLower.includes("darkibox")) return "darkibox";
     if (urlLower.includes("savefiles")) return "savefiles";
-    if (urlLower.includes("fsvid")) return "fsvid";
+    if (urlLower.includes("fsvid") || urlLower.includes("vidzy")) return "fsvid";
     if (urlLower.includes("vidara")) return "vidara";
     if (urlLower.includes("vidsonic")) return "vidsonic";
     if (urlLower.includes("anonmp4")) return "anonmp4";
     if (urlLower.includes("upbolt")) return "upbolt";
     if (urlLower.includes("streamcash")) return "streamcash";
-    if (urlLower.includes("lulustream") || urlLower.includes("luluvdo") || urlLower.includes("luluvid")) return "lulustream";
+    if (urlLower.includes("lulustream") || urlLower.includes("luluvdo") || urlLower.includes("luluvid") || urlLower.includes("lplaygo")) return "lulustream";
     if (urlLower.includes("embedseek") || urlLower.includes("neocine") || urlLower.includes("embed4me") || urlLower.includes("lpayer") || urlLower.includes("seekplayer") || urlLower.includes("flemmix") || urlLower.includes("p2pstream")) return "embedseek";
     
     return null; // Inconnu ou universel
@@ -1153,7 +1153,7 @@ async function extractDirectVideo(embedUrl, langPrefix, originalUrl, parentDomai
     
     const _mvxD = _movixActiveDomain || MOVIX_FALLBACK_DOMAIN;
     let pDomain = parentDomain || `https://${_mvxD}/`;
-    const hostDomain = (embedUrl.match(/https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || "inconnu";
+    let hostDomain = (embedUrl.match(/https?:\/\/(?:www\.)?([^\/]+)/i) || [])[1] || "inconnu";
 
     const checkIfDeleted = (html) => {
         const h = html.toLowerCase();
@@ -1302,9 +1302,18 @@ async function extractDirectVideo(embedUrl, langPrefix, originalUrl, parentDomai
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
             };
 
-            const req = await soraFetch(embedUrl, { headers: uqHeaders });
+            let req = await soraFetch(embedUrl, { headers: uqHeaders });
             if (req) {
-                 const html = await req.text();
+                 let html = await req.text();
+                 // uqload n'accepte d'être intégré que depuis sa liste de sites :
+                 // ailleurs il répond « Video embed restricted for this domain ».
+                 // Sans Referer, il sert la page normale.
+                 if (/embed restricted/i.test(html)) {
+                     const bare = { ...uqHeaders };
+                     delete bare["Referer"];
+                     req = await soraFetch(embedUrl, { headers: bare });
+                     html = req ? await req.text() : "";
+                 }
                  if (checkIfDeleted(html)) isDeleted = true;
                  else {
                      let streamUrl = vidhideExtractor(html);
@@ -1514,16 +1523,25 @@ async function extractDirectVideo(embedUrl, langPrefix, originalUrl, parentDomai
                 } catch(e) {}
             }
         }
-        else if (urlLower.includes("fsvid")) {
+        else if (urlLower.includes("fsvid") || urlLower.includes("vidzy")) {
             hostRecognized = true;
             _log(`   🕵️ Extraction Fsvid en cours pour ${hostDomain}...`);
-            
+
             const req = await soraFetch(embedUrl, { headers: { "Referer": pDomain } });
             if (req) {
                  const html = await req.text();
                  if (checkIfDeleted(html)) isDeleted = true;
                  else {
-                     let streamUrl = vidhideExtractor(html);
+                     // Depuis novembre 2026 la vraie URL est en clair, mais un
+                     // leurre (_fsvHls -> /troll/master.m3u8) la précède : on
+                     // l'écarte et on préfère l'arborescence /hls2/.
+                     let streamUrl = fsvidClearSource(html + "\n" + unpackFirst(html));
+                     if (streamUrl) {
+                         _log(`   ✅ [Fsvid] Flux extrait avec succès !`);
+                         return { title: `${langPrefix} Fsvid`, streamUrl: streamUrl, headers: { "Referer": `https://${hostDomain}/` } };
+                     }
+                     streamUrl = vidhideExtractor(html);
+                     if (streamUrl && /\/troll\//i.test(streamUrl)) streamUrl = null;
                      
                      if (!streamUrl) {
                          const fileMatch = html.match(/sources\s*:\s*\[\s*\{\s*src\s*:\s*[\"']([^\"']+)[\"']/i) || 
@@ -1663,10 +1681,17 @@ async function extractDirectVideo(embedUrl, langPrefix, originalUrl, parentDomai
                 }
             } catch (e) { _log(`   ❌ [Streamcash] ${e.message}`); }
         }
-        else if (urlLower.includes("lulustream") || urlLower.includes("luluvdo") || urlLower.includes("luluvid")) {
+        else if (urlLower.includes("lulustream") || urlLower.includes("luluvdo") || urlLower.includes("luluvid") || urlLower.includes("lplaygo")) {
             hostRecognized = true;
             _log(`   🕵️ Extraction Lulustream en cours pour ${hostDomain}...`);
-            
+            // luluvdo.com ne répond plus et lulustream.com redirige : le
+            // lecteur vit sur lplaygo.com, on n'en garde que le code du fichier.
+            const luluCode = (embedUrl.match(/^https?:\/\/[^/]+\/(?:[ed]\/)?([a-z0-9]{12})(?:[/?#]|$)/i) || [])[1];
+            if (luluCode) {
+                embedUrl = `https://lplaygo.com/e/${luluCode}`;
+                hostDomain = "lplaygo.com";
+            }
+
             const luluHeaders = {
                 "Referer": pDomain,
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -1837,6 +1862,32 @@ function voeExtractor(html) {
         let result = JSON.parse(step6);
         return result.source || (result.source && result.source.find(s => s.source)?.source) || null;
     } catch (e) { return null; }
+}
+
+// fsvid / vidzy : URL en clair à côté du leurre « _fsvHls » (/troll/…). On
+// n'utilise cette lecture qu'en présence du leurre, qui identifie la famille.
+function fsvidClearSource(code) {
+    if (!/\b_fsvHls\s*=/.test(code)) return null;
+    const urls = code.match(/https?:\/\/[^"'\s\\]+?\.(?:m3u8|mp4)(?:\?[^"'\s\\]*)?/gi) || [];
+    const real = urls.filter(u => !/\/troll\//i.test(u));
+    return real.find(u => /\/hls2\//i.test(u)) || real[0] || null;
+}
+
+// Premier bloc p.a.c.k.e.r dépaqueté (vidzy.org paque encore sa page).
+function unpackFirst(html) {
+    try {
+        const packed = (html.match(/eval\(function\(p,a,c,k,e,d\).*?\.split\('\|'\)\)\)/) || [])[0];
+        if (!packed) return "";
+        const m = packed.match(/}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\('\|'\)/);
+        if (!m) return "";
+        let p = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"');
+        const a = parseInt(m[3], 10);
+        let c = parseInt(m[4], 10);
+        const k = m[6].split('|');
+        const e = function (n) { return (n < a ? '' : e(parseInt(n / a))) + ((n = n % a) > 35 ? String.fromCharCode(n + 29) : n.toString(36)); };
+        while (c--) { if (k[c]) p = p.replace(new RegExp('\\b' + e(c) + '\\b', 'g'), k[c]); }
+        return p.replace(/\\\//g, "/");
+    } catch (err) { return ""; }
 }
 
 function vidhideExtractor(html) {

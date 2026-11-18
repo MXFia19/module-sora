@@ -497,6 +497,11 @@ async function extractStreamUrl(url) {
             else if (urlLower.includes("streamhide") || urlLower.includes("vidhide") || urlLower.includes("luluvdo")) {
                 logDebug(`[MOTEUR] Sélection de Streamhide / F16px`);
                 try {
+                    // luluvdo.com ne répond plus : le même fichier se lit sur lplaygo.com.
+                    if (urlLower.includes("luluvdo")) {
+                        const luluCode = (embedUrl.match(/^https?:\/\/[^/]+\/(?:[ed]\/)?([a-z0-9]{12})(?:[/?#]|$)/i) || [])[1];
+                        if (luluCode) embedUrl = `https://lplaygo.com/e/${luluCode}`;
+                    }
                     const req = await soraFetch(embedUrl, { headers: { "Referer": BASE_URL } });
                     logDebug(`[Streamhide] Exécution de vidhideExtractor...`);
                     let streamUrl = vidhideExtractor(await req.text()); 

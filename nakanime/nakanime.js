@@ -323,16 +323,20 @@ async function extractMailru(embedUrl) {
     return null;
 }
 
-// LULUSTREAM / LULUVDOO : code packé -> m3u8. ⚠️ le flux exige Referer https://luluvdo.com/ (sinon 403)
+// LULUSTREAM / LULUVDOO : code packé -> m3u8. luluvdo.com ne répond plus : le lecteur
+// vit sur lplaygo.com (lulustream.com y redirige). ⚠️ le flux exige Referer lplaygo (sinon 403).
+const LULU_HOST = "https://lplaygo.com";
 async function extractLulustream(embedUrl) {
     try {
-        const res = await soraFetch(embedUrl, { headers: { "User-Agent": NAK_UA, "Referer": "https://luluvdo.com/", "Accept-Language": "fr-FR,fr;q=0.8" } });
+        const code = (String(embedUrl).match(/^https?:\/\/[^/]+\/(?:[ed]\/)?([a-z0-9]{12})(?:[/?#]|$)/i) || [])[1];
+        if (code) embedUrl = LULU_HOST + "/e/" + code;
+        const res = await soraFetch(embedUrl, { headers: { "User-Agent": NAK_UA, "Referer": LULU_HOST + "/", "Accept-Language": "fr-FR,fr;q=0.8" } });
         if (!res || typeof res.text !== "function") return null;
         const html = await res.text();
         const u = unpackStream(html);
         // Le player doit rejouer EXACTEMENT les mêmes headers que le fetch (UA + Referer + Accept-Language),
         // sinon le token du m3u8 est invalide -> 403.
-        if (u) return { streamUrl: u.replace(/\\\//g, "/"), headers: { "User-Agent": NAK_UA, "Referer": "https://luluvdo.com/", "Accept-Language": "fr-FR,fr;q=0.8" } };
+        if (u) return { streamUrl: u.replace(/\\\//g, "/"), headers: { "User-Agent": NAK_UA, "Referer": LULU_HOST + "/", "Accept-Language": "fr-FR,fr;q=0.8" } };
     } catch (e) {}
     return null;
 }

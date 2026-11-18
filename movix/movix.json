@@ -6,7 +6,7 @@
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "2.0.18",
+    "version": "2.0.19",
     "language": "French",
     "streamType": "HLS/MP4",
     "quality": "1080p",
@@ -19,5 +19,5 @@
     "softsub": false,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "anime now queries the anime probe AND all standard sources in parallel (more links); filemoon fully local + PoW worker offload with fallback; skip hanging hosts -> faster"
+    "changelog": "fsvid/vidzy : URL lue en clair à côté du leurre /troll/ ; uqload : nouvel essai sans Referer si l'intégration est refusée ; Lulustream : lecteur pris sur lplaygo.com (luluvdo.com est mort)"
 }

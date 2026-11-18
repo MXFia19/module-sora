@@ -6,7 +6,7 @@
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.22",
+    "version": "1.0.23",
     "language": "French",
     "streamType": "HLS/MP4",
     "quality": "1080p",
@@ -19,5 +19,5 @@
     "softsub": false,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "fix ok.ru/mail.ru 403 on iOS: stream Referer must be the CDN's own origin (same-origin), not my.mail.ru, and NO cookie (verified vs working browser request)"
+    "changelog": "Lulustream : lecteur pris sur lplaygo.com (luluvdo.com est mort)"
 }
