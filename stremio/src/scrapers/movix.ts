@@ -59,6 +59,8 @@ const ECARTES: Array<{ motif: RegExp; raison: string }> = [
   { motif: /\bveev\.\w+/i, raison: 'attestation canvas/WebGL' },
   { motif: /\b(?:listeamed|sandratableother)\.\w+/i, raison: 'interstitiel publicitaire' },
   { motif: /\b(?:younetu|netu|hqq)\.\w+/i, raison: 'hébergeur fermé' },
+  { motif: /\buptostream\.link/i, raison: 'domaine à vendre (hébergeur fermé)' },
+  { motif: /\b1\.multiup\.us/i, raison: 'domaine parqué (redirige vers ww19.multiup.us)' },
   // Lecteurs de la sonde TMDB (« Omega » sur le site) : chaque page est une
   // vérification de sécurité Cloudflare avant tout lecteur.
   { motif: /\bemmmmbed\.\w+/i, raison: 'Turnstile (captcha Cloudflare) devant chaque lecteur' },

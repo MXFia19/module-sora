@@ -38,6 +38,30 @@ test('le déchiffrement sert d’identification : vidzy.org est du fsvid', () =>
   assert.equal(decodeFsvid(pageVidzy, 'https://vidzy.org/embed-x.html'), null);
 });
 
+/** Forme de novembre 2026 (fsvid.lol/embed-lwa4enepfqwt.html, dépaquetée) :
+ *  plus de XOR, la vraie URL est en clair, mais APRÈS le leurre. */
+const pageClaire = `var _fsvHls="https://s1.fsvid.lol/troll/master.m3u8";try{document.cookie="fsv_pe=1"}catch(e){}var player=videojs('vjsplayer',{sources:[{src:"https://r1.fsvid.lol/hls2/02/00000/lwa4enepfqwt_o/master.m3u8?t=hpy4MRDw&s=1794986900&e=86400&f=4304&i=0.0&sp=0",type:"application/x-mpegURL"}],poster:""});`;
+
+test('forme en clair : la vraie URL, jamais le leurre qui la précède', () => {
+  const url = decodeFsvid(pageClaire, 'https://fsvid.lol/embed-lwa4enepfqwt.html');
+  assert.equal(url, 'https://r1.fsvid.lol/hls2/02/00000/lwa4enepfqwt_o/master.m3u8?t=hpy4MRDw&s=1794986900&e=86400&f=4304&i=0.0&sp=0');
+});
+
+test('forme en clair sur vidzy.org (page non paquée)', () => {
+  const vidzy = `<script>var _fsvHls="https://s1.fsvid.lol/troll/master.m3u8";player = videojs('vjsplayer', {sources: [{src: "https://u14.vidzy.org/hls2/06/00016/vsashtvoc6ui_n/master.m3u8?t=mQQy&s=1&e=14400", type: "application/x-mpegURL"}]});</script>`;
+  assert.match(decodeFsvid(vidzy, 'https://vidzy.org/embed-vsashtvoc6ui.html') ?? '', /^https:\/\/u14\.vidzy\.org\/hls2\//);
+});
+
+test('le leurre seul ne rend rien', () => {
+  assert.equal(decodeFsvid('var _fsvHls="https://s1.fsvid.lol/troll/master.m3u8";', 'https://fsvid.lol/embed-x.html'), null);
+});
+
+test('sans leurre, une URL en clair n’est pas prise pour du fsvid', () => {
+  // Le chemin générique s'en charge déjà ; ce décodeur ne doit identifier que
+  // sa propre famille.
+  assert.equal(decodeFsvid('sources:[{src:"https://cdn.example/hls2/x/master.m3u8"}]', 'https://autre.invalid/e/x'), null);
+});
+
 test('une page ordinaire ne déclenche jamais le décodeur', () => {
   // Il tourne désormais sur CHAQUE page du chemin générique : un faux positif
   // coûterait un flux mort à l'utilisateur.

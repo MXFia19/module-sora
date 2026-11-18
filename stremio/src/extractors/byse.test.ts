@@ -55,3 +55,11 @@ test('isBysePage reconnaît la coquille et rien d\'autre', () => {
   assert.equal(isBysePage('<html><head><title>Byse Frontend</title>'), true);
   assert.equal(isBysePage('<html><head><title>Loading...</title>'), false);
 });
+
+test('byse : raison lisible selon l\'erreur de l\'API', async () => {
+  const { byseReason } = await import('./byse');
+  assert.match(byseReason('video record missing: video not found'), /^fichier absent/);
+  assert.match(byseReason('video not found'), /^fichier absent/);
+  assert.match(byseReason('captcha required'), /anti-robot/);
+  assert.match(byseReason(undefined), /pas de bloc playback/);
+});

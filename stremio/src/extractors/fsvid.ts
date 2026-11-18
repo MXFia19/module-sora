@@ -21,6 +21,24 @@ const log = logger('Fsvid');
  *
  *  Les deux constantes sont relues dans la page plutôt que codées en dur :
  *  elles sont ce qu'un exploitant change en premier. */
+/** Depuis novembre 2026, fsvid.lol et vidzy.org ont abandonné le XOR : la
+ *  vraie URL est écrite en clair dans `sources:[{src:"…/hls2/…/master.m3u8"}]`
+ *  — vidzy.org ne la paque même plus. Le leurre `_fsvHls` est toujours là,
+ *  et il précède la vraie URL : la recherche générique le ramassait en
+ *  premier. On ne lit cette forme qu'en présence du leurre, qui sert
+ *  d'identification positive de la famille, et on écarte tout ce qui le
+ *  ressemble. */
+const FSV_DECOY = /\b_fsvHls\s*=/;
+
+function clearFsvidSource(code: string): string | null {
+  if (!FSV_DECOY.test(code)) return null;
+  const urls = [...code.matchAll(/https?:\/\/[^"'\s\\]+?\.(?:m3u8|mp4)(?:\?[^"'\s\\]*)?/gi)].map(m => m[0]);
+  const real = urls.filter(u => !/\/troll\//i.test(u));
+  // L'arborescence hls2 est celle du lecteur XFileSharing qu'ils utilisent :
+  // c'est elle qu'on préfère si la page porte d'autres médias (publicités).
+  return real.find(u => /\/hls2\//i.test(u)) ?? real[0] ?? null;
+}
+
 export function decodeFsvid(page: string, embedUrl: string): string | null {
   const code = `${page}\n${unpackAll(page)}`;
 
@@ -28,7 +46,7 @@ export function decodeFsvid(page: string, embedUrl: string): string | null {
   const params = code.match(/\(\s*(0x[0-9a-fA-F]+|\d+)\s*\+\s*\w+\s*\*\s*(\d+)\s*\+\s*\w+\s*\)\s*&\s*255/);
   // Muet : depuis que le chemin générique essaie ce déchiffrement sur chaque
   // page, l'absence de charge utile est le cas NORMAL, pas un incident.
-  if (!payload || !params) return null;
+  if (!payload || !params) return clearFsvidSource(code);
 
   const start = Number(params[1]);
   const step = Number(params[2]);

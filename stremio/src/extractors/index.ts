@@ -4,9 +4,11 @@ import { logger } from '../log';
 import { recordFailure, hostOf } from '../failures';
 import type { FailureContext } from '../failures';
 import { unpackAll, findMediaUrl, declaredHlsLink } from './unpack';
-import { extractEmbed4me } from './embed4me';
+import { extractEmbed4me, resolveEmbedseek } from './embed4me';
+import { extractUqload } from './uqload';
+import { extractEmbedOrigin } from './embedorigin';
 import { extractFsvid, decodeFsvid } from './fsvid';
-import { extractByse, isBysePage } from './byse';
+import { extractByse, isBysePage, byseFailure } from './byse';
 import { extractHgCloud, isHgCloudPage } from './hgcloud';
 import { extractBlinkflux, isBlinkfluxPage } from './blinkflux';
 import { extractFirestream, isFirestreamPage } from './firestream';
@@ -82,10 +84,16 @@ const HOSTS: Host[] = [
   },
   {
     name: 'Lplayer',
-    match: /lplayer|embed4me|embedseek|neocine|seekplayer|flemmix|p2pstream/i,
+    match: /lplayer|embed4me|embedseek|neocine|seekplayer|flemmix|p2pstream|upns?\.(?:pro|live|one)|\.upn\.one/i,
     async extract(embedUrl) {
       const r = await extractEmbed4me(embedUrl);
-      return r ? { url: r.url, server: 'Lplayer', headers: r.headers } : null;
+      if (r) return { url: r.url, server: 'Lplayer', headers: r.headers };
+      // Depuis novembre 2026 la famille ne sert plus la vidéo elle-même :
+      // /api/public/resolve renvoie vers un autre lecteur (turboembed.com
+      // aujourd'hui), qu'on confie au reste de la chaîne.
+      const hop = await resolveEmbedseek(embedUrl);
+      if (hop?.next) return (await extractOnce(hop.next, embedUrl, 1))[0] ?? null;
+      return null;
     },
   },
   {
@@ -104,8 +112,22 @@ const HOSTS: Host[] = [
   },
   {
     name: 'Lulustream',
-    match: /luluvdo|lulustream|luluvid|lulu\.st/i,
+    match: /luluvdo|lulustream|luluvid|lulu\.st|lplaygo/i,
     extract: (embedUrl, referer) => extractLulustream(embedUrl, referer),
+  },
+  {
+    // uqload n'accepte d'être intégré que depuis sa liste de sites : avec un
+    // autre Referer il rend « Video embed restricted ». extractUqload retente
+    // sans Referer, ce qu'il accepte.
+    name: 'Uqload',
+    match: /uqload\./i,
+    extract: (embedUrl, referer) => extractUqload(embedUrl, referer),
+  },
+  {
+    // Stream Origin : page vide, le lecteur lit /app/v1/play/<code> (JSON en clair).
+    name: 'StreamOrigin',
+    match: /(?:embedorigin|streamorigin)\.[a-z]+\/(?:e|d|v)\//i,
+    extract: embedUrl => extractEmbedOrigin(embedUrl),
   },
   {
     name: 'Vidara',
@@ -133,6 +155,10 @@ const PAGES_MORTES: RegExp[] = [
   /Video (?:not found|does not exist|was deleted|is unavailable)/i,
   /This (?:domain|website) is for sale/i,
   /file (?:not found|was deleted)/i,
+  /File was locked by administrator/i,
+  // L'uploader a limité l'intégration à une liste de sites : rien à lire sans
+  // se faire passer pour l'un d'eux, ce qu'on ne fait pas.
+  /Video embed restricted for this domain[^<\n]*/i,
 ];
 
 export function pageMorte(html: string): string | null {
@@ -224,6 +250,8 @@ async function extractGeneric(
         log.debug(`byse reconnu sur ${page}`);
         return byse;
       }
+      const raison = byseFailure(page);
+      if (raison) { why.reason = raison; return null; }
     }
 
     const seek = await extractEmbed4me(page);

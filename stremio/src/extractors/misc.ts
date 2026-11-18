@@ -95,17 +95,33 @@ const BROWSER_HEADERS = {
  *  dans un bloc packé, comme chez beaucoup d'autres — ce qui vaut à cette
  *  famille son propre extracteur, c'est uniquement le jeu d'en-têtes exigé à
  *  la lecture, que le chemin générique ne pose pas. */
+/** Domaine actuel du lecteur Luluvdo. luluvdo.com ne résout plus (nov. 2026)
+ *  et lulustream.com répond 301 vers lui : les sources continuent pourtant de
+ *  citer les anciens domaines. Seul le code de fichier (12 caractères) compte,
+ *  on le rejoue donc directement ici plutôt que de suivre un domaine mort. */
+export const LULU_HOST = 'https://lplaygo.com';
+
+/** `https://luluvdo.com/e/<code>`, `/d/<code>` ou `/<code>` -> lecteur actuel.
+ *  Rend l'URL d'origine si on n'y trouve pas de code. */
+export function luluEmbedUrl(embedUrl: string): string {
+  const code = embedUrl.match(/^https?:\/\/[^/]+\/(?:[de]\/)?([a-z0-9]{12})(?:[/?#.]|$)/i)?.[1];
+  return code ? `${LULU_HOST}/e/${code.toLowerCase()}` : embedUrl;
+}
+
 export async function extractLulustream(embedUrl: string, referer: string): Promise<ExtractedStream | null> {
-  const html = await getText(embedUrl, { headers: { Referer: referer, ...BROWSER_HEADERS } });
+  const playerUrl = luluEmbedUrl(embedUrl);
+  const html = await getText(playerUrl, { headers: { Referer: referer, ...BROWSER_HEADERS } });
   if (!html) return null;
 
   const url = findMediaUrl(html) ?? findMediaUrl(unpackAll(html));
   if (!url) return null;
 
-  const host = origin(embedUrl);
+  const host = origin(playerUrl);
   return {
     url,
     server: 'Lulustream',
-    headers: { Referer: host ? `${host}/` : referer, ...BROWSER_HEADERS },
+    headers: host
+      ? { Referer: `${host}/`, Origin: host, ...BROWSER_HEADERS }
+      : { Referer: referer, ...BROWSER_HEADERS },
   };
 }

@@ -65,10 +65,30 @@ export function isBysePage(html: string): boolean {
   return /<title>\s*Byse\s+Frontend/i.test(html);
 }
 
+/** Pourquoi la dernière extraction d'un lien n'a rien rendu, tel que l'API le
+ *  dit. Sans ça, un fichier supprimé (« video not found », le cas de loin le
+ *  plus fréquent) remontait comme « lecteur non reconnu », et on cherchait un
+ *  bug d'extraction là où il n'y avait qu'un fichier effacé. */
+const lastFailure = new Map<string, string>();
+
+export function byseFailure(embedUrl: string): string | undefined {
+  return lastFailure.get(embedUrl);
+}
+
+/** Traduit l'erreur de l'API en raison lisible pour le journal des échecs. */
+export function byseReason(error: unknown): string {
+  const msg = typeof error === 'string' ? error : '';
+  if (/not found|missing|deleted|removed/i.test(msg)) return `fichier absent : « ${msg} »`;
+  if (/captcha|fingerprint|verification/i.test(msg)) return `vérification anti-robot (« ${msg} »)`;
+  return msg ? `l'API Byse refuse : « ${msg} »` : "l'API Byse ne rend pas de bloc playback";
+}
+
 export async function extractByse(embedUrl: string, referer: string): Promise<ExtractedStream[] | null> {
   const code = embedUrl.match(/\/(?:e|d|v)\/([A-Za-z0-9_-]+)/)?.[1];
   const host = origin(embedUrl);
   if (!code || !host) return null;
+  lastFailure.delete(embedUrl);
+  if (lastFailure.size > 200) lastFailure.clear();
 
   const data = await getJson<any>(`${host}/api/videos/${code}/`, {
     headers: { Referer: embedUrl, Accept: 'application/json' },
@@ -77,6 +97,7 @@ export async function extractByse(embedUrl: string, referer: string): Promise<Ex
   const playback = data?.playback;
   if (!playback?.payload || !Array.isArray(playback.key_parts)) {
     log.debug(`pas de bloc playback pour ${code}${data?.error ? ` (${data.error})` : ''}`);
+    lastFailure.set(embedUrl, byseReason(data?.error));
     return null;
   }
 
@@ -85,6 +106,7 @@ export async function extractByse(embedUrl: string, referer: string): Promise<Ex
     sources = decodeByse(playback)?.sources ?? [];
   } catch (e) {
     log.debug(`déchiffrement échoué pour ${code}: ${e instanceof Error ? e.message : e}`);
+    lastFailure.set(embedUrl, 'bloc playback indéchiffrable (format Byse changé ?)');
     return null;
   }
 

@@ -137,7 +137,7 @@ function isFilmTab(name: string): boolean {
 
 /** Les tableaux d'`episodes.js` : un par hébergeur, tous alignés sur le même
  *  index d'épisode. On rend, pour l'index demandé, un lien par tableau. */
-function embedsAt(js: string, index: number): string[] {
+export function embedsAt(js: string, index: number): string[] {
   if (!js || js.includes('<html') || js.length < 50) return [];
 
   const out: string[] = [];
@@ -145,22 +145,54 @@ function embedsAt(js: string, index: number): string[] {
   for (const m of js.matchAll(re)) {
     const urls = m[1]!.match(/['"]([^'"]+)['"]/g) ?? [];
     const raw = urls[index]?.replace(/['"]/g, '').trim();
-    if (raw?.startsWith('http')) out.push(raw);
+    // « lien:<id> » : l'adresse du lecteur ne se donne qu'à la demande
+    // (voir resolveLien) — on la garde telle quelle pour la résoudre après.
+    if (raw?.startsWith('http') || raw?.startsWith('lien:')) out.push(raw);
   }
   return out;
 }
 
-/** Récupère l'episodes.js d'un onglet, en suivant le <script src> de la page
- *  quand le fichier n'est pas à l'emplacement attendu. */
-async function episodesJs(tabUrl: string, referer: string): Promise<string> {
+/** Depuis novembre 2026 les tableaux ne sont plus dans un episodes.js mais
+ *  écrits dans la page de saison (`var eps1 = [...]`, sans point-virgule
+ *  garanti). On n'en garde que les tableaux, remis au format d'episodes.js
+ *  pour que `embedsAt` les lise de la même façon. */
+export function epsArraysOnly(html: string): string {
+  const blocks = html.match(/var\s+eps\d+\s*=\s*\[[\s\S]*?\]/g) ?? [];
+  return blocks.map(b => `${b};`).join('\n');
+}
+
+interface EpisodesSource {
+  js: string;
+  /** Jeton qui autorise la résolution des « lien:<id> » de cette page. */
+  jeton?: string;
+}
+
+/** Récupère les tableaux d'un onglet : l'episodes.js s'il existe encore,
+ *  sinon ceux écrits dans la page, sinon le <script src> qu'elle désigne. */
+async function episodesJs(tabUrl: string, referer: string): Promise<EpisodesSource> {
   const base = tabUrl.endsWith('/') ? tabUrl : `${tabUrl}/`;
   const direct = await getText(`${base}episodes.js`, { headers: { Referer: referer } });
-  if (direct && !direct.includes('<html') && direct.length >= 50) return direct;
+  if (direct && !direct.includes('<html') && direct.length >= 50) return { js: direct };
 
-  const page = await getText(tabUrl, { headers: { Referer: referer } });
+  const page = await getText(base, { headers: { Referer: referer } });
+  const inPage = epsArraysOnly(page);
+  if (inPage) {
+    const jeton = page.match(/epsJeton\s*=\s*["']([^"']+)["']/)?.[1];
+    return { js: inPage, jeton };
+  }
   const src = page.match(/<script[^>]+src=['"]([^'"]*episodes\.js[^'"]*)['"]/i)?.[1];
-  if (!src) return '';
-  return getText(absolute(src.trim(), base), { headers: { Referer: referer } });
+  if (!src) return { js: '' };
+  return { js: await getText(absolute(src.trim(), base), { headers: { Referer: referer } }) };
+}
+
+/** `lien:<id>` -> URL du lecteur, via l'API du site et le jeton de la page. */
+async function resolveLien(domain: string, jeton: string, id: string, referer: string): Promise<string | null> {
+  const res = await request(
+    `https://${domain}/api/lien.php?j=${encodeURIComponent(jeton)}&l=${encodeURIComponent(id)}`,
+    { headers: { Referer: referer, Accept: 'application/json' } },
+  );
+  const u = res.json<{ u?: unknown }>()?.u;
+  return typeof u === 'string' && u.startsWith('http') ? u : null;
 }
 
 /** Titres des entrées d'un onglet, quand la page les déclare. Un onglet
@@ -189,8 +221,14 @@ async function streamsAt(tab: Tab, index: number, domain: string): Promise<RawSt
 
   const referer = `https://${domain}/`;
   const perLang = await Promise.all(variants.map(async v => {
-    const js = await episodesJs(v.url, referer);
-    return embedsAt(js, index).map(url => ({ url, lang: v.lang }));
+    const { js, jeton } = await episodesJs(v.url, referer);
+    const pageReferer = v.url.endsWith('/') ? v.url : `${v.url}/`;
+    const urls = await Promise.all(embedsAt(js, index).map(async raw => {
+      if (!raw.startsWith('lien:')) return raw;
+      if (!jeton) return null;
+      return resolveLien(domain, jeton, raw.slice(5), pageReferer).catch(() => null);
+    }));
+    return urls.filter((u): u is string => !!u).map(url => ({ url, lang: v.lang }));
   }));
 
   const embeds = perLang.flat();
