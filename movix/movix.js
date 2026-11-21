@@ -493,36 +493,43 @@ async function extractEpisodes(href) {
             episodes.push({
                 number: 1,
                 title: details.title || "Le Film",
+                seasonTitle: "Film",
                 image: details.backdrop_path ? `https://image.tmdb.org/t/p/w500${details.backdrop_path}` : "",
                 href: `stream/movie/${id}`
             });
         } else if (type === 'tv') {
-            if (details.seasons) {
-                for (const season of details.seasons) {
-                    const sNum = season.season_number;
-                    if (sNum === 0) continue; 
+            // Saisons dans l'ordre de TMDB. `seasonTitle` : le nom TMDB (« Saison 1 », « Arc Water Seven »…), que
+            // Tsumi affiche dans son choix de saison ; `season` : le vrai numéro ; `title` : le seul nom de l'épisode.
+            // Sans les spéciaux (saison 0) : les sources de Movix n'en ont pas, et son secours anime (index absolu)
+            // lancerait l'épisode 1 de la série à la place.
+            const seasons = (details.seasons || []).filter(s => typeof s.season_number === "number" && s.season_number > 0 && s.episode_count !== 0);
+            seasons.sort((a, b) => a.season_number - b.season_number);
+            for (const season of seasons) {
+                const sNum = season.season_number;
+                const sName = String(season.name || "").trim() || `Saison ${sNum}`;
 
-                    const seasonUrl = `https://api.themoviedb.org/3/tv/${id}/season/${sNum}?api_key=${TMDB_KEY}&language=fr-FR`;
-                    try {
-                        const sRes = await soraFetch(seasonUrl);
-                        if (!sRes) continue;
-                        
-                        const sText = typeof sRes === "string" ? sRes : await sRes.text();
-                        const sData = JSON.parse(sText);
+                const seasonUrl = `https://api.themoviedb.org/3/tv/${id}/season/${sNum}?api_key=${TMDB_KEY}&language=fr-FR`;
+                try {
+                    const sRes = await soraFetch(seasonUrl);
+                    if (!sRes) continue;
 
-                        if (sData.episodes) {
-                            sData.episodes.forEach(ep => {
-                                episodes.push({
-                                    number: ep.episode_number,
-                                    season: sNum,
-                                    title: ep.name ? `S${sNum}E${ep.episode_number} - ${ep.name}` : `Épisode ${ep.episode_number}`,
-                                    image: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : "",
-                                    href: `stream/tv/${id}/${sNum}/${ep.episode_number}`
-                                });
-                            });
-                        }
-                    } catch (err) { }
-                }
+                    const sText = typeof sRes === "string" ? sRes : await sRes.text();
+                    const sData = JSON.parse(sText);
+
+                    (sData.episodes || []).forEach(ep => {
+                        const n = parseInt(ep.episode_number, 10);
+                        if (isNaN(n)) return;
+                        const name = String(ep.name || "").trim();
+                        episodes.push({
+                            number: n,
+                            season: sNum,
+                            seasonTitle: sName,
+                            title: name || `Épisode ${n}`,
+                            image: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : "",
+                            href: `stream/tv/${id}/${sNum}/${n}`
+                        });
+                    });
+                } catch (err) { }
             }
         }
         

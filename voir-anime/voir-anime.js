@@ -179,6 +179,16 @@ async function extractDetails(url) {
 }
 
 // --- 3. ÉPISODES ---
+// Texte d'un bout de HTML : sans balises, entités décodées, espaces réduits.
+function vaText(s) {
+    return String(s || "").replace(/<[^>]+>/g, " ")
+        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+        .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")
+        .replace(/\s+/g, " ").trim();
+}
+
 async function extractEpisodes(url) {
     console.log(`[Episodes] 📂 Recherche des épisodes pour : ${url}`);
     try {
@@ -186,19 +196,58 @@ async function extractEpisodes(url) {
         let html = await response.text();
         let results = [];
         
+        // Sur voiranime, une fiche = une saison (jujutsu-kaisen, jujutsu-kaisen-2…) : son nom est le titre de la
+        // fiche. Les épisodes s'écrivent « Titre - 24 VOSTFR - 24 », « … - OAV03 », « … - 176x177 » (double) ou
+        // « … - (FILM VF) One Piece Red » : le dernier morceau est le libellé du site.
+        const pageTitle = vaText((html.match(/<div class=["']post-title["'][^>]*>\s*<h1[^>]*>([\s\S]*?)<\/h1>/i) || html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
         const epRegex = /<li class=["'][^"']*wp-manga-chapter[^"']*["'][^>]*>[\s\S]*?<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
         let match;
+        const seen = new Set();
 
         while ((match = epRegex.exec(html)) !== null) {
             let epHref = match[1];
-            let epTitle = match[2].replace(/<[^>]+>/g, '').trim();
-            let numMatch = epTitle.match(/(?:Épisode|Episode|Ep|OAV)\s*(\d+)/i) || epHref.match(/-(\d+)(?:-vostfr|-vf)?\/?$/i);
-            let epNumber = numMatch ? parseInt(numMatch[1]) : (results.length + 1);
+            if (seen.has(epHref)) continue;
+            seen.add(epHref);
+            let rawTitle = vaText(match[2]);
+            let label = rawTitle.split(" - ").pop().trim();
+            // Numéro : celui du libellé (« 24 », le premier de « 176x177 »), sinon du titre ou de l'adresse.
+            let numMatch = label.match(/^(\d+)(?:\.\d+|x\d+)?$/i) || rawTitle.match(/(?:Épisode|Episode|Ep|OAV)\s*(\d+)/i) || epHref.match(/-(\d+)(?:-vostfr|-vf)?\/?$/i);
+            let epNumber = numMatch ? parseInt(numMatch[1], 10) : (results.length + 1);
 
-            results.push({ href: epHref, title: epTitle, number: epNumber });
+            // Genre et nom affiché : « Épisode N » pour un épisode numéroté (Tsumi affiche alors N, même 176-177),
+            // sinon le nom du site sans son préfixe « (FILM VF) ».
+            let kind = "ep", title;
+            const typed = label.match(/^\((FILM|SPECIAL|SP[EÉ]CIAL|OAV|OVA|ONA)\b[^)]*\)\s*(.*)$/i);
+            if (/^\d+(?:\.\d+)?$/.test(label)) title = `Épisode ${label.replace(/^0+(?=\d)/, "")}`;
+            else if (/^\d+x\d+$/i.test(label)) title = `Épisode ${label.split(/x/i).map(n => n.replace(/^0+(?=\d)/, "")).join("-")}`;
+            else if (/^(OAV|OVA)\s*\d+$/i.test(label)) { kind = "oav"; title = `OAV ${label.replace(/^\D+0*(?=\d)/, "")}`; }
+            else if (typed) {
+                kind = /film/i.test(typed[1]) ? "film" : /oav|ova/i.test(typed[1]) ? "oav" : "special";
+                title = typed[2].trim() || pageTitle || rawTitle;
+            }
+            else title = label || rawTitle;
+
+            results.push({ href: epHref, title, number: epNumber, kind });
         }
 
         results.sort((a, b) => a.number - b.number);
+
+        // `seasonTitle` sur tous les épisodes : le nom de la fiche ; si la fiche mêle épisodes et OAV / films /
+        // spéciaux, ces derniers vont dans leur propre groupe. `season` seulement quand le site l'écrit (« Saison 2 »,
+        // « 2nd Season ») et 0 pour OAV, films et spéciaux : jamais de numéro deviné (« Kimetsu no Yaiba 3 » n'est
+        // pas forcément la saison 3 de TMDB).
+        const kinds = new Set(results.map(r => r.kind));
+        const groupName = { oav: "OAV", film: "Films", special: "Spéciaux" };
+        const sMatch = pageTitle.match(/\b(?:saison|season)\s*(\d+)\b/i) || pageTitle.match(/\b(\d+)(?:st|nd|rd|th)\s+season\b/i);
+        const pageSeason = sMatch ? parseInt(sMatch[1], 10) : null;
+        const pageName = pageTitle || "Épisodes";
+        results = results.map(r => {
+            const ep = { href: r.href, title: r.title, name: r.title, number: r.number };
+            ep.seasonTitle = r.kind !== "ep" && kinds.size > 1 ? groupName[r.kind] : pageName;
+            if (r.kind !== "ep") ep.season = 0;
+            else if (pageSeason !== null) ep.season = pageSeason;
+            return ep;
+        });
         console.log(`[Episodes] ✅ ${results.length} épisodes trouvés.`);
         return JSON.stringify(results);
     } catch (e) { 
