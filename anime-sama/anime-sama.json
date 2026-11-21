@@ -6,7 +6,7 @@
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.1.4",
+    "version": "1.1.5",
     "language": "French",
     "streamType": "MP4",
     "quality": "1080p",
@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "épisodes lus dans la page de saison (episodes.js a disparu) et liens « lien:<id> » résolus via /api/lien.php"
+    "changelog": "saisons nommées comme sur le site (seasonTitle : « Saison 1 Director's Cut », « Films », « Kai »…), saisons avec une apostrophe et saisons masquées bien lues, noms d'épisodes du site (« Épisode 12.5 », « Memory Snow »)"
 }

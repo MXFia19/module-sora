@@ -154,6 +154,96 @@ async function extractDetails(url) {
 }
 
 // --- 3. ÉPISODES ---
+// Saisons de l'œuvre : ses appels panneauAnime("nom", "chemin"), dans l'ordre du site, lus ligne par ligne comme le
+// fait la page elle-même. Ignorés : les modèles ("nom", "url"), les lignes en commentaire (// ou <!-- -->, saison
+// masquée « Bientôt de retour ») et une même saison dans une autre langue (le lecteur propose déjà VOSTFR, VF et VA).
+function seasonTabs(html, url) {
+    const re = /panneauAnime\s*\(\s*(["'])((?:\\.|(?!\1).)*)\1\s*,\s*(["'])((?:\\.|(?!\3).)*)\3\s*\)/g;
+    const tabs = [];
+    const seen = new Set();
+    let bloc = false;
+    for (let line of String(html || "").split(/\r?\n/)) {
+        line = line.trim();
+        const cachee = bloc || /^(<!--|\/\/)/.test(line) || line.includes("-->");
+        if (/^<!--/.test(line) && !line.includes("-->")) bloc = true;
+        if (line.includes("-->")) bloc = false;
+        if (cachee || /^\/\*/.test(line)) continue;
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(line)) !== null) {
+            const name = m[2].replace(/\\(.)/g, "$1").trim();
+            const path = m[4].replace(/\\(.)/g, "$1").trim();
+            if (!name || !path || /^(nom|name)$/i.test(name) || /^url$/i.test(path)) continue;
+            // Sans URL() : absent du moteur JavaScript de certaines applis.
+            const origin = (url.match(/^https?:\/\/[^/]+/) || [""])[0];
+            const full = /^https?:\/\//i.test(path) ? path : path.startsWith("/") ? origin + path : url + path;
+            const key = full.replace(/\/(vostfr|vf|va)(\/|$)/i, "/lang$2").replace(/\/$/, "");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            tabs.push({ name, url: full });
+        }
+    }
+    return tabs;
+}
+
+// Noms des épisodes d'une page de saison, comme sa liste déroulante : la dernière liste écrite par la page
+// (resetListe(); creerListe(1, 12); newSP(12.5); newSPF("Memory Snow"); finirListe(13);), hors commentaires : la
+// page garde un modèle « resetListe(); creerListe(debut, fin)… » en commentaire. Sans liste : [].
+function episodeNames(html, count) {
+    const scripts = String(html || "").match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [];
+    let block = "";
+    for (const script of scripts) {
+        const code = script.replace(/\/\*[\s\S]*?\*\//g, "")
+            .split(/\r?\n/).map(l => l.replace(/^\s*\/\/.*$/, "")).join("\n");
+        const at = code.lastIndexOf("resetListe(");
+        if (at !== -1) block = code.slice(at);
+    }
+    if (!block) return [];
+    const names = [];
+    let retards = 0;
+    const call = /\b(creerListe|finirListe|newSPF|newSP)\s*\(/g;
+    let m;
+    while ((m = call.exec(block)) !== null && names.length < 5000) {
+        const args = callArgs(block, call.lastIndex);
+        if (m[1] === "creerListe") {
+            const debut = parseInt(args[0], 10), fin = parseInt(args[1], 10);
+            if (isNaN(debut) || isNaN(fin)) continue;
+            for (let i = debut; i <= fin && names.length < 5000; i++) names.push(`Épisode ${i}`);
+        } else if (m[1] === "finirListe") {
+            const debut = parseInt(args[0], 10);
+            if (isNaN(debut)) continue;
+            for (let i = debut; i <= count - retards && names.length < 5000; i++) names.push(`Épisode ${i}`);
+        } else if (m[1] === "newSP") {
+            names.push(`Épisode ${args[0]}`);
+            retards++;
+        } else {
+            names.push(args[0] || `Épisode ${names.length + 1}`);
+            retards++;
+        }
+    }
+    return names;
+}
+
+// Arguments d'un appel (chaînes sans leurs guillemets), lus jusqu'à sa parenthèse fermante.
+function callArgs(code, from) {
+    const args = [];
+    let current = "", quote = null;
+    for (let i = from; i < code.length; i++) {
+        const c = code[i];
+        if (quote) {
+            if (c === "\\") { current += code[++i] || ""; continue; }
+            if (c === quote) { quote = null; continue; }
+            current += c;
+            continue;
+        }
+        if (c === '"' || c === "'") { quote = c; continue; }
+        if (c === ",") { args.push(current.trim()); current = ""; continue; }
+        if (c === ")") { args.push(current.trim()); break; }
+        current += c;
+    }
+    return args;
+}
+
 async function extractEpisodes(url) {
     console.log(`[Episodes AS] 📂 Analyse multi-saisons : ${url}`);
     try {
@@ -163,27 +253,16 @@ async function extractEpisodes(url) {
         const response = await fetchv2(url, headers, "GET");
         const html = await response.text();
 
-        const seasonRegex = /panneauAnime\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/gi;
-        let match;
-        let tabs = [];
-        
-        while ((match = seasonRegex.exec(html)) !== null) {
-            let name = match[1].trim();
-            let path = match[2].trim();
-            if (name.toLowerCase() === 'nom' || path.toLowerCase() === 'url') continue;
-            let fullUrl = path.startsWith('http') ? path : url + path;
-            tabs.push({ name: name, url: fullUrl });
-        }
-
+        let tabs = seasonTabs(html, url);
         if (tabs.length === 0) tabs.push({ name: "Saison 1", url: url + "saison1/vostfr" });
 
         let results = [];
-        let fallbackSeason = 1;
 
         for (let tab of tabs) {
             try {
                 let pageUrl = tab.url.endsWith('/') ? tab.url : tab.url + '/';
                 let jsUrl = pageUrl + "episodes.js";
+                let pageHtml = "";
 
                 let jsRes = await fetchv2(jsUrl, headers, "GET");
                 let jsContent = await jsRes.text();
@@ -191,6 +270,7 @@ async function extractEpisodes(url) {
                 if (!jsContent || jsContent.includes("<html") || jsContent.length < 50) {
                     let tabRes = await fetchv2(tab.url, headers, "GET");
                     let tabText = await tabRes.text();
+                    pageHtml = tabText;
                     // Nouveau format (nov. 2026) : plus d'episodes.js, les tableaux
                     // eps1, eps2… sont écrits dans la page de saison elle-même.
                     let inPage = epsArraysOnly(tabText);
@@ -202,7 +282,7 @@ async function extractEpisodes(url) {
                     if (scriptMatch) {
                         let scriptSrc = scriptMatch[1].trim();
                         let baseFolder = tab.url.endsWith('/') ? tab.url : tab.url + '/';
-                        jsUrl = scriptSrc.startsWith('http') ? scriptSrc : (scriptSrc.startsWith('/') ? new URL(url).origin + scriptSrc : baseFolder + scriptSrc);
+                        jsUrl = scriptSrc.startsWith('http') ? scriptSrc : (scriptSrc.startsWith('/') ? (url.match(/^https?:\/\/[^/]+/) || [""])[0] + scriptSrc : baseFolder + scriptSrc);
                         jsRes = await fetchv2(jsUrl, headers, "GET");
                         jsContent = await jsRes.text();
                     }
@@ -213,31 +293,41 @@ async function extractEpisodes(url) {
                 const arrayRegex = /(?:var|let|const)\s+[a-zA-Z0-9_]+\s*=\s*\[([\s\S]*?)\]/gm;
                 let arrMatch;
                 let maxEpisodes = 0;
+                let firstCount = -1;
 
                 while ((arrMatch = arrayRegex.exec(jsContent)) !== null) {
                     let urls = arrMatch[1].match(/['"]([^'"]+)['"]/g) || [];
+                    if (firstCount < 0) firstCount = urls.length;
                     if (urls.length > maxEpisodes) maxEpisodes = urls.length;
                 }
 
                 if (maxEpisodes > 0) {
                     let cleanTabName = tab.name.replace(/\(?(VOSTFR|VF)\)?/i, '').trim();
-                    let currentSeason = fallbackSeason;
+                    // `season` : le numéro de saison pour les titres reliés (TMDB S2E3 -> « Saison 2 », épisode 3),
+                    // 0 pour les films et OAV, absent pour le reste (Kai, Director's Cut…). `seasonTitle` : le nom
+                    // du site, que Tsumi affiche dans son choix de saison.
                     let seasonMatch = cleanTabName.match(/saison\s*(\d+)/i);
-                    
-                    if (seasonMatch) currentSeason = parseInt(seasonMatch[1]);
-                    else if (cleanTabName.toLowerCase().includes('film') || cleanTabName.toLowerCase().includes('oav')) currentSeason = 0; 
+                    let currentSeason = seasonMatch ? parseInt(seasonMatch[1], 10)
+                        : /film|oav|ova/i.test(cleanTabName) ? 0 : null;
+                    // Noms de la liste déroulante du site (« Épisode 12.5 », « Memory Snow »…). Le numéro reste la
+                    // place dans la liste (entier, comme l'attendent les applis).
+                    let names = episodeNames(pageHtml, firstCount > 0 ? firstCount : maxEpisodes);
 
                     for (let i = 0; i < maxEpisodes; i++) {
                         let separator = jsUrl.includes('?') ? '&' : '?';
                         let epHref = `${jsUrl}${separator}episode_index=${i}`;
-                        let epTitle = maxEpisodes === 1 ? cleanTabName : `Épisode ${i + 1}`;
-                        
-                        results.push({
+                        let siteName = names[i] || "";
+                        let epTitle = maxEpisodes === 1
+                            ? (siteName && !/^épisode\s/i.test(siteName) ? siteName : cleanTabName)
+                            : (siteName || `Épisode ${i + 1}`);
+
+                        let episode = {
                             title: epTitle, name: epTitle, href: epHref,
-                            number: i + 1, season: currentSeason     
-                        });
+                            number: i + 1, seasonTitle: cleanTabName
+                        };
+                        if (currentSeason !== null) episode.season = currentSeason;
+                        results.push(episode);
                     }
-                    if (!cleanTabName.toLowerCase().includes('film')) fallbackSeason++;
                 }
             } catch (e) { }
         }
