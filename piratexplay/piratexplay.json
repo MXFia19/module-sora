@@ -6,7 +6,7 @@
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.0",
+    "version": "1.0.1",
     "language": "Hindi",
     "streamType": "HLS",
     "quality": "720p",
@@ -19,5 +19,5 @@
     "softsub": true,
     "supportsSora": true,
     "supportsLuna": true,
-    "changelog": "first release: anime with Indian dubs from piratexplay.cc (site search, per-season episodes API); plays the Vidmoly embeds (multi-audio HLS), other hosts are reported as unsupported"
+    "changelog": "nouveaux lecteurs : Ravok, StreamRuby (Rubystm), Byse (via les hubs HD/FHD/HQ) et Blakite, en plus de Vidmoly ; Abyss, GDMirror et les hébergeurs morts restent signalés"
 }

@@ -6,7 +6,7 @@
         "icon": "https://i.pinimg.com/1200x/89/78/33/89783349d3270e4ab071db9a038db8ea.jpg",
         "url": "https://github.com/MXFia19"
     },
-    "version": "1.0.9",
+    "version": "1.0.10",
     "language": "French",
     "streamType": "MP4",
     "quality": "1080p",
@@ -17,7 +17,7 @@
     "downloadSupport": true,
     "asyncJS": true,
     "softsub": false,
-    "changelog": "Épisodes nommés comme sur le site (« Épisode 24 », « Épisode 176-177 », « OAV 2 », nom du film) et nom de la fiche comme saison ; numéros des épisodes doubles corrigés",
+    "changelog": "Lecteur myTV (voembed.net, un Vidmoly) lu comme Vidmoly au lieu de VOE ; Streamtape relu (calcul du lien corrigé) ; tous les lecteurs pris directement dans la page",
     "supportsSora": true,
     "supportsLuna": true
 }

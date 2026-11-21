@@ -257,7 +257,13 @@ async function extractSibnet(embedUrl) {
 async function extractVoe(embedUrl) {
     try {
         const res = await soraFetch(embedUrl, { headers: { "User-Agent": NAK_UA, "Referer": `${BASE_URL}/` } });
-        const html = await res.text();
+        let html = await res.text();
+        // Domaines VOE tournants (derricknationtop.com…) : page « Redirecting… » vers le vrai lecteur.
+        const redir = /<title>\s*Redirecting/i.test(html) ? html.match(/window\.location\.href\s*=\s*["']([^"']+)["']/i) : null;
+        if (redir && redir[1] && redir[1].startsWith("http")) {
+            const r2 = await soraFetch(redir[1], { headers: { "User-Agent": NAK_UA, "Referer": `${BASE_URL}/` } });
+            html = r2 && typeof r2.text === "function" ? await r2.text() : "";
+        }
         const u = voeExtractor(html);
         if (u) {
             const origin = "https://" + ((embedUrl.match(/https?:\/\/([^/]+)/) || [])[1] || "") + "/";
@@ -341,6 +347,28 @@ async function extractLulustream(embedUrl) {
     return null;
 }
 
+// UQLOAD : page packée -> sources:["…m3u8"]. uqload ne s'intègre que depuis sa liste de sites :
+// ailleurs il répond « Video embed restricted for this domain » ; sans Referer il sert la page
+// normale. (porté de movix)
+async function extractUqload(embedUrl) {
+    try {
+        const base = { "User-Agent": NAK_UA, "Accept-Language": "fr-FR,fr;q=0.9" };
+        let res = await soraFetch(embedUrl, { headers: { ...base, "Referer": `${BASE_URL}/` } });
+        let html = res && typeof res.text === "function" ? await res.text() : "";
+        if (/embed restricted/i.test(html)) {
+            res = await soraFetch(embedUrl, { headers: base });
+            html = res && typeof res.text === "function" ? await res.text() : "";
+        }
+        let u = unpackStream(html);
+        if (!u) { const m = html.match(/sources\s*:\s*\[\s*["']([^"']+)["']\s*\]/i); if (m) u = m[1]; }
+        if (u) {
+            const origin = "https://" + ((embedUrl.match(/https?:\/\/([^/]+)/) || [])[1] || "") + "/";
+            return { streamUrl: u.replace(/\\\//g, "/"), headers: { "User-Agent": NAK_UA, "Referer": origin } };
+        }
+    } catch (e) {}
+    return null;
+}
+
 // GÉNÉRIQUE : pour les hosts non spécifiques (lulustream, vidzy, sendvid, ...).
 // Tente un lien direct .m3u8/.mp4 puis un dépack eval(p,a,c,k,e,d).
 async function extractGeneric(embedUrl) {
@@ -348,7 +376,10 @@ async function extractGeneric(embedUrl) {
         const origin = "https://" + ((embedUrl.match(/https?:\/\/([^/]+)/) || [])[1] || "") + "/";
         const res = await soraFetch(embedUrl, { headers: { "User-Agent": NAK_UA, "Referer": `${BASE_URL}/` } });
         const html = await res.text();
-        let u = unpackStream(html);
+        // fsvid / vidzy : la vraie URL est en clair, mais un leurre (/troll/master.m3u8) la précède.
+        let u = fsvidClearSource(html + "\n" + unpackFirst(html));
+        if (!u) u = unpackStream(html);
+        if (u && /\/troll\//i.test(u)) u = null;
         // sendvid & co : parfois la source est dans <source src="..."> ou file:"..."
         if (!u) {
             const m = html.match(/<source[^>]+src=["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i)
@@ -361,6 +392,32 @@ async function extractGeneric(embedUrl) {
         }
     } catch (e) {}
     return null;
+}
+
+// fsvid / vidzy : URL en clair à côté du leurre « _fsvHls » (/troll/…). On
+// n'utilise cette lecture qu'en présence du leurre, qui identifie la famille. (porté de movix)
+function fsvidClearSource(code) {
+    if (!/\b_fsvHls\s*=/.test(code)) return null;
+    const urls = code.match(/https?:\/\/[^"'\s\\]+?\.(?:m3u8|mp4)(?:\?[^"'\s\\]*)?/gi) || [];
+    const real = urls.filter(u => !/\/troll\//i.test(u));
+    return real.find(u => /\/hls2\//i.test(u)) || real[0] || null;
+}
+
+// Premier bloc p.a.c.k.e.r dépaqueté (vidzy.org paque encore sa page). (porté de movix)
+function unpackFirst(html) {
+    try {
+        const packed = (html.match(/eval\(function\(p,a,c,k,e,d\).*?\.split\('\|'\)\)\)/) || [])[0];
+        if (!packed) return "";
+        const m = packed.match(/}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\('\|'\)/);
+        if (!m) return "";
+        let p = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"');
+        const a = parseInt(m[3], 10);
+        let c = parseInt(m[4], 10);
+        const k = m[6].split('|');
+        const e = function (n) { return (n < a ? '' : e(parseInt(n / a))) + ((n = n % a) > 35 ? String.fromCharCode(n + 29) : n.toString(36)); };
+        while (c--) { if (k[c]) p = p.replace(new RegExp('\\b' + e(c) + '\\b', 'g'), k[c]); }
+        return p.replace(/\\\//g, "/");
+    } catch (err) { return ""; }
 }
 
 // --- Déchiffreurs d'embeds (portés depuis voir-anime/movix) ---
@@ -613,6 +670,7 @@ async function extractStreamUrl(url) {
             else if (host.includes("lpayer") || host.includes("embed4me") || embed.includes("embed4me") || embed.includes("embedseek")) extracted = await extractEmbed4me(embed);
             else if (host.includes("filemoon") || host.includes("bysesukior") || embed.includes("bysesukior") || embed.includes("filemoon")) extracted = await extractFilemoon(embed);
             else if (host.includes("lulu") || embed.includes("lulustream") || embed.includes("luluvdo")) extracted = await extractLulustream(embed);
+            else if (host.includes("uqload") || embed.includes("uqload")) extracted = await extractUqload(embed);
 
             // Secours générique (lulustream, vidzy, sendvid... + si un extracteur dédié a échoué)
             if (!extracted && !embed.includes("mail.ru")) {

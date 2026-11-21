@@ -437,8 +437,11 @@ async function extractStreamUrl(url) {
             let prefix = `[${embed.lang}]`;
             let streamCountBefore = streams.length;
 
+            // ansembed.net (1er lecteur de chaque épisode) et voembed.net sont des domaines Vidmoly.
+            const isVidmoly = urlLower.includes("vidmoly") || urlLower.includes("ansembed") || urlLower.includes("voembed");
+
             // 1. LECTEUR VOE
-            if (urlLower.includes("voe.sx") || urlLower.includes("voe.network") || urlLower.includes("voe") || urlLower.includes("lancewhosedifficult")) {
+            if (!isVidmoly && (urlLower.includes("voe.sx") || urlLower.includes("voe.network") || urlLower.includes("voe") || urlLower.includes("lancewhosedifficult"))) {
                 console.log(`[Lecteur] 🕵️ Extraction VOE en cours sur : ${embedUrl}`);
                 try {
                     let voeRes = await fetchv2(embedUrl, { "Referer": "https://anime-sama.to/" }, "GET");
@@ -477,10 +480,11 @@ async function extractStreamUrl(url) {
                 } catch (e) {}
             } 
             // 4. LECTEUR VIDMOLY
-            else if (urlLower.includes("vidmoly")) {
+            else if (isVidmoly) {
                 try {
                     let fixedVidUrl = embedUrl.replace(/vidmoly\.(to|me|net|ru|is)/i, "vidmoly.biz");
-                    const vidRes = await fetchv2(fixedVidUrl, { "Referer": "https://vidmoly.biz/" }, "GET");
+                    const vidRef = urlLower.includes("vidmoly") ? "https://vidmoly.biz/" : "https://anime-sama.to/";
+                    const vidRes = await fetchv2(fixedVidUrl, { "Referer": vidRef }, "GET");
                     const vidHtml = await vidRes.text();
                     const fileMatch = vidHtml.match(/file\s*:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/i) || vidHtml.match(/["'](https?:\/\/[^"']+\.(?:m3u8|mp4)[^"']*)["']/i);
                     if (fileMatch) {
@@ -585,17 +589,34 @@ async function extractStreamUrl(url) {
                     const req = await fetchv2(embedUrl, { "Referer": "https://anime-sama.to/" }, "GET");
                     const html = await req.text();
 
-                    if (html.includes('/vidhide/') || html.includes('eval(function(p,a,c,k,e,d)')) {
-                        let streamUrl = vidhideExtractor(html); 
+                    // VOE sous un domaine sans « voe » (derricknationtop.com, megankiddifference.com…) :
+                    // une page « Redirecting… » qui renvoie vers le vrai lecteur VOE.
+                    let voeHtml = html;
+                    const voeRedirect = /<title>\s*Redirecting/i.test(html) ? html.match(/window\.location\.href\s*=\s*["']([^"']+)["']/i) : null;
+                    if (voeRedirect && voeRedirect[1] && voeRedirect[1].startsWith("http")) {
+                        const vr = await fetchv2(voeRedirect[1], { "Referer": "https://anime-sama.to/" }, "GET");
+                        voeHtml = vr ? await vr.text() : "";
+                    }
+                    const voeUrl = voeExtractor(voeHtml);
+
+                    if (voeUrl) {
+                        const typeStr = voeUrl.includes(".m3u8") ? "HLS" : "MP4";
+                        streams.push({ title: `${prefix} VOE (${typeStr})`, streamUrl: voeUrl, headers: { "Referer": embedUrl } });
+                        extractedNames.push(`${prefix} VOE`);
+                    }
+                    else if (html.includes('/vidhide/') || html.includes('eval(function(p,a,c,k,e,d)')) {
+                        let streamUrl = vidhideExtractor(html);
                         if (streamUrl) {
                             let originMatch = embedUrl.match(/^(https?:\/\/[^\/]+)/i);
                             let originUrl = originMatch ? originMatch[1] + "/" : "https://vidhide.com/";
-                            streams.push({ 
-                                title: `${prefix} Vidhide`, 
-                                streamUrl: streamUrl, 
-                                headers: { "Referer": originUrl, "User-Agent": "Mozilla/5.0" } 
+                            // uqload.vc sert la même page packée : on le nomme pour ce qu'il est.
+                            const hostName = urlLower.includes("uqload") ? "Uqload" : "Vidhide";
+                            streams.push({
+                                title: `${prefix} ${hostName}`,
+                                streamUrl: streamUrl,
+                                headers: { "Referer": originUrl, "User-Agent": "Mozilla/5.0" }
                             });
-                            extractedNames.push(`${prefix} Vidhide`);
+                            extractedNames.push(`${prefix} ${hostName}`);
                         }
                     }
                 } catch(e) {}
@@ -780,7 +801,9 @@ async function embed4meExtractor(embedUrl) {
         if (!host || !id) return null;
         const apiUrl = `https://${host}/api/v1/video?id=${id}&w=1680&h=1050&r=`;
         // ⚠️ N'envoyer QUE le User-Agent (Origin/Referer -> 400 sur cette famille).
-        const res = await fetchv2(apiUrl, { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Accept": "*/*" }, "GET");
+        // Sans suivre les redirections : lpayer.embed4me.com renvoie depuis nov. 2026 un 308 vers
+        // lui-même à l'infini (≈ 25 s perdues par épisode avant l'échec). L'API répond en direct.
+        const res = await fetchv2(apiUrl, { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Accept": "*/*" }, "GET", null, false);
         if (!res || typeof res.text !== "function") return null;
         const hex = (await res.text()).trim();
         if (!/^[0-9a-fA-F]+$/.test(hex)) return null;

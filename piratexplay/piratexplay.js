@@ -12,13 +12,20 @@
 //   Episode  : /episode/<season slug>-<s>x<e>/   Film: /movies/<slug>/
 //
 // Playback: each page lists ~15 embeds (iframe src / data-src), all tagged
-// "Multi Audio". The ones resolvable in pure JS are Vidmoly's
-// (`sources: [{ file: '<master.m3u8>' }]`, often under .net and .biz with the
-// same id). The others are out of reach here: Vexal checks the embedding
-// domain, Abyss (short.icu), UPNS (cloudy.upns.one), StreamP2P and the
-// GDMirror hubs (index11 / gdmirrorbot) hand out AES-wrapped ids for those
-// same hosts, Rubystm was down and Strmup / TurboVid did not answer when
-// this was written. They are reported, not offered.
+// "Multi Audio". Read here (November 2026):
+//   - Ravok     /proxy/play.php?url=https://ravok.buzz/video/<hash>
+//               -> POST /player/index.php?data=<hash>&do=getVideo -> {hls, videoSource}
+//   - Rubystm   StreamRuby (XFileSharing): GET /dl?op=embed&file_code=<code> -> jwplayer file:"…m3u8"
+//   - index11   /public/player/index11.php?id=… lists data-link servers in clear;
+//               the Byse one (bysezejataos.com…) answers /api/videos/<code>/ with
+//               an AES-256-GCM "playback" block, decrypted locally (no attestation)
+//   - Blakite   blakiteapi.xyz/embed/<tmdb>/<s>-<e>: window.CFG -> Rumble CDN mp4/HLS
+//   - Vidmoly   `sources: [{ file: '<master.m3u8>' }]`, often under .net and .biz
+// Not read: Abyss (short.icu / abyssplayer, also behind proxy/multi.php) is a
+// protected player; GDMirror (gdmirrorbot / iqsmartgames) checks the embedding
+// domain with obfuscated code and a fingerprint; UPNS answers "not found" for
+// every file; Strmup, Vidstreaming and Vudeo are parked domains; Emturbovid /
+// Turbovidhls do not resolve. They are reported, not offered.
 
 const PX_BASE = "https://piratexplay.cc";
 const PX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -79,8 +86,8 @@ async function getPage(url, referer) {
     return await readBody(response);
 }
 
-async function getJson(url) {
-    const response = await soraFetch(url, { method: 'GET', headers: { "Accept": "application/json", "Referer": `${PX_BASE}/` } });
+async function getJson(url, referer) {
+    const response = await soraFetch(url, { method: 'GET', headers: { "Accept": "application/json", "Referer": referer || `${PX_BASE}/` } });
     const body = await readBody(response);
     if (!body) return null;
     try { return JSON.parse(body); } catch (e) { return null; }
@@ -127,6 +134,252 @@ async function vidmolyExtract(embedUrl) {
     if (!m) return null;
     const origin = `https://${hostOf(url)}`;
     return { title: "Vidmoly · HLS · Multi Audio", streamUrl: m[1], headers: { "User-Agent": PX_UA, "Referer": `${origin}/`, "Origin": origin } };
+}
+
+// --- Ravok (FirePlayer): the iframe gives the hash, one POST gives the HLS master.
+// The signed link is tied to the caller's IP: use it right away, never cache it.
+async function ravokExtract(embedUrl) {
+    const m = String(embedUrl).match(/^https?:\/\/([^/]+)\/video\/([a-f0-9]{16,64})/i);
+    if (!m) return null;
+    const host = m[1], hash = m[2];
+    const response = await soraFetch(`https://${host}/player/index.php?data=${hash}&do=getVideo`, {
+        method: 'POST',
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": `https://${host}/video/${hash}`
+        },
+        body: `hash=${hash}&r=${encodeURIComponent(PX_BASE + "/")}`
+    });
+    let data = null;
+    try { data = JSON.parse(await readBody(response)); } catch (e) { return null; }
+    // Only the HLS form is in clear; the other one hides its mp4 list behind CryptoJS.
+    if (!data || !data.hls || typeof data.videoSource !== 'string' || !/^https?:\/\//.test(data.videoSource)) return null;
+    return [{ title: "Ravok · HLS · Multi Audio", streamUrl: data.videoSource, headers: { "User-Agent": PX_UA, "Referer": `https://${host}/` } }];
+}
+
+// --- StreamRuby (rubystm.com, redirects to its current domain): XFileSharing
+// embed form, sent as GET so the 301 to the current domain keeps it.
+async function streamRubyExtract(embedUrl) {
+    const host = hostOf(embedUrl);
+    const code = (String(embedUrl).match(/\/(?:e|embed-|d)\/?([A-Za-z0-9]{12})/) || [])[1];
+    if (!host || !code) return null;
+    let html = await getPage(`https://${host}/dl?op=embed&file_code=${code}&auto=1&referer=`, `https://${host}/e/${code}.html`);
+    if (html && html.indexOf('eval(function(p,a,c,k,e,d)') !== -1) html += "\n" + unpackAll(html);
+    const m = html && html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/);
+    if (!m) return null;
+    return [{ title: "StreamRuby · HLS · Multi Audio", streamUrl: m[1], headers: { "User-Agent": PX_UA, "Referer": `https://${host}/` } }];
+}
+
+// --- Blakite: the page carries window.CFG; the files sit on Rumble's CDN under
+// <dataId>.<quality code>.mp4 (or a chunklist for M3U8), as the page builds them.
+async function blakiteExtract(embedUrl) {
+    const html = await getPage(embedUrl, `${PX_BASE}/`);
+    const cfgText = (html.match(/window\.CFG\s*=\s*(\{[\s\S]*?\});/) || [])[1];
+    if (!cfgText) return null;
+    let cfg = null;
+    try { cfg = JSON.parse(cfgText); } catch (e) { return null; }
+    if (!cfg || cfg.err || !cfg.dataId) return null;
+    const base = (html.match(/const\s+B\s*=\s*'(https:\/\/[^']+)'/) || [])[1];
+    if (!base) return null;
+
+    const CODE = { 240: 'oaa', 360: 'baa', 480: 'caa', 720: 'gaa', 1080: 'haa' }, ORDER = [240, 360, 480, 720, 1080];
+    const isHls = String(cfg.format || '').toUpperCase() === 'M3U8';
+    const hlsUrl = (c, r) => `${base}${cfg.dataId}.${c}.tar?r_file=chunklist.m3u8&r_type=application%2Fvnd.apple.mpegurl${r ? `&r_range=${r}` : ''}`;
+    const list = [];
+    if (isHls && cfg.ranges) {
+        String(cfg.ranges).split(/\r?\n/).forEach(line => {
+            const m = line.match(/(\d+-\d+)\s*\(\s*(\d+)\s*p\s*\)/i);
+            if (m && CODE[+m[2]] && !list.some(x => x.h === +m[2])) list.push({ h: +m[2], url: hlsUrl(CODE[+m[2]], m[1]) });
+        });
+    }
+    if (!list.length) {
+        const n = Math.min(cfg.qid || ORDER.length, ORDER.length);
+        for (let i = 0; i < n; i++) list.push({ h: ORDER[i], url: isHls ? hlsUrl(CODE[ORDER[i]], '') : `${base}${cfg.dataId}.${CODE[ORDER[i]]}.mp4` });
+    }
+    list.sort((a, b) => b.h - a.h);
+
+    // The page probes each quality before playing it; keep the best one that answers.
+    const lang = (String(cfg.animeTitle || cfg.title || '').match(/\((\w+) Dubbed\)/i) || [])[1] || '';
+    for (const item of list.slice(0, 3)) {
+        try {
+            const r = await soraFetch(item.url, { method: isHls ? 'GET' : 'HEAD', headers: {} });
+            const ok = r && (r.status === undefined || r.status === 200 || r.status === 206);
+            if (!ok) continue;
+            if (isHls && (await readBody(r)).indexOf('#EXTM3U') === -1) continue;
+            return [{ title: `Blakite · ${isHls ? 'HLS' : 'MP4'} ${item.h}p${lang ? ` · ${lang}` : ''}`, streamUrl: item.url, headers: { "User-Agent": PX_UA } }];
+        } catch (e) { }
+    }
+    return null;
+}
+
+// --- Byse (bysezejataos.com and the platform's other domains): /api/videos/<code>/
+// returns a "playback" block in AES-256-GCM whose key is two of the key_parts,
+// picked by `version` ([n, 31-n]). Decrypted here; no attestation or PoW is sent:
+// if the API does not give the block, the server is reported.
+async function byseExtract(embedUrl) {
+    const host = hostOf(embedUrl);
+    const code = (String(embedUrl).match(/\/(?:e|d|v)\/([A-Za-z0-9_-]+)/) || [])[1];
+    if (!host || !code) return null;
+    const data = await getJson(`https://${host}/api/videos/${code}/`, embedUrl);
+    const pb = data && data.playback;
+    if (!pb || !pb.payload || !pb.iv || !Array.isArray(pb.key_parts)) return null;
+
+    const n = parseInt(String(pb.version), 10);
+    let parts = pb.key_parts;
+    if (n >= 1 && n <= 20 && pb.key_parts[n - 1] && pb.key_parts[30 - n]) parts = [pb.key_parts[n - 1], pb.key_parts[30 - n]];
+    const keyChunks = parts.map(b64urlBytes);
+    let total = 0; keyChunks.forEach(k => { total += k.length; });
+    const key = new Uint8Array(total);
+    let off = 0; keyChunks.forEach(k => { key.set(k, off); off += k.length; });
+    if (key.length !== 32) return null;
+
+    let sources = [];
+    try {
+        const plain = aesGcmDecrypt256(key, b64urlBytes(pb.iv), b64urlBytes(pb.payload));
+        let txt = "";
+        for (let i = 0; i < plain.length; i++) txt += String.fromCharCode(plain[i]);
+        try { txt = decodeURIComponent(escape(txt)); } catch (e) { }
+        sources = (JSON.parse(txt) || {}).sources || [];
+    } catch (e) { return null; }
+
+    const out = [];
+    for (const s of sources) {
+        if (!s || typeof s.url !== 'string' || !/^https?:\/\//.test(s.url)) continue;
+        const kind = /mpegurl|\.m3u8/i.test(`${s.mime_type || ''} ${s.url}`) ? 'HLS' : 'MP4';
+        const headers = { "User-Agent": PX_UA, "Referer": `https://${host}/` };
+        // Some files answer 404 on the CDN although the API lists them: check the playlist.
+        if (kind === 'HLS') {
+            const body = await readBody(await soraFetch(s.url, { method: 'GET', headers: { "Referer": `https://${host}/` } }).catch(() => null));
+            if (body.indexOf('#EXTM3U') === -1) continue;
+        }
+        out.push({ title: `Byse · ${kind}${s.label ? ` ${s.label}` : ''} · Multi Audio`, streamUrl: s.url, headers: headers });
+    }
+    return out.length ? out : null;
+}
+
+// --- index11 hub: the server list is in clear (data-link). Only the hosts above
+// are tried; the others go to the report.
+async function index11Links(hubUrl) {
+    const html = await getPage(hubUrl, `${PX_BASE}/`);
+    const links = [];
+    const re = /data-link="(https?:\/\/[^"]+)"/g;
+    let m;
+    while ((m = re.exec(html)) !== null) {
+        const link = decodeEntities(m[1]);
+        if (links.indexOf(link) === -1) links.push(link);
+    }
+    return links;
+}
+
+// Which reader handles a link; null = not supported (with the reason).
+function hostKind(link) {
+    const h = hostOf(link).toLowerCase();
+    if (/\/proxy\/play\.php\?url=/i.test(link)) return 'ravok-proxy';
+    if (/\/public\/player\/index\d*\.php/i.test(link)) return 'index11';
+    if (/vidmoly\./.test(h)) return 'vidmoly';
+    if (/\/video\/[a-f0-9]{16,64}/i.test(link)) return 'ravok';
+    if (/rubystm|streamruby/.test(h)) return 'streamruby';
+    if (/blakiteapi/.test(h)) return 'blakite';
+    if (/byse|filemoon/.test(h)) return 'byse';
+    return null;
+}
+
+function unsupportedReason(link) {
+    const h = hostOf(link).toLowerCase();
+    if (/short\.icu|abyss|hydrax/.test(h) || /\/proxy\/multi\.php/.test(link)) return "Abyss/Hydrax: protected player";
+    if (/gdmirror|iqsmartgames/.test(h)) return "GDMirror: domain check with obfuscated code and fingerprint";
+    if (/upns|upn\.one/.test(h)) return "UPNS: file not found";
+    if (/strmup|vidstreaming|vudeo/.test(h)) return "Parked domain";
+    if (/turbovid/.test(h)) return "Host unreachable";
+    return "Unsupported host";
+}
+
+// ==========================================
+// 🔐 PURE-JS HELPERS (no atob / crypto on iOS)
+// ==========================================
+
+function b64urlBytes(s) {
+    const b64 = String(s).replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const out = [];
+    for (let bc = 0, bs = 0, idx = 0; idx < b64.length; idx++) {
+        const c = chars.indexOf(b64.charAt(idx)); if (c < 0) continue;
+        bs = bc % 4 ? bs * 64 + c : c;
+        if (bc++ % 4) out.push(255 & (bs >> ((-2 * bc) & 6)));
+    }
+    return new Uint8Array(out);
+}
+
+// AES-256-GCM decryption through CTR (the tag is not checked), from movix.
+const aesGcmDecrypt256 = (function () {
+    const sbox = new Uint8Array(256);
+    (function () {
+        let p = 1, q = 1;
+        const rotl8 = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;
+        do {
+            p = (p ^ (p << 1) ^ ((p & 0x80) ? 0x11b : 0)) & 0xff;
+            q &= 0xff; q ^= q << 1; q ^= q << 2; q ^= q << 4; q &= 0xff; if (q & 0x80) q ^= 0x09; q &= 0xff;
+            sbox[p] = (q ^ rotl8(q, 1) ^ rotl8(q, 2) ^ rotl8(q, 3) ^ rotl8(q, 4) ^ 0x63) & 0xff;
+        } while (p !== 1);
+        sbox[0] = 0x63;
+    })();
+    const rcon = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36, 0x6c, 0xd8, 0xab, 0x4d];
+    function expandKey256(key) {
+        const Nk = 8, words = 60, w = new Array(words);
+        for (let i = 0; i < Nk; i++) w[i] = [key[4 * i], key[4 * i + 1], key[4 * i + 2], key[4 * i + 3]];
+        for (let i = Nk; i < words; i++) {
+            let t = w[i - 1].slice();
+            if (i % Nk === 0) { t = [t[1], t[2], t[3], t[0]].map(b => sbox[b]); t[0] ^= rcon[i / Nk - 1]; }
+            else if (i % Nk === 4) { t = t.map(b => sbox[b]); }
+            w[i] = w[i - Nk].map((b, j) => (b ^ t[j]) & 0xff);
+        }
+        return w;
+    }
+    const gmul = (a, b) => { let r = 0; for (let i = 0; i < 8; i++) { if (b & 1) r ^= a; const hi = a & 0x80; a = (a << 1) & 0xff; if (hi) a ^= 0x1b; b >>= 1; } return r & 0xff; };
+    function encryptBlock(inp, w) {
+        let s = inp.slice();
+        const addRK = (round) => { for (let c = 0; c < 16; c++) s[c] ^= w[round * 4 + (c >> 2)][c & 3]; };
+        const subBytes = () => { for (let i = 0; i < 16; i++) s[i] = sbox[s[i]]; };
+        const shiftRows = () => { const t = s.slice(); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) s[r + 4 * c] = t[r + 4 * ((c + r) % 4)]; };
+        const mixCols = () => { for (let c = 0; c < 4; c++) { const i = 4 * c, a0 = s[i], a1 = s[i + 1], a2 = s[i + 2], a3 = s[i + 3]; s[i] = gmul(a0, 2) ^ gmul(a1, 3) ^ a2 ^ a3; s[i + 1] = a0 ^ gmul(a1, 2) ^ gmul(a2, 3) ^ a3; s[i + 2] = a0 ^ a1 ^ gmul(a2, 2) ^ gmul(a3, 3); s[i + 3] = gmul(a0, 3) ^ a1 ^ a2 ^ gmul(a3, 2); } };
+        addRK(0);
+        for (let round = 1; round < 14; round++) { subBytes(); shiftRows(); mixCols(); addRK(round); }
+        subBytes(); shiftRows(); addRK(14);
+        return s;
+    }
+    return function (key, iv, payload) {
+        const w = expandKey256(key);
+        const ct = payload.subarray(0, payload.length - 16);
+        const counter = new Uint8Array(16);
+        counter.set(iv.subarray(0, 12), 0); counter[15] = 1;
+        const inc = () => { for (let i = 15; i >= 12; i--) { counter[i] = (counter[i] + 1) & 0xff; if (counter[i]) break; } };
+        const out = new Uint8Array(ct.length);
+        for (let off = 0; off < ct.length; off += 16) {
+            inc();
+            const ks = encryptBlock(Array.from(counter), w);
+            for (let i = 0; i < 16 && off + i < ct.length; i++) out[off + i] = ct[off + i] ^ ks[i];
+        }
+        return out;
+    };
+})();
+
+// p.a.c.k.e.r, for the hosts that wrap their player config in it.
+function unpackAll(html) {
+    const out = [];
+    let i = 0;
+    while ((i = html.indexOf("eval(function(p,a,c,k,e,d)", i)) !== -1) {
+        const s = html.slice(i); i += 10;
+        const m = s.match(/\}\s*\(\s*'([\s\S]*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'([\s\S]*?)'\.split\('\|'\)/);
+        if (!m) continue;
+        const a = parseInt(m[2], 10), k = m[4].split("|");
+        let c = parseInt(m[3], 10);
+        const enc = n => (n < a ? "" : enc(Math.floor(n / a))) + ((n = n % a) > 35 ? String.fromCharCode(n + 29) : n.toString(36));
+        const dict = {};
+        while (c--) dict[enc(c)] = k[c] || enc(c);
+        out.push(m[1].replace(/\\'/g, "'").replace(/\b\w+\b/g, w => (dict[w] !== undefined ? dict[w] : w)));
+    }
+    return out.join("\n");
 }
 
 // ==========================================
@@ -284,25 +537,51 @@ async function extractStreamUrl(url) {
             if (embeds.indexOf(link) === -1) embeds.push(link);
         }
 
-        // Vidmoly often appears twice (.net and .biz): resolve each id once.
-        const vidmoly = [];
-        for (const link of embeds) {
-            if (/vidmoly\./i.test(link)) {
-                const id = (link.match(/embed-([a-z0-9]+)/i) || [])[1] || link;
-                if (!vidmoly.some(v => v.id === id)) vidmoly.push({ id: id, url: link });
-            } else {
-                failedLinks.push({ server_name: hostOf(link) || "unknown", url: link, reason: "Unsupported host (encrypted, domain-locked or unreachable)" });
+        // The index11 hubs list more servers in clear: open them all at once.
+        const hubs = embeds.filter(link => hostKind(link) === 'index11');
+        const hubLinks = await Promise.all(hubs.map(h => index11Links(h).catch(() => [])));
+        const all = embeds.filter(link => hostKind(link) !== 'index11');
+        hubLinks.forEach(list => list.forEach(link => { if (all.indexOf(link) === -1) all.push(link); }));
+
+        // One job per distinct file (Vidmoly often appears under .net and .biz).
+        const jobs = [];
+        for (let link of all) {
+            let kind = hostKind(link);
+            if (kind === 'ravok-proxy') {
+                const inner = (link.match(/[?&]url=([^&]+)/) || [])[1] || "";
+                link = /^https?%3A/i.test(inner) ? decodeURIComponent(inner) : inner;
+                kind = /\/video\/[a-f0-9]{16,64}/i.test(link) ? 'ravok' : null;
             }
+            if (!kind) {
+                failedLinks.push({ server_name: hostOf(link) || "unknown", url: link, reason: unsupportedReason(link) });
+                continue;
+            }
+            const id = kind === 'vidmoly' ? ((link.match(/embed-([a-z0-9]+)/i) || [])[1] || link)
+                : kind === 'ravok' ? (link.match(/\/video\/([a-f0-9]+)/i) || [])[1]
+                : kind === 'streamruby' ? ((link.match(/\/(?:e|d)\/([A-Za-z0-9]{12})/) || [])[1] || link)
+                : kind === 'byse' ? ((link.match(/\/(?:e|d|v)\/([A-Za-z0-9_-]+)/) || [])[1] || link)
+                : link;
+            if (!jobs.some(j => j.kind === kind && j.id === id)) jobs.push({ kind: kind, id: id, url: link });
         }
 
-        const resolved = await Promise.all(vidmoly.map(v => vidmolyExtract(v.url).catch(() => null)));
-        vidmoly.forEach((v, i) => {
-            const result = resolved[i];
-            if (result && !streams.some(s => s.streamUrl === result.streamUrl)) {
-                streams.push({ title: vidmoly.length > 1 ? `${result.title} #${i + 1}` : result.title, streamUrl: result.streamUrl, headers: result.headers });
-            } else if (!result) {
-                failedLinks.push({ server_name: "Vidmoly", url: v.url, reason: "Extraction failed" });
+        const readers = { ravok: ravokExtract, byse: byseExtract, streamruby: streamRubyExtract, vidmoly: async u => { const r = await vidmolyExtract(u); return r ? [r] : null; }, blakite: blakiteExtract };
+        const order = ['ravok', 'byse', 'streamruby', 'vidmoly', 'blakite'];
+        jobs.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+        const results = await Promise.all(jobs.map(j => readers[j.kind](j.url).catch(() => null)));
+
+        const found = [];
+        jobs.forEach((job, i) => {
+            const list = results[i];
+            if (!list || !list.length) {
+                failedLinks.push({ server_name: job.kind, url: job.url, reason: "Extraction failed" });
+                return;
             }
+            list.forEach(s => { if (!found.some(f => f.streamUrl === s.streamUrl)) found.push(s); });
+        });
+        // Same name twice (several files on one host): number them.
+        found.forEach(s => {
+            const same = found.filter(f => f.title === s.title);
+            streams.push({ title: same.length > 1 ? `${s.title} #${same.indexOf(s) + 1}` : s.title, streamUrl: s.streamUrl, headers: s.headers });
         });
 
         console.log(`-----------------------------------------------------`);

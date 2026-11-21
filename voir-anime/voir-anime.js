@@ -22,9 +22,10 @@ const EXTRACTORS = {
 // Détermine à quel extracteur appartient une URL d'embed (ou null si inconnu).
 function extractorKeyForUrl(urlLower) {
     if (urlLower.includes("filemoon") || urlLower.includes("filelions") || urlLower.includes("alions") || urlLower.includes("weneverbeenfree")) return "filemoon";
+    // voembed.net (« LECTEUR myTV ») est un domaine Vidmoly : à tester AVANT « voe ».
+    if (urlLower.includes("vidmoly") || urlLower.includes("voembed")) return "vidmoly";
     if (urlLower.includes("voe.sx") || urlLower.includes("voe.network") || urlLower.includes("voe") || urlLower.includes("lancewhosedifficult")) return "voe";
     if (urlLower.includes("streamtape.com") || urlLower.includes("streamta.pe")) return "streamtape";
-    if (urlLower.includes("vidmoly")) return "vidmoly";
     if (urlLower.includes("streamhide") || urlLower.includes("vidhide") || urlLower.includes("luluvdo")) return "streamhide";
     if (urlLower.includes("yourupload")) return "yourupload";
     if (urlLower.includes("sibnet")) return "sibnet";
@@ -297,7 +298,27 @@ async function extractStreamUrl(url) {
         logDebug(`🔍 Iframes directes trouvées : ${embedUrls.length}`);
         if(embedUrls.length > 0) logDebug(`↳ Liens : ${embedUrls.join(', ')}`);
 
-        // 2️⃣ Recherche des redirections (data-redirect)
+        // 1️⃣bis La page embarque TOUS ses lecteurs dans
+        // thisChapterSources = {"LECTEUR myTV":"<iframe src=\"…\">", …} : pas besoin d'ouvrir chaque ?host=.
+        let chapterSourcesFound = 0;
+        const csMatch = html.match(/thisChapterSources\s*=\s*(\{[\s\S]*?\})\s*;/);
+        if (csMatch) {
+            try {
+                const cs = JSON.parse(csMatch[1]);
+                for (const k in cs) {
+                    const sm = String(cs[k]).match(/src=["']([^"']+)["']/i);
+                    if (!sm) continue;
+                    let u = sm[1].replace(/&amp;/g, '&');
+                    if (u.startsWith('//')) u = "https:" + u;
+                    if (!u.startsWith('http')) continue;
+                    chapterSourcesFound++;
+                    if (!embedUrls.includes(u)) embedUrls.push(u);
+                }
+            } catch (e) { logDebug(`⚠️ thisChapterSources illisible : ${e.message}`); }
+        }
+        logDebug(`📋 Lecteurs listés par la page (thisChapterSources) : ${chapterSourcesFound}`);
+
+        // 2️⃣ Recherche des redirections (data-redirect) — seulement si la liste ci-dessus manque
         const redirectRegex = /data-redirect=["']([^"']+\?host=[^"']+)["']/gi;
         let pagesToFetch = [];
         
@@ -308,7 +329,7 @@ async function extractStreamUrl(url) {
         }
         logDebug(`🔄 Liens 'data-redirect' trouvés : ${pagesToFetch.length}`);
 
-        if (pagesToFetch.length > 0) {
+        if (pagesToFetch.length > 0 && chapterSourcesFound === 0) {
             logDebug(`⏳ Résolution des liens redirect...`);
             const pagesHtml = await Promise.all(
                 pagesToFetch.map(async p => {
@@ -344,6 +365,8 @@ async function extractStreamUrl(url) {
         // --- TRAITEMENT DES LECTEURS ---
         for (let embedUrl of embedUrls) {
             let urlLower = embedUrl.toLowerCase();
+            // voembed.net (« LECTEUR myTV ») = Vidmoly ; son nom contient « voe », on l'écarte de VOE.
+            const isVidmoly = urlLower.includes("vidmoly") || urlLower.includes("voembed");
             logDebug(`⚙️ Analyse du lecteur : ${embedUrl}`);
 
             // 🎛️ Skip si l'extracteur est désactivé dans EXTRACTORS
@@ -380,7 +403,7 @@ async function extractStreamUrl(url) {
                 }
             }
             // --- MOTEUR VOE ---
-            else if (urlLower.includes("voe.sx") || urlLower.includes("voe.network") || urlLower.includes("voe") || urlLower.includes("lancewhosedifficult")) {
+            else if (!isVidmoly && (urlLower.includes("voe.sx") || urlLower.includes("voe.network") || urlLower.includes("voe") || urlLower.includes("lancewhosedifficult"))) {
                 logDebug(`[MOTEUR] Sélection de VOE`);
                 try {
                     let voeRes = await soraFetch(embedUrl, { headers: { "Referer": BASE_URL } });
@@ -437,19 +460,17 @@ async function extractStreamUrl(url) {
                             // avec éventuel .substring(N) / .substr(N) sur l'un des morceaux.
                             // Ex : '//streamtape.com/get_video?id=xxx&expires=...' + ('abctoken').substring(3)
                             let tokenStr = "";
-                            // Capture chaque terme : soit '...' , soit ('...').substring(N) / .substr(N)
-                            const termRegex = /(?:\(\s*)?(['"])([^'"]*)\1(?:\s*\)\s*\.\s*(substring|substr)\s*\(\s*(\d+)\s*\))?/g;
+                            // Capture chaque terme : soit '...' , soit ('...').substring(N) / .substr(N),
+                            // éventuellement ENCHAÎNÉS : ('xcdm/get_video?…').substring(2).substring(1)
+                            const termRegex = /(?:\(\s*)?(['"])([^'"]*)\1\s*\)?((?:\s*\.\s*(?:substring|substr|slice)\s*\(\s*\d+\s*\))*)/g;
                             let term;
                             let matchedAny = false;
                             while ((term = termRegex.exec(expression)) !== null) {
                                 matchedAny = true;
                                 let piece = term[2];
-                                const fn = term[3];
-                                const arg = term[4] !== undefined ? parseInt(term[4], 10) : null;
-                                if (fn && arg !== null) {
-                                    // substring(N) et substr(N) sans 2e argument sont équivalents ici (jusqu'à la fin)
-                                    piece = piece.slice(arg);
-                                }
+                                // substring(N) / substr(N) / slice(N) sans 2e argument : on coupe jusqu'à la fin, appel par appel
+                                const ops = term[3] ? term[3].match(/\d+/g) || [] : [];
+                                for (const n of ops) piece = piece.slice(parseInt(n, 10));
                                 tokenStr += piece;
                             }
 
@@ -518,7 +539,7 @@ async function extractStreamUrl(url) {
                 }
             }
             // --- MOTEUR VIDMOLY ---
-            else if (urlLower.includes("vidmoly")) {
+            else if (isVidmoly) {
                 logDebug(`[MOTEUR] Sélection de Vidmoly`);
                 try {
                     const vidRes = await soraFetch(embedUrl, { headers: { "Referer": BASE_URL } });
