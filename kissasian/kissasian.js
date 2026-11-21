@@ -1,9 +1,9 @@
 // ==========================================
 // ⚙️ SORA MODULE — KISSASIAN
 // ==========================================
-// KissAsian (kissasian.gr; the FMHY link wwv21.kissasian.com.lv redirects
-// there) is a WordPress drama catalog. Its own search form finds nothing,
-// but the REST API is open:
+// KissAsian (kissasian.com.gr; the old kissasian.gr and the FMHY link
+// wwv21.kissasian.com.lv redirect there) is a WordPress drama catalog. Its
+// own search form finds nothing, but the REST API is open:
 //   GET /wp-json/wp/v2/series?search=<q>&_embed=wp:featuredmedia  -> series + cover
 // A series page lists its episodes (/<slug>-episode-<n>/, newest first) and
 // each episode page offers two servers in <li data-video="…">:
@@ -16,12 +16,12 @@
 //       Subtitles: storage.dramavibe.cfd/api/public/video/<uuid>/subtitles
 //       (the uuid is the m3u8's folder) -> [{lang, format, url}].
 //
-//   "Backup Server"    kissasian.gr/…/kisskh-player.php?ep=<kisskh id>
+//   "Backup Server"    kissasian.com.gr/…/kisskh-player.php?ep=<kisskh id>
 //       A thin page around KissKH's CDN: `var src = "…m3u8"` and
 //       `var subtitleList = [{url, label, land}]` in clear (the site proxies
 //       segments only to dodge browser CORS, a native player needs no proxy).
 
-const KA_BASE = "https://kissasian.gr";
+const KA_BASE = "https://kissasian.com.gr";
 const KA_DV_ORIGIN = "https://catalog.dramavibe.cfd";
 const KA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -210,7 +210,7 @@ async function extractEpisodes(url) {
         let m;
         while ((m = re.exec(block)) !== null) {
             const link = m[1];
-            const href = `kissasian-play://${link.replace(KA_BASE, "").replace(/^\/+/, "")}`;
+            const href = `kissasian-play://${link.replace(/^https?:\/\/[^/]+/, "").replace(/^\/+/, "")}`;
             if (episodes.some(e => e.href === href)) continue;
             const title = decodeEntities(m[3]).trim();
             const numMatch = title.match(/Episode\s+(\d+(?:\.\d+)?)/i) || link.match(/episode-(\d+)/i);

@@ -18,14 +18,16 @@
 // (lulustream.com redirects there). Its
 // /e/<code> player hides the HLS master in a Dean Edwards p.a.c.k.e.r block,
 // unpacked locally. Many Luluvdo files are deleted, so links are tried in
-// order until a few live ones are found. Wootly (IP-bound signed links) and
-// Doodstream (behind a Cloudflare challenge) are not used.
+// order until a few live ones are found. Nearly every title also has one
+// Wootly link (MP4, read below). Doodstream is not used: dood.re answers a
+// Cloudflare challenge for every live file.
 
 const LV_SITE = "https://www.levidia.ch";
 const LV_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-const LV_MAX_STREAMS = 3;   // stop once this many live streams are found
-const LV_MAX_TRIES = 8;     // links tried at most per page
+const LV_MAX_STREAMS = 3;   // Luluvdo: stop once this many live streams are found
+const LV_MAX_TRIES = 12;    // Luluvdo links tried at most per page (many are deleted)
+const LV_MAX_WOOTLY = 2;    // Wootly links tried at most per page
 
 // ==========================================
 // 🗄️ SUPABASE TRACKER
@@ -279,6 +281,41 @@ async function luluvdo(code) {
 }
 
 // ==========================================
+// 🎞️ HOST: WOOTLY
+// ==========================================
+
+// go.php -> www.wootly.ch/?v=<token>, a page whose iframe is
+// web.wootly.ch/e/<…>. That player only shows a play button; clicking it
+// POSTs qdfx=1 back to the same address, which answers the real player:
+//   var vd="<id>", tk="<token>"  ->  GET /grabm?t=<tk>&id=<vd>  -> MP4 link
+// The MP4 link is signed for the IP that asked for it: the device makes every
+// request itself, so it plays there; it is not cached.
+async function wootly(pageUrl, referer) {
+    const { html } = await getPage(pageUrl, { "Referer": referer });
+    const iframe = (html.match(/<iframe[^>]+src="([^"]+)"/i) || [])[1];
+    if (!iframe) return { error: /not found|deleted|removed/i.test(html) ? "File deleted on Wootly" : "No Wootly player" };
+    const playerUrl = iframe.indexOf("//") === 0 ? `https:${iframe}` : iframe;
+    const playerOrigin = (playerUrl.match(/^https?:\/\/[^/]+/) || [])[0];
+    if (!playerOrigin) return { error: "Bad Wootly player address" };
+
+    const res = await soraFetch(playerUrl, {
+        method: 'POST',
+        headers: { "Referer": playerUrl, "Origin": playerOrigin, "Content-Type": "application/x-www-form-urlencoded" },
+        body: "qdfx=1"
+    });
+    const player = await readBody(res);
+    const vd = (player.match(/\bvd\s*=\s*"(\d+)"/) || [])[1];
+    const tk = (player.match(/\btk\s*=\s*"([^"]+)"/) || [])[1];
+    if (!vd || !tk) return { error: "No Wootly token after play" };
+
+    const link = (await readBody(await soraFetch(`${playerOrigin}/grabm?t=${encodeURIComponent(tk)}&id=${encodeURIComponent(vd)}`, {
+        method: 'GET', headers: { "Referer": playerUrl }
+    }))).trim();
+    if (!/^https?:\/\//.test(link)) return { error: "Wootly returned no video link" };
+    return { streamUrl: link, headers: { "Referer": `${playerOrigin}/`, "User-Agent": LV_UA } };
+}
+
+// ==========================================
 // 🎬 PLAYBACK
 // ==========================================
 
@@ -310,18 +347,37 @@ async function extractStreamUrl(url) {
         const cookie = [session ? `PHPSESSID=${session}` : "", js ? `${js[1]}=${js[2]}` : ""].filter(Boolean).join('; ');
 
         const links = parseLinks(html);
-        let tries = 0;
+        let tries = 0, luluFound = 0, wootlyTries = 0;
         for (const link of links) {
-            if (streams.length >= LV_MAX_STREAMS || tries >= LV_MAX_TRIES) break;
-            if (!/lulu/i.test(link.host)) {
+            const isLulu = /lulu/i.test(link.host);
+            const isWootly = /wootly/i.test(link.host);
+            if (!isLulu && !isWootly) {
                 failedLinks.push({ server_name: link.host || "unknown", url: link.go, reason: `${link.host} not supported` });
                 continue;
             }
-            tries++;
+            // Luluvdo: tried in order until a few live files; Wootly (usually a
+            // single listing per page) has its own budget.
+            if (isLulu && (luluFound >= LV_MAX_STREAMS || tries >= LV_MAX_TRIES)) continue;
+            if (isWootly && wootlyTries >= LV_MAX_WOOTLY) continue;
+            if (isLulu) tries++; else wootlyTries++;
             try {
-                // go.php -> 302 -> luluvdo.com/[d/]<code> (read, not followed).
+                // go.php -> 302 -> luluvdo.com/[d/]<code> or www.wootly.ch/?v=<token> (read, not followed).
                 const hop = await goTarget(link.go, cookie ? { "Referer": url, "Cookie": cookie } : { "Referer": url });
                 const finalUrl = hop.location;
+                if (isWootly) {
+                    if (!/^https?:\/\/[^/]*wootly\./i.test(finalUrl)) {
+                        failedLinks.push({ server_name: link.host, url: link.go, reason: hop.html ? "No Wootly page after go.php" : "go.php refused (cookies)" });
+                        continue;
+                    }
+                    const wres = await wootly(finalUrl, url);
+                    if (wres.error) {
+                        failedLinks.push({ server_name: link.host, url: finalUrl, reason: wres.error });
+                        continue;
+                    }
+                    streams.push({ title: `Wootly${link.quality ? ` (${link.quality})` : ''} · MP4`, streamUrl: wres.streamUrl, headers: wres.headers });
+                    console.log(`   -> Wootly`);
+                    continue;
+                }
                 const code = (finalUrl.match(/^https?:\/\/[^/]+\/(?:[de]\/)?([a-z0-9]{12})(?:[/?#]|$)/i) || [])[1]
                     || (hop.html.match(/lulu[a-z]*\.[a-z]+\/e\/([a-z0-9]{12})/i) || [])[1]
                     || (hop.html.match(/name="file_code" value="([a-z0-9]{12})"/i) || [])[1];
@@ -337,7 +393,8 @@ async function extractStreamUrl(url) {
                 // Several listings often point at the same upload: compare without the token.
                 const same = (a) => a.split('?')[0] === res.streamUrl.split('?')[0];
                 if (streams.some(s => same(s.streamUrl))) continue;
-                streams.push({ title: `Luluvdo${link.quality ? ` (${link.quality})` : ''} #${streams.length + 1}`, streamUrl: res.streamUrl, headers: res.headers });
+                luluFound++;
+                streams.push({ title: `Luluvdo${link.quality ? ` (${link.quality})` : ''} #${luluFound}`, streamUrl: res.streamUrl, headers: res.headers });
                 console.log(`   -> Luluvdo ${code}`);
             } catch (e) {
                 failedLinks.push({ server_name: link.host, url: link.go, reason: String(e) });
